@@ -23,8 +23,8 @@ classifiers = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/canonical/observability-libs/"
-"Bug Tracker" = "https://github.com/canonical/observability-libs/issues"
+"Homepage" = "https://github.com/canonical/cos-lib"
+"Bug Tracker" = "https://github.com/canonical/cos-lib/issues"
 
 [package]
 include = ["py.typed"]
