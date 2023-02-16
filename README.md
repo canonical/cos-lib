@@ -1,2 +1,2 @@
-# cos-lib
-Utils for COS Lite charms
+# cosl
+Utils for COS Lite charms.
