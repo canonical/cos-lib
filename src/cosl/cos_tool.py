@@ -7,7 +7,6 @@ import logging
 import platform
 import subprocess
 import tempfile
-import uuid
 from pathlib import Path
 from typing import Optional, Tuple
 

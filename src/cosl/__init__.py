@@ -6,4 +6,4 @@
 from .cos_tool import CosTool
 from .juju_topology import JujuTopology
 
-__all__ = [JujuTopology, CosTool]
+__all__ = ["JujuTopology", "CosTool"]

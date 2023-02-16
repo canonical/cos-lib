@@ -125,7 +125,8 @@ class TestTransformPromQL(unittest.TestCase):
     def test_handles_comparisons(self):
         tool = self.harness.charm.tool
         output = tool.inject_label_matchers(
-            "up > 1", {"juju_model": "some_juju_model"},
+            "up > 1",
+            {"juju_model": "some_juju_model"},
         )
         assert output == 'up{juju_model="some_juju_model"} > 1'
 
