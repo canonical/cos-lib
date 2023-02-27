@@ -7,12 +7,15 @@ import logging
 import platform
 import subprocess
 import tempfile
+import uuid
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Literal, Optional, Tuple
 
 import yaml
 
 logger = logging.getLogger(__name__)
+
+_QueryType = Literal["logql", "promql"]
 
 
 class CosTool:
@@ -21,8 +24,9 @@ class CosTool:
     _path = None
     _disabled = False
 
-    def __init__(self, charm):
+    def __init__(self, charm, query_type: _QueryType):
         self._charm = charm
+        self._query_type = query_type  # type: _QueryType
 
     @property
     def path(self):
@@ -36,8 +40,9 @@ class CosTool:
                 self._disabled = True
         return self._path
 
-    def apply_label_matchers(self, rules) -> dict:
+    def apply_label_matchers(self, rules: dict, query_type: Optional[_QueryType] = None) -> dict:
         """Will apply label matchers to the expression of all alerts in all supplied groups."""
+        query_type = query_type or self._query_type
         if not self.path:
             return rules
         for group in rules["groups"]:
@@ -56,47 +61,79 @@ class CosTool:
                     if label in rule["labels"]:
                         topology[label] = rule["labels"][label]
 
-                rule["expr"] = self.inject_label_matchers(rule["expr"], topology)
+                rule["expr"] = self.inject_label_matchers(rule["expr"], topology, query_type)
         return rules
 
-    def validate_alert_rules(self, rules: dict) -> Tuple[bool, str]:
+    def validate_alert_rules(
+        self, rules: dict, query_type: Optional[_QueryType] = None
+    ) -> Tuple[bool, str]:
         """Will validate correctness of alert rules, returning a boolean and any errors."""
+        query_type = query_type or self._query_type
         if not self.path:
             logger.debug("`cos-tool` unavailable. Not validating alert correctness.")
             return True, ""
 
         with tempfile.TemporaryDirectory() as tmpdir:
             rule_path = Path(tmpdir + "/validate_rule.yaml")
+
+            # Smash "our" rules format into what upstream actually uses, which is more like:
+            #
+            # groups:
+            #   - name: foo
+            #     rules:
+            #       - alert: SomeAlert
+            #         expr: up
+            #       - alert: OtherAlert
+            #         expr: up
+            if query_type == "logql":
+                transformed_rules = {"groups": []}  # type: ignore
+                for rule in rules["groups"]:
+                    transformed = {"name": str(uuid.uuid4()), "rules": [rule]}
+                    transformed_rules["groups"].append(transformed)
+
+                rules = transformed_rules
+
             rule_path.write_text(yaml.dump(rules))
 
-            args = [str(self.path), "validate", str(rule_path)]
+            args = [str(self.path), "--format", query_type, "validate", str(rule_path)]
             # noinspection PyBroadException
             try:
                 self._exec(args)
                 return True, ""
             except subprocess.CalledProcessError as e:
                 logger.debug("Validating the rules failed: %s", e.output)
-                return False, ", ".join(
-                    [
-                        line
-                        for line in e.output.decode("utf8").splitlines()
-                        if "error validating" in line
-                    ]
-                )
+                return False, ", ".join([line for line in e.output if "error validating" in line])
 
-    def inject_label_matchers(self, expression, topology) -> str:
+    def inject_label_matchers(
+        self,
+        expression: str,
+        topology: dict,
+        query_type: Optional[_QueryType] = None,
+        dashboard_variable: Optional[bool] = False,
+    ) -> str:
         """Add label matchers to an expression."""
+        query_type = query_type or self._query_type
+
         if not topology:
             return expression
         if not self.path:
             logger.debug("`cos-tool` unavailable. Leaving expression unchanged: %s", expression)
             return expression
-        args = [str(self.path), "transform"]
+        args = [str(self.path), "--format", query_type, "transform"]
+
+        value_tmpl = r"${}" if dashboard_variable else "{}"
+
+        variable_topology = {k: value_tmpl.format(topology[k]) for k in topology.keys()}
         args.extend(
-            ["--label-matcher={}={}".format(key, value) for key, value in topology.items()]
+            [
+                "--label-matcher={}={}".format(key, value)
+                for key, value in variable_topology.items()
+            ]
         )
 
-        args.extend(["{}".format(expression)])
+        # Pass a leading "--" so expressions with a negation or subtraction aren't interpreted as
+        # flags
+        args.extend(["--", "{}".format(expression)])
         # noinspection PyBroadException
         try:
             return self._exec(args)
@@ -119,5 +156,6 @@ class CosTool:
         return None
 
     def _exec(self, cmd) -> str:
-        result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        return result.stdout.decode("utf-8").strip()
+        result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        output = result.stdout.decode("utf-8").strip()
+        return output
