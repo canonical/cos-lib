@@ -101,8 +101,14 @@ class CosTool:
                 self._exec(args)
                 return True, ""
             except subprocess.CalledProcessError as e:
-                logger.debug("Validating the rules failed: %s", e.output)
-                return False, ", ".join([line for line in e.output if "error validating" in line])
+                logger.debug("Validating the rules failed: %s", e.output.decode("utf-8"))
+                return False, ", ".join(
+                    [
+                        line
+                        for line in e.output.decode("utf-8").splitlines()
+                        if "error validating" in line
+                    ]
+                )
 
     def inject_label_matchers(
         self,
@@ -156,6 +162,5 @@ class CosTool:
         return None
 
     def _exec(self, cmd) -> str:
-        result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        output = result.stdout.decode("utf-8").strip()
-        return output
+        result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        return result.stdout.decode("utf-8").strip()
