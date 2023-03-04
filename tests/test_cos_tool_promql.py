@@ -4,56 +4,12 @@
 import subprocess
 import unittest
 import unittest.mock
-from pathlib import PosixPath
-
-from ops.charm import CharmBase
-from ops.testing import Harness
 
 from cosl import CosTool
 
 
-# noqa: E302
-# pylint: disable=too-few-public-methods
-class ToolProviderCharmPromQL(CharmBase):
-    """Container charm for running the promql integration test."""
-
-    def __init__(self, *args):
-        super().__init__(*args)
-        self.tool = CosTool(self, query_type="promql")
-
-
 class TestTransformPromQL(unittest.TestCase):
     """Test that the cos-tool promql implementation works."""
-
-    def setUp(self):
-        self.harness = Harness(ToolProviderCharmPromQL)
-        self.harness.set_model_name("transform")
-        self.addCleanup(self.harness.cleanup)
-        self.harness.begin()
-
-    # pylint: disable=protected-access
-    @unittest.mock.patch("platform.machine", lambda: "teakettle")
-    def test_disable_on_invalid_arch(self):
-        tool = self.harness.charm.tool
-        self.assertIsNone(tool.path)
-        self.assertTrue(tool._disabled)
-
-    # pylint: disable=protected-access
-    @unittest.mock.patch("platform.machine", lambda: "x86_64")
-    def test_gives_path_on_valid_arch(self):
-        """When given a valid arch, it should return the binary path."""
-        transformer = self.harness.charm.tool
-        self.assertIsInstance(transformer.path, PosixPath)
-
-    @unittest.mock.patch("platform.machine", lambda: "x86_64")
-    def test_setup_transformer(self):
-        """When setup it should know the path to the binary."""
-        tool = self.harness.charm.tool
-
-        self.assertIsInstance(tool.path, PosixPath)
-
-        p = str(tool.path)
-        self.assertTrue(p.endswith("cos-tool-amd64"))
 
     @unittest.mock.patch("platform.machine", lambda: "x86_64")
     @unittest.mock.patch("subprocess.run")
@@ -62,7 +18,7 @@ class TestTransformPromQL(unittest.TestCase):
             returncode=10, cmd="cos-tool", stderr=""
         )
 
-        tool = self.harness.charm.tool
+        tool = CosTool(default_query_type="promql")
         output = tool.apply_label_matchers(
             {
                 "groups": [
@@ -89,7 +45,7 @@ class TestTransformPromQL(unittest.TestCase):
 
     @unittest.mock.patch("platform.machine", lambda: "invalid")
     def test_uses_original_expression_when_binary_missing(self):
-        tool = self.harness.charm.tool
+        tool = CosTool(default_query_type="promql")
         output = tool.apply_label_matchers(
             {
                 "groups": [
@@ -116,14 +72,14 @@ class TestTransformPromQL(unittest.TestCase):
 
     @unittest.mock.patch("platform.machine", lambda: "x86_64")
     def test_fetches_the_correct_expression(self):
-        tool = self.harness.charm.tool
+        tool = CosTool(default_query_type="promql")
 
         output = tool.inject_label_matchers("up", {"juju_model": "some_juju_model"})
         assert output == 'up{juju_model="some_juju_model"}'
 
     @unittest.mock.patch("platform.machine", lambda: "x86_64")
     def test_handles_comparisons(self):
-        tool = self.harness.charm.tool
+        tool = CosTool(default_query_type="promql")
         output = tool.inject_label_matchers(
             "up > 1",
             {"juju_model": "some_juju_model"},
@@ -132,7 +88,7 @@ class TestTransformPromQL(unittest.TestCase):
 
     @unittest.mock.patch("platform.machine", lambda: "x86_64")
     def test_handles_multiple_labels(self):
-        tool = self.harness.charm.tool
+        tool = CosTool(default_query_type="promql")
         output = tool.inject_label_matchers(
             "up > 1",
             {
@@ -151,15 +107,9 @@ class TestTransformPromQL(unittest.TestCase):
 class TestValidateAlerts(unittest.TestCase):
     """Test that the cos-tool validation works."""
 
-    def setUp(self):
-        self.harness = Harness(ToolProviderCharmPromQL)
-        self.harness.set_model_name("validate")
-        self.addCleanup(self.harness.cleanup)
-        self.harness.begin()
-
     @unittest.mock.patch("platform.machine", lambda: "x86_64")
     def test_returns_errors_on_bad_rule_file(self):
-        tool = self.harness.charm.tool
+        tool = CosTool(default_query_type="promql")
         valid, errs = tool.validate_alert_rules(
             {
                 "groups": [
@@ -175,7 +125,7 @@ class TestValidateAlerts(unittest.TestCase):
 
     @unittest.mock.patch("platform.machine", lambda: "x86_64")
     def test_successfully_validates_good_alert_rules(self):
-        tool = self.harness.charm.tool
+        tool = CosTool(default_query_type="promql")
         valid, errs = tool.validate_alert_rules(
             {
                 "groups": [

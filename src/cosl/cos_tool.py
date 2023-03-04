@@ -5,6 +5,7 @@
 
 import logging
 import platform
+import re
 import subprocess
 import tempfile
 import uuid
@@ -18,15 +19,34 @@ logger = logging.getLogger(__name__)
 _QueryType = Literal["logql", "promql"]
 
 
+def ensure_querytype(func):
+    """A small decorator to ensure that query type is specified."""
+
+    def wrapper(self, *args, **kwargs):
+        if not self._query_type and not kwargs.get("query_type", None):
+            raise TypeError(
+                "Either a default query type or a per-method query type must be used for `CosTool`!"
+            )
+        return func(self, *args, **kwargs)
+
+    wrapper.__doc__ = func.__doc__
+    return wrapper
+
+
 class CosTool:
-    """Uses cos-tool to inject label matchers into alert rule expressions and validate rules."""
+    """Uses cos-tool to inject label matchers into alert rule expressions and validate rules.
+
+    Args:
+        default_query_type: an optional querytype to use for all invocations of this class, if
+          not specified per-method. Either :default_query_type: or per-method :query_type:
+          **must** be used, or a :TypeError: will be raised.
+    """
 
     _path = None
     _disabled = False
 
-    def __init__(self, charm, query_type: _QueryType):
-        self._charm = charm
-        self._query_type = query_type  # type: _QueryType
+    def __init__(self, default_query_type: Optional[_QueryType] = None):
+        self._query_type = default_query_type
 
     @property
     def path(self):
@@ -40,6 +60,7 @@ class CosTool:
                 self._disabled = True
         return self._path
 
+    @ensure_querytype
     def apply_label_matchers(self, rules: dict, query_type: Optional[_QueryType] = None) -> dict:
         """Will apply label matchers to the expression of all alerts in all supplied groups."""
         query_type = query_type or self._query_type
@@ -64,6 +85,7 @@ class CosTool:
                 rule["expr"] = self.inject_label_matchers(rule["expr"], topology, query_type)
         return rules
 
+    @ensure_querytype
     def validate_alert_rules(
         self, rules: dict, query_type: Optional[_QueryType] = None
     ) -> Tuple[bool, str]:
@@ -76,7 +98,8 @@ class CosTool:
         with tempfile.TemporaryDirectory() as tmpdir:
             rule_path = Path(tmpdir + "/validate_rule.yaml")
 
-            # Smash "our" rules format into what upstream actually uses, which is more like:
+            # Smash "our" rules format into what upstream actually uses for Loki,
+            # which is more like:
             #
             # groups:
             #   - name: foo
@@ -110,6 +133,7 @@ class CosTool:
                     ]
                 )
 
+    @ensure_querytype
     def inject_label_matchers(
         self,
         expression: str,
@@ -142,7 +166,11 @@ class CosTool:
         args.extend(["--", "{}".format(expression)])
         # noinspection PyBroadException
         try:
-            return self._exec(args)
+            return (
+                re.sub(r'="\$juju', r'=~"$juju', self._exec(args))
+                if dashboard_variable
+                else self._exec(args)
+            )
         except subprocess.CalledProcessError as e:
             logger.debug('Applying the expression failed: "%s", falling back to the original', e)
             return expression
