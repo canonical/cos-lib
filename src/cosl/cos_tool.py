@@ -10,14 +10,15 @@ import subprocess
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import yaml
 from typing_extensions import Concatenate, ParamSpec, TypeVar
 
+from .types import OfficialRuleFileFormat, QueryType
+
 logger = logging.getLogger(__name__)
 
-_QueryType = Literal["logql", "promql"]
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
 
@@ -47,9 +48,9 @@ class CosTool:
 
     _path = None
     _disabled = False
-    query_type = None  # type: Union[_QueryType, None]
+    query_type = None  # type: Union[QueryType, None]
 
-    def __init__(self, default_query_type: Optional[_QueryType] = None):
+    def __init__(self, default_query_type: Optional[QueryType] = None):
         self.query_type = default_query_type
 
     @property
@@ -66,8 +67,8 @@ class CosTool:
 
     @ensure_querytype
     def apply_label_matchers(
-        self, rules: Dict[str, Any], query_type: Optional[_QueryType] = None
-    ) -> Dict[str, Any]:
+        self, rules: OfficialRuleFileFormat, query_type: Optional[QueryType] = None
+    ) -> OfficialRuleFileFormat:
         """Will apply label matchers to the expression of all alerts in all supplied groups."""
         query_type = query_type or self.query_type
         if not self.path:
@@ -93,7 +94,7 @@ class CosTool:
 
     @ensure_querytype
     def validate_alert_rules(
-        self, rules: Dict[str, Any], query_type: Optional[_QueryType] = None
+        self, rules: Dict[str, Any], query_type: Optional[QueryType] = None
     ) -> Tuple[bool, str]:
         """Will validate correctness of alert rules, returning a boolean and any errors."""
         query_type = query_type or self.query_type
@@ -144,7 +145,7 @@ class CosTool:
         self,
         expression: str,
         topology: Dict[str, Any],
-        query_type: Optional[_QueryType] = None,
+        query_type: Optional[QueryType] = None,
         dashboard_variable: Optional[bool] = False,
     ) -> str:
         """Add label matchers to an expression."""
