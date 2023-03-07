@@ -25,7 +25,7 @@ class _AlertingRuleFormat(TypedDict):
 SingleRuleFormat = Union[_AlertingRuleFormat, _RecordingRuleFormat]
 
 
-class OfficialRuleFileItems(TypedDict):
+class OfficialRuleFileItem(TypedDict):
     """Typing for a single node of the official rule file format."""
 
     name: str
