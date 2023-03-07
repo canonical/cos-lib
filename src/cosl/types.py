@@ -33,6 +33,11 @@ class OfficialRuleFileItem(TypedDict):
 
 
 class OfficialRuleFileFormat(TypedDict):
-    """Typing for the official rule file format."""
+    """Typing for the official rule file format.
+    
+    References:
+    - https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/
+    - https://prometheus.io/docs/prometheus/latest/configuration/recording_rules/
+    """
 
     groups: List[OfficialRuleFileItems]
