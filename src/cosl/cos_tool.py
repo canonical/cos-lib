@@ -144,7 +144,7 @@ class CosTool:
     def inject_label_matchers(
         self,
         expression: str,
-        topology: Dict[str, Any],
+        topology: Dict[str, str],
         query_type: Optional[QueryType] = None,
         dashboard_variable: Optional[bool] = False,
     ) -> str:

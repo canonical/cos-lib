@@ -3,23 +3,25 @@
 """Types used by cos-lib."""
 from typing import Dict, List, Literal, Optional, TypedDict, Union
 
+from typing_extensions import Required
+
 QueryType = Literal["logql", "promql"]
 RuleType = Literal["alert", "record"]
 
 
 class _RecordingRuleFormat(TypedDict):
-    record: str
-    expr: str
+    record: Required[str]
+    expr: Required[str]
     labels: Dict[str, str]
 
 
 class _AlertingRuleFormat(TypedDict):
-    alert: str
-    expr: str
+    alert: Required[str]
+    expr: Required[str]
     duration: Optional[str]
     keep_firing_for: Optional[str]
     labels: Dict[str, str]
-    annotations: Dict[str, str]
+    annotations: Optional[Dict[str, str]]
 
 
 SingleRuleFormat = Union[_AlertingRuleFormat, _RecordingRuleFormat]
@@ -34,10 +36,10 @@ class OfficialRuleFileItem(TypedDict):
 
 class OfficialRuleFileFormat(TypedDict):
     """Typing for the official rule file format.
-    
+
     References:
     - https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/
     - https://prometheus.io/docs/prometheus/latest/configuration/recording_rules/
     """
 
-    groups: List[OfficialRuleFileItems]
+    groups: List[OfficialRuleFileItem]

@@ -87,7 +87,7 @@ import yaml
 from . import CosTool, JujuTopology
 from .types import (
     OfficialRuleFileFormat,
-    OfficialRuleFileItems,
+    OfficialRuleFileItem,
     QueryType,
     RuleType,
     SingleRuleFormat,
@@ -242,7 +242,7 @@ class Rules(ABC):
 
     def _from_file(  # noqa: C901
         self, root_path: Path, file_path: Path
-    ) -> List[OfficialRuleFileItems]:
+    ) -> List[OfficialRuleFileItem]:
         """Read a rules file from path, injecting juju topology.
 
         Args:
@@ -283,7 +283,7 @@ class Rules(ABC):
                 return []
 
             # update rules with additional metadata
-            groups = cast(List[OfficialRuleFileItems], groups)
+            groups = cast(List[OfficialRuleFileItem], groups)
             for group in groups:
                 # update group name with topology and sub-path
                 group["name"] = self._group_name(str(root_path), str(file_path), group["name"])

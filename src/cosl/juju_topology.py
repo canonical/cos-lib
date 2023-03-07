@@ -68,7 +68,7 @@ topology = JujuTopology(
 
 """
 from collections import OrderedDict
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 from uuid import UUID
 
 from ops.charm import CharmBase
@@ -152,7 +152,7 @@ class JujuTopology:
         )
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]):
+    def from_dict(cls, data: Dict[str, str]):
         """Factory method for creating `JujuTopology` children from a dictionary.
 
         Args:
@@ -181,7 +181,7 @@ class JujuTopology:
         *,
         remapped_keys: Optional[Dict[str, str]] = None,
         excluded_keys: Optional[List[str]] = None,
-    ) -> "OrderedDict[str, Any]":
+    ) -> "OrderedDict[str, str]":
         """Format the topology information into an ordered dict.
 
         Keeping the dictionary ordered is important to be able to
