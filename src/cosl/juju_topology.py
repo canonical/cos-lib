@@ -263,6 +263,21 @@ class JujuTopology:
         return ", ".join(['{}="{}"'.format(key, value) for key, value in items if value])
 
     @property
+    def alert_expression_dict(self) -> Dict[str, str]:
+        """Topology labels to insert in alert rule expressions."""
+        items = self.as_dict(
+            excluded_keys=["unit", "charm_name"],
+        ).items()
+
+        return {"juju_{}".format(key): value for key, value in items if value}
+
+    @property
+    def alert_expression_str(self) -> str:
+        """The alert expression topology as a promql/logql string."""
+        items = self.alert_expression_dict.items()
+        return ", ".join(['{}="{}"'.format(key, value) for key, value in items if value])
+
+    @property
     def model(self) -> str:
         """Getter for the juju model value."""
         return self._model
