@@ -264,7 +264,12 @@ class JujuTopology:
 
     @property
     def alert_expression_dict(self) -> Dict[str, str]:
-        """Topology labels to insert in alert rule expressions."""
+        """Topology labels to insert in alert rule expressions.
+        
+        - "unit" is excluded because alert rules are forwarded over app data (one copy per app),
+          so having a "unit" matcher would exclude alerts from all other units.
+        - "charm" is excluded because ...
+        """
         items = self.as_dict(
             excluded_keys=["unit", "charm_name"],
         ).items()
@@ -273,7 +278,7 @@ class JujuTopology:
 
     @property
     def alert_expression_str(self) -> str:
-        """The alert expression topology as a promql/logql string."""
+        """Topology label matchers for the alert expression, as a promql/logql string."""
         items = self.alert_expression_dict.items()
         return ", ".join(['{}="{}"'.format(key, value) for key, value in items if value])
 
