@@ -270,7 +270,7 @@ class JujuTopology:
         - "charm" is excluded because ...
         """
         items = self.as_dict(
-            excluded_keys=["unit", "charm_name"],
+            included_keys=["model", "model_uuid", "application"],
         ).items()
 
         return {"juju_{}".format(key): value for key, value in items if value}
