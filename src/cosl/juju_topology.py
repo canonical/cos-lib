@@ -265,7 +265,6 @@ class JujuTopology:
     @property
     def alert_expression_dict(self) -> Dict[str, str]:
         """Topology labels to insert in alert rule expressions.
-        
         - "unit" is excluded because alert rules are forwarded over app data (one copy per app),
           so having a "unit" matcher would exclude alerts from all other units.
         - "charm" is excluded because ...
