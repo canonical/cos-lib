@@ -180,6 +180,7 @@ class JujuTopology:
         self,
         *,
         remapped_keys: Optional[Dict[str, str]] = None,
+        included_keys: Optional[List[str]] = None,
         excluded_keys: Optional[List[str]] = None,
     ) -> "OrderedDict[str, str]":
         """Format the topology information into an ordered dict.
@@ -190,6 +191,8 @@ class JujuTopology:
         Args:
             remapped_keys: A dictionary mapping old key names to new key names,
                 which will be substituted when invoked.
+            included_keys: A list of key names to include in the returned dict.
+                `excluded_keys` wins over `included_keys`.
             excluded_keys: A list of key names to exclude from the returned dict.
             uuid_length: The length to crop the UUID to.
         """
@@ -202,6 +205,10 @@ class JujuTopology:
                 ("charm_name", self.charm_name),
             ]
         )
+
+        if included_keys:
+            ret = OrderedDict({k: v for k, v in ret.items() if k in included_keys})
+
         if excluded_keys:
             ret = OrderedDict({k: v for k, v in ret.items() if k not in excluded_keys})
 
@@ -265,6 +272,7 @@ class JujuTopology:
     @property
     def alert_expression_dict(self) -> Dict[str, str]:
         """Topology labels to insert in alert rule expressions.
+
         - "unit" is excluded because alert rules are forwarded over app data (one copy per app),
           so having a "unit" matcher would exclude alerts from all other units.
         - "charm" is excluded because ...
