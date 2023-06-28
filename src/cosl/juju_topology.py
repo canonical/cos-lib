@@ -275,7 +275,7 @@ class JujuTopology:
 
         - "unit" is excluded because alert rules are forwarded over app data (one copy per app),
           so having a "unit" matcher would exclude alerts from all other units.
-        - "charm" is excluded because ...
+        - "charm" is excluded because in the case of subordinate charms, the labels need to match the subordinate and the principal.
         """
         items = self.as_dict(
             included_keys=["model", "model_uuid", "application"],
