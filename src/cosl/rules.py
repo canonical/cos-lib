@@ -338,9 +338,9 @@ class Rules(ABC):
     def _is_already_modified(self, name: str) -> bool:
         """Detect whether a group name has already been modified with juju topology."""
         modified_matcher = re.compile(r"^.*?_[\da-f]{8}_.*?alerts$")
-        if modified_matcher.match(name) is not None:
-            return True
-        return False
+        if modified_matcher.match(name) is None:
+            return False
+        return True
 
     # ---- END STATIC HELPER METHODS --- #
 
