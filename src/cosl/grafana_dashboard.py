@@ -1,16 +1,24 @@
 # Copyright 2023 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""
-The GrafanaDashboard class is used to compress and encode,
-or decompress and decode, Grafana Dashboards in JSON format
-using LZMA.
-"""
-class GrafanaDashboard(str):
-    """Grafana Dashboard encoded json; lzma-compressed."""
+"""Grafana Dashboard."""
 
-    # TODO Replace this with a custom type when pydantic v2 released (end of 2023 Q1?)
-    # https://github.com/pydantic/pydantic/issues/4887
+import base64
+import json
+import logging
+import lzma
+from typing import Dict, Union
+
+logger = logging.getLogger(__name__)
+
+
+class GrafanaDashboard(str):
+    """GrafanaDashboard represents an actual dashboard in Grafana.
+
+    The class is used to compress and encode, or decompress and decode,
+    Grafana Dashboards in JSON format using LZMA.
+    """
+
     @staticmethod
     def _serialize(raw_json: Union[str, bytes]) -> "GrafanaDashboard":
         if not isinstance(raw_json, bytes):
