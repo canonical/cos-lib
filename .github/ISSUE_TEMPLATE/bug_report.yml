@@ -23,7 +23,7 @@ body:
       label: To Reproduce
       description: >
         Please provide the output of `juju export-bundle` and step-by-step instructions for how to reproduce the behavior.
-        A deployment diagram could be handy too.
+        A deployment diagram could be handy too. See https://discourse.charmhub.io/t/9269 for examples.
       placeholder: |
         1. `juju deploy ...`
         2. `juju relate ...`
@@ -56,4 +56,3 @@ body:
     id: additional-context
     attributes:
       label: Additional context
-
