@@ -11,11 +11,11 @@ class MandatoryRelationPairs:
 
     >>> # "rel1" must be paired with (both "r1" and "r2") or "r3", and "rel2" with "r4"
     >>> mrp = MandatoryRelationPairs({"rel1": [{"r1", "r2"}, {"r3"}], "rel2": [{"r4"}]})
-    >>> mrp.get_missing_as_str({"rel1", "r1", "rel2"})
+    >>> mrp.get_missing_as_str("rel1", "r1", "rel2")
     "['r2']|['r3'] for rel1; ['r4'] for rel2"
-    >>> mrp.get_missing_as_str({"rel1", "r3"})
+    >>> mrp.get_missing_as_str("rel1", "r3")
     ''
-    >>> mrp.get_missing_as_str(set())
+    >>> mrp.get_missing_as_str()
     ''
     """
 
@@ -33,13 +33,14 @@ class MandatoryRelationPairs:
         # }
         self._pairs = pairs
 
-    def get_missing(self, relations_present: Set[str]) -> Dict[str, List[Set[str]]]:
+    def get_missing(self, *relations_present: str) -> Dict[str, List[Set[str]]]:
         """Returns a mapping from relation name to the set of missing mandatory relation names.
 
         If nothing is missing for a given relation, then it won't be listed (as a key) in the dict.
         """
         # From all relations currently present, get a list of 'incoming' relations that must
         # have matching 'outgoing' relations.
+        relations_present = set(relations_present or [])
         rels = relations_present.intersection(self._pairs.keys())
 
         # Same shape as `self._pairs`
@@ -54,9 +55,9 @@ class MandatoryRelationPairs:
 
         return missing
 
-    def get_missing_as_str(self, relations_present: Set[str]) -> str:
+    def get_missing_as_str(self, *relations_present: str) -> str:
         """Return the missing relations, formatted into a string."""
-        missing = self.get_missing(relations_present)
+        missing = self.get_missing(*relations_present)
 
         combos = "; ".join(
             sorted(
