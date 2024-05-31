@@ -5,8 +5,6 @@ import json
 import logging
 from unittest.mock import patch
 
-import pytest
-
 from src.cosl.loki_logger import LokiHandler
 
 
