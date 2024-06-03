@@ -1,5 +1,7 @@
 # Copyright 2023 Canonical Ltd.
 # See LICENSE file for licensing details.
+# Original LokiEmitter/LokiHandler implementation from
+# https://github.com/GreyZmeem/python-logging-loki (MIT licensed)
 
 """Loki logger."""
 
@@ -21,7 +23,6 @@ logger = logging.getLogger("loki-logger")
 logging.getLogger("urllib3").setLevel(logging.INFO)
 
 
-# from https://github.com/GreyZmeem/python-logging-loki (MIT licensed), which seems to be dead
 class LokiEmitter:
     """Base Loki emitter class."""
 
@@ -29,9 +30,9 @@ class LokiEmitter:
     success_response_code: int = 204
 
     #: Label name indicating logging level.
-    level_tag: str = "severity"
+    level_label: str = "severity"
     #: Label name indicating logger name.
-    logger_tag: str = "logger"
+    logger_label: str = "logger"
 
     #: String contains chars that can be used in label names in LogQL.
     label_allowed_chars: str = "".join((string.ascii_letters, string.digits, "_"))
@@ -44,18 +45,18 @@ class LokiEmitter:
         ("-", "_"),
     )
 
-    def __init__(self, url: str, tags: Optional[dict] = None, cert: Optional[str] = None):
+    def __init__(self, url: str, labels: Optional[dict] = None, cert: Optional[str] = None):
         """Create new Loki emitter.
 
         Arguments:
             url: Endpoint used to send log entries to Loki (e.g.
             `https://my-loki-instance/loki/api/v1/push`).
-            tags: Default tags added to every log record.
+            labels: Default labels added to every log record.
             cert: Absolute path to a ca cert for TLS authentication.
 
         """
         #: Tags that will be added to all records handled by this handler.
-        self.tags = tags or {}
+        self.labels = labels or {}
         #: Loki JSON push endpoint (e.g `http://127.0.0.1/loki/api/v1/push`)
         self.url = url
         #: Optional cert for TLS auth
@@ -86,9 +87,9 @@ class LokiEmitter:
                 "Unexpected Loki API response status code: {0}".format(resp.status_code)
             )
 
-    def build_payload(self, record: logging.LogRecord, line) -> dict:
+    def build_payload(self, record: logging.LogRecord, line: str) -> dict:
         """Build JSON payload with a log entry."""
-        labels = self.build_tags(record)
+        labels = self.build_labels(record)
         ns = 1e9
         ts = str(int(time.time() * ns))
         stream = {
@@ -107,35 +108,35 @@ class LokiEmitter:
             label = label.replace(char_from, char_to)
         return "".join(char for char in label if char in self.label_allowed_chars)
 
-    def build_tags(self, record: logging.LogRecord) -> Dict[str, Any]:
-        """Return tags that must be send to Loki with a log record."""
-        tags = dict(self.tags) if isinstance(self.tags, ConvertingDict) else self.tags
-        tags = cast(Dict[str, Any], copy.deepcopy(tags))
-        tags[self.level_tag] = record.levelname.lower()
-        tags[self.logger_tag] = record.name
+    def build_labels(self, record: logging.LogRecord) -> Dict[str, Any]:
+        """Return labels that must be send to Loki with a log record."""
+        labels = dict(self.labels) if isinstance(self.labels, ConvertingDict) else self.labels
+        labels = cast(Dict[str, Any], copy.deepcopy(labels))
+        labels[self.level_label] = record.levelname.lower()
+        labels[self.logger_label] = record.name
 
-        extra_tags = getattr(record, "tags", {})
-        if not isinstance(extra_tags, dict):
-            return tags
+        extra_labels = getattr(record, "labels", {})
+        if not isinstance(extra_labels, dict):
+            return labels
 
-        for tag_name, tag_value in extra_tags.items():
-            cleared_name = self.format_label(tag_name)
+        for label_name, label_value in extra_labels.items():
+            cleared_name = self.format_label(label_name)
             if cleared_name:
-                tags[cleared_name] = tag_value
+                labels[cleared_name] = label_value
 
-        return tags
+        return labels
 
 
 class LokiHandler(logging.Handler):
     """Log handler that sends log records to Loki.
 
-    `Loki API <https://github.com/grafana/loki/blob/mas<#NOWOKE>ter/docs/api.md>`
+    `Loki API <https://github.com/grafana/loki/blob/master/docs/api.md>`  # wokeignore
     """
 
     def __init__(
         self,
         url: str,
-        tags: Optional[dict] = None,
+        labels: Optional[dict] = None,
         # username, password tuple
         cert: Optional[str] = None,
     ):
@@ -144,12 +145,12 @@ class LokiHandler(logging.Handler):
         Arguments:
             url: Endpoint used to send log entries to Loki (e.g.
             `https://my-loki-instance/loki/api/v1/push`).
-            tags: Default tags added to every log record.
+            labels: Default labels added to every log record.
             cert: Optional absolute path to cert file for TLS auth.
 
         """
         super().__init__()
-        self.emitter = LokiEmitter(url, tags, cert)
+        self.emitter = LokiEmitter(url, labels, cert)
 
     def emit(self, record: logging.LogRecord):
         """Send log record to Loki."""
