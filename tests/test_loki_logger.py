@@ -49,12 +49,15 @@ def test_root_logging(send_request, n_lokis):
         root_logger.addHandler(handler)
         created_handlers.append(handler)
 
+    info_logline = "hey there"
+    error_logline = "boo!"
+
     try:
         any_logger = logging.getLogger("test-foo")
         any_logger.setLevel("INFO")
 
-        any_logger.info("hey there")
-        any_logger.error("boo!")
+        any_logger.info(info_logline)
+        any_logger.error(error_logline)
 
     finally:
         # Cleanup the test env:
@@ -78,5 +81,6 @@ def test_root_logging(send_request, n_lokis):
     )
 
     assert (
-        _get_log_lines(send_request.call_args_list) == ["hey there"] * n_lokis + ["boo!"] * n_lokis
+        _get_log_lines(send_request.call_args_list)
+        == [info_logline] * n_lokis + [error_logline] * n_lokis
     )
