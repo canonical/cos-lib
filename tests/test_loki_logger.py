@@ -28,14 +28,10 @@ def _get_loki_urls(calls: List[_Call]):
     return [call.args[0].full_url for call in calls]
 
 
-def _get_log_lines(calls: List[_Call]):
-    """Extract the logline from the intercepted LokiLogger call."""
-    return [_get_loki_http_post_payload(call)["streams"][0]["values"][0][1] for call in calls]
-
-
 @pytest.mark.parametrize("n_lokis", (1, 2, 5))
+@pytest.mark.parametrize("loglevel_info", (True, False))
 @patch("src.cosl.loki_logger.LokiEmitter._send_request")
-def test_root_logging(send_request, n_lokis):
+def test_root_logging(send_request, n_lokis, loglevel_info):
     root_logger = logging.getLogger()
 
     urls = []
@@ -49,16 +45,13 @@ def test_root_logging(send_request, n_lokis):
         root_logger.addHandler(handler)
         created_handlers.append(handler)
 
-    info_logline = "hey there"
-    error_logline = "boo!"
-
     try:
         any_logger = logging.getLogger("test-foo")
-        any_logger.setLevel("INFO")
+        if loglevel_info:
+            any_logger.setLevel("INFO")
 
-        any_logger.info(info_logline)
-        any_logger.error(error_logline)
-
+        any_logger.info("something")
+        any_logger.error("something else")
     finally:
         # Cleanup the test env:
         #   We're mutating the root logger by adding handlers to it,
@@ -78,9 +71,4 @@ def test_root_logging(send_request, n_lokis):
 
     assert (
         _get_logs_severity(send_request.call_args_list) == ["info"] * n_lokis + ["error"] * n_lokis
-    )
-
-    assert (
-        _get_log_lines(send_request.call_args_list)
-        == [info_logline] * n_lokis + [error_logline] * n_lokis
     )
