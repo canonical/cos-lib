@@ -13,6 +13,7 @@ readme = "README.md"
 requires-python = ">=3.8"
 dependencies = [
   "ops",
+  "pydantic",
   "PyYAML",
   "typing-extensions"
 ]
