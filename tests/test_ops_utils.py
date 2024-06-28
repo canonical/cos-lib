@@ -11,11 +11,11 @@ from ops.testing import Harness
 class TestCharm(CharmBase):
     meta = dedent(
         """
-    name: test-charm
-    requires:
-      some-relation:
-        interface: some_interface
-    """
+        name: test-charm
+        requires:
+          some-relation:
+            interface: some_interface
+        """
     )
 
 
