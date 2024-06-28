@@ -3,6 +3,7 @@
 
 """Nginx workload."""
 
+from typing import Callable
 from ops import CharmBase, pebble
 
 import logging
@@ -22,8 +23,9 @@ class Nginx:
     """Helper class to manage the nginx workload."""
     config_path = NGINX_CONFIG
 
-    def __init__(self, charm: CharmBase, config: str):
+    def __init__(self, charm: CharmBase, config_getter: Callable[[None], str]):
         self._charm = charm
+        self._config_getter = config_getter
         self._container = self._charm.unit.get_container("nginx")
 
     def configure_tls(self, private_key:str, server_cert:str, ca_cert:str) -> None:
@@ -37,7 +39,7 @@ class Nginx:
         """Configure pebble layer."""
         if self._container.can_connect():
             self._container.push(
-                self.config_path, self.config, make_dirs=True  # type: ignore
+                self.config_path, self._config_getter(), make_dirs=True  # type: ignore
             )
             self._container.add_layer("nginx", self.layer, combine=True)
             self._container.autostart()

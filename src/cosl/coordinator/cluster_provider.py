@@ -88,8 +88,8 @@ class ClusterProviderAppData(DatabagModel):
     """ClusterProviderAppData."""
 
     ### worker node configuration
-    worker_config: Dict[str, Any]
-    """The whole worker workload configuration, whatever it is."""
+    worker_config: str
+    """The whole worker workload configuration, whatever it is. E.g. yaml-encoded things."""
 
     ### self-monitoring stuff
     loki_endpoints: Optional[Dict[str, str]] = None
@@ -166,8 +166,7 @@ class ClusterProvider(Object):
 
     def publish_data(
         self,
-        _config: Dict[str, Any],
-        _receiver: Optional[Dict[ReceiverProtocol, Any]] = None,
+        worker_config: str,
         ca_cert: Optional[str] = None,
         server_cert: Optional[str] = None,
         privkey_secret_id: Optional[str] = None,
@@ -177,9 +176,8 @@ class ClusterProvider(Object):
         for relation in self._relations:
             if relation:
                 local_app_databag = ClusterProviderAppData(
-                    _config=_config,
+                    worker_config=worker_config,
                     loki_endpoints=loki_endpoints,
-                    _receiver=_receiver,
                     ca_cert=ca_cert,
                     server_cert=server_cert,
                     privkey_secret_id=privkey_secret_id,
