@@ -28,12 +28,28 @@ class Nginx:
         self._config_getter = config_getter
         self._container = self._charm.unit.get_container("nginx")
 
+    @property
+    def are_certificates_on_disk(self) -> bool:
+        return (
+            self._container.can_connect()
+            and self._container.exists(CERT_PATH)
+            and self._container.exists(KEY_PATH)
+            and self._container.exists(CA_CERT_PATH)
+        )
+
     def configure_tls(self, private_key:str, server_cert:str, ca_cert:str) -> None:
         if self._container.can_connect():
             self._container.push(KEY_PATH, private_key)
             self._container.push(CERT_PATH, server_cert)
             self._container.push(CA_CERT_PATH, ca_cert)
             self._container.exec(["update-ca-certificates", "--fresh"])
+
+    def delete_certificates(self) -> None:
+        if self._container.can_connect():
+            self._container.remove_path(CERT_PATH, recursive=True)
+            self._container.remove_path(KEY_PATH, recursive=True)
+            self._container.remove_path(CA_CERT_PATH, recursive=True)
+            self._container.exec(["update-ca-certificates" "--fresh"])
 
     def configure_pebble_layer(self) -> None:
         """Configure pebble layer."""

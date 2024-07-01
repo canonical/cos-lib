@@ -10,17 +10,16 @@ it does not live in a charm lib as most other relation endpoint wrappers do.
 """
 
 import collections
-import enum
 import json
 import logging
-from enum import Enum, unique
+import yaml
 from typing import Any, Dict, List, Optional, Set, FrozenSet, Iterable, Mapping
 
 import ops
 import pydantic
 
 # The only reason we need the tracing lib is this enum. Not super nice.
-from ops import EventSource, Object, ObjectEvents
+from ops import EventSource, Object, ObjectEvents, RelationCreatedEvent
 
 from databag_model import DatabagModel
 
@@ -60,6 +59,8 @@ class ConfigReceivedEvent(ops.EventBase):
 class ClusterError(Exception):
     """Base class for exceptions raised by this module."""
 
+class DataValidationError(ClusterError):
+    """Raised when relation databag validation fails."""
 
 class DatabagAccessPermissionError(ClusterError):
     """Raised when a follower attempts to write leader settings."""
@@ -70,6 +71,8 @@ class JujuTopology(pydantic.BaseModel):
 
     model: str
     unit: str
+    app: str
+    # TODO: probably add charm here
     # ...
 
 
@@ -103,16 +106,28 @@ class ClusterProviderAppData(DatabagModel):
     privkey_secret_id: Optional[str] = None
     """TLS Config"""
 
-    
 
 class ClusterChangedEvent(ops.EventBase):
     """Event emitted when any "-cluster" relation event fires."""
+
+class ClusterRemovedEvent(ops.EventBase):
+    """Event emitted when the relation with the "-cluster" provider has been severed.
+
+    Or when the relation data has been wiped.
+    """
 
 
 class ClusterProviderEvents(ObjectEvents):
     """Events emitted by the ClusterProvider "-cluster" endpoint wrapper."""
 
     changed = EventSource(ClusterChangedEvent)
+
+class ClusterRequirerEvents(ObjectEvents):
+    """Events emitted by the ClusterRequirer "-cluster" endpoint wrapper."""
+
+    config_received = EventSource(ConfigReceivedEvent)
+    created = EventSource(RelationCreatedEvent)
+    removed = EventSource(ClusterRemovedEvent)
 
 
 class ClusterProvider(Object):
@@ -152,7 +167,7 @@ class ClusterProvider(Object):
             self._charm.on[endpoint].relation_broken, self._on_cluster_changed
         )
 
-    def _on_cluster_changed(self, _):
+    def _on_cluster_changed(self, _: ops.EventBase) -> None:
         self.on.changed.emit()
 
     def publish_privkey(self, label: str) -> str:
@@ -254,3 +269,157 @@ class ClusterProvider(Object):
         if Role.all in data:
             del data[Role.all]
         return dct
+    
+    def gather_topology(self) -> List[Dict[str, str]]:
+        """Gather Topology."""
+        data = []
+        for relation in self._relations:
+            if not relation.app:
+                continue
+
+            for worker_unit in relation.units:
+                try:
+                    worker_data = ClusterRequirerUnitData.load(relation.data[worker_unit])
+                    unit_address = worker_data.address
+                except DataValidationError as e:
+                    log.info(f"invalid databag contents: {e}")
+                    continue
+                worker_topology = {
+                    # TODO: these assignments might be wrong
+                    "unit": worker_unit.name,
+                    "app": worker_unit.app.name,
+                    "address": unit_address,
+                }
+                data.append(worker_topology)
+
+        return data
+
+class ClusterRequirer(Object):
+    """``-cluster`` requirer endpoint wrapper."""
+
+    on = ClusterRequirerEvents()  # type: ignore
+
+    def __init__(
+        self,
+        charm: ops.CharmBase,
+        key: Optional[str] = None,
+        endpoint: str = DEFAULT_ENDPOINT_NAME,
+    ):
+        super().__init__(charm, key or endpoint)
+        self._charm = charm
+        self.juju_topology = {"unit": self.model.unit.name, "model": self.model.name}
+
+        relation = self.model.get_relation(endpoint)
+        self.relation: Optional[ops.Relation] = (
+            relation if relation and relation.app and relation.data else None
+        )
+
+        self.framework.observe(
+            self._charm.on[endpoint].relation_changed, self._on_cluster_changed
+        )
+        self.framework.observe(
+            self._charm.on[endpoint].relation_created, self._on_cluster_changed
+        )
+        self.framework.observe(
+            self._charm.on[endpoint].relation_broken, self._on_cluster_changed
+        )
+
+    def _on_cluster_relation_broken(self, _event: ops.RelationBrokenEvent):
+        self.on.removed.emit()
+
+    def _on_cluster_relation_created(self, event: ops.RelationCreatedEvent):
+        self.on.created.emit(relation=event.relation, app=event.app, unit=event.unit)
+
+    def _on_cluster_relation_changed(self, _event: ops.RelationChangedEvent):
+        # to prevent the event from firing if the relation is in an unhealthy state (breaking...)
+        if self.relation:
+            new_config = self.get_worker_config()
+            if new_config:
+                self.on.config_received.emit(new_config)
+
+            # if we have published our data, but we receive an empty/invalid config,
+            # then the remote end must have removed it.
+            elif self.is_published():
+                self.on.removed.emit()
+
+    def is_published(self):
+        """Verify that the local side has done all they need to do.
+
+        - unit address is published
+        - roles are published
+        """
+        relation = self.relation
+        if not relation:
+            return False
+
+        unit_data = relation.data[self._charm.unit]
+        app_data = relation.data[self._charm.app]
+
+        try:
+            ClusterRequirerUnitData.load(unit_data)
+            ClusterRequirerAppData.load(app_data)
+        except DataValidationError as e:
+            log.info(f"invalid databag contents: {e}")
+            return False
+        return True
+
+    def publish_unit_address(self, url: str):
+        """Publish this unit's URL via the unit databag."""
+        try:
+            urlparse(url)
+        except Exception as e:
+            raise ValueError(f"{url} is an invalid url") from e
+
+        databag_model = ClusterRequirerUnitData(
+            juju_topology=self.juju_topology,  # type: ignore
+            address=url,
+        )
+        relation = self.relation
+        if relation:
+            unit_databag = relation.data[self.model.unit]  # type: ignore # all checks are done in __init__
+            databag_model.dump(unit_databag)
+
+    def publish_app_roles(self, roles: Iterable[str]):
+        """Publish this application's roles via the application databag."""
+        if not self._charm.unit.is_leader():
+            raise DatabagAccessPermissionError("only the leader unit can publish roles.")
+
+        relation = self.relation
+        if relation:
+            # TODO: is it fine to move the meta-roles expansion into the Coordinator ?
+            deduplicated_roles = list(expand_roles(roles))
+            databag_model = ClusterRequirerAppData(roles=deduplicated_roles)
+            databag_model.dump(relation.data[self.model.app])
+
+    def _get_data_from_coordinator(self) -> Optional[ClusterProviderAppData]:
+        """Fetch the contents of the doordinator databag."""
+        data: Optional[ClusterProviderAppData] = None
+        relation = self.relation
+        if relation:
+            try:
+                databag = relation.data[relation.app]  # type: ignore # all checks are done in __init__
+                coordinator_databag = ClusterProviderAppData.load(databag)
+                data = coordinator_databag
+            except DataValidationError as e:
+                log.info(f"invalid databag contents: {e}")
+
+        return data
+
+    def get_worker_config(self) -> Dict[str, Any]:
+        """Fetch the worker config from the coordinator databag."""
+        data = self._get_data_from_coordinator()
+        if data:
+            return yaml.safe_load(data.worker_config)
+        return {}
+
+    def get_loki_endpoints(self) -> Dict[str, str]:
+        """Fetch the loki endpoints from the coordinator databag."""
+        data = self._get_data_from_coordinator()
+        if data:
+            return data.loki_endpoints or {}
+        return {}
+
+    def get_cert_secret_ids(self) -> Optional[str]:
+        """Fetch certificates secrets ids for the worker config."""
+        if self.relation and self.relation.app:
+            return self.relation.data[self.relation.app].get("secrets", None)

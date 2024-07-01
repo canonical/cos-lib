@@ -14,13 +14,13 @@ import ops
 from cosl.juju_topology import JujuTopology
 from cosl.coordinator.cluster_provider import ClusterProvider
 from cosl.helpers import check_libs_installed
-from cosl.coordinator.nginx import Nginx
+from cosl.coordinator.nginx import Nginx, NGINX_PROMETHEUS_EXPORTER_PORT
 
 check_libs_installed(
         "charms.data_platform_libs.v0.s3",
         "charms.grafana_k8s.v0.grafana_source",
         "charms.observability_libs.v1.cert_handler",
-                "charms.grafana_k8s.v0.grafana_dashboard",
+        "charms.grafana_k8s.v0.grafana_dashboard",
         "charms.observability_libs.v1.cert_handler",
         "charms.prometheus_k8s.v0.prometheus_scrape",
         "charms.loki_k8s.v1.loki_push_api",
@@ -31,7 +31,7 @@ check_libs_installed(
 from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
 from charms.observability_libs.v1.cert_handler import CertHandler
 from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
-from charms.loki_k8s.v1.loki_push_api import LogForwarder
+from charms.loki_k8s.v1.loki_push_api import LokiPushApiConsumer
 from charms.tempo_k8s.v2.tracing import TracingEndpointRequirer
 from charms.data_platform_libs.v0.s3 import S3Requirer
 from charms.grafana_k8s.v0.grafana_source import GrafanaSourceProvider
@@ -40,6 +40,10 @@ from charms.observability_libs.v1.cert_handler import VAULT_SECRET_LABEL, CertHa
 
 logger = logging.getLogger(__name__)
 
+
+NGINX_ORIGINAL_ALERT_RULES_PATH = "./src/prometheus_alert_rules/nginx"
+WORKER_ORIGINAL_ALERT_RULES_PATH = "./src/prometheus_alert_rules/mimir_workers"
+CONSOLIDATED_ALERT_RULES_PATH = "./src/prometheus_alert_rules/consolidated_rules"
 
 class S3NotFoundError(Exception):
     """Raised when the s3 integration is not present or not ready."""
@@ -58,7 +62,6 @@ _EndpointMapping=TypedDict(
     'tracing':str,
     'logging':str,
     'grafana-dashboards':str,
-    'grafana-source':str,
     'metrics':str,
     's3':str},
     total=True
@@ -70,7 +73,6 @@ _EndpointMappingOverrides=TypedDict(
     'tracing':str,
     'logging':str,
     'grafana-dashboards':str,
-    'grafana-source':str,
     'metrics':str,
     's3':str},
     total=False
@@ -83,7 +85,6 @@ class Coordinator(ops.Object):
                  "tracing": "tracing",
                  "logging": "logging",
                  "grafana-dashboards": "grafana-dashboards",
-                 "grafana-source": "grafana-source",
                  "metrics": "metrics-endpoint",
                  "s3": "s3",
         }
@@ -94,7 +95,7 @@ class Coordinator(ops.Object):
 
                  s3_bucket_name: str,
                  external_url: str, # the ingressed url if we have ingress, else fqdn
-                 grafana_datasource_type: str,
+                 metrics_port: str,
                  
                  nginx_config: Callable[["Coordinator"], str],
                  workers_config: Callable[["Coordinator"], str],
@@ -107,13 +108,16 @@ class Coordinator(ops.Object):
         self._charm = charm
         self._topology = JujuTopology.from_charm(self._charm)
         self._external_url = external_url
+        self._metrics_port = metrics_port
+        
+        self._nginx_container = nginx_container or self.charm.unit.get_container("nginx")
 
-        # TODO: Question: Should we allow disabling individual integrations, and what would that mean?
         _endpoints = self._endpoints
         _endpoints.update(endpoints or {})
 
         self.roles_config = roles_config
 
+        # TODO: get and pass the cluster relation name
         self.cluster = ClusterProvider(
             self._charm, frozenset(roles_config.Role),
             roles_config.meta_roles
@@ -138,36 +142,24 @@ class Coordinator(ops.Object):
 
         self.s3_requirer = S3Requirer(self._charm, _endpoints['s3'], s3_bucket_name)
 
-        # configure this tempo as a datasource in grafana
-        self.grafana_source_provider = GrafanaSourceProvider(
-            self._charm,
-            relation_name=_endpoints['grafana-source'],
-            source_type=grafana_datasource_type,
-            source_url=external_url,
-            refresh_event=[
-                # refresh the source url when TLS config might be changing
-                self.on[self.cert_handler.certificates_relation_name].relation_changed,
-                # todo figure out how to pass ingress-changed events down here, given that the charm might use IPA or -route.
-            ],
-        )
-
         self._grafana_dashboards = GrafanaDashboardProvider(
             self._charm, relation_name=_endpoints["grafana-dashboards"]
         )
 
-        self._logging = LogForwarder(self._charm, relation_name=_endpoints["logging"])
+        self._logging = LokiPushApiConsumer(self._charm, relation_name=_endpoints["logging"])
 
         # Provide ability for this to be scraped by Prometheus using prometheus_scrape
         refresh_events = [self._charm.on.update_status]
+        # TODO: add cluster joined/changed/departed/broken events to refresh_events
         if self.cert_handler:
             refresh_events.append(self.cert_handler.on.cert_changed)
 
+        self._render_alert_rules()
         self._scraping = MetricsEndpointProvider(
             self,
             relation_name=_endpoints["metrics"],
-            jobs=[
-             # todo: what's a default scrape job definition? do we need to pass anything here?
-            ],
+            alert_rules_path=CONSOLIDATED_ALERT_RULES_PATH,
+            jobs=self._scrape_jobs,
             external_url=self._external_url,
             refresh_event=refresh_events
         )
@@ -193,6 +185,10 @@ class Coordinator(ops.Object):
         # lifecycle
         self.framework.observe(self.on.config_changed, self._on_config_changed)
 
+        # nginx
+        self.framework.observe(self.on.nginx_pebble_ready, self._on_nginx_pebble_ready)
+        self.framework.observe(self.on.nginx_prometheus_exporter_pebble_ready, self._on_nginx_prometheus_exporter_pebble_ready)
+
         # s3
         self.framework.observe(
             self.s3_requirer.on.credentials_changed, self._on_s3_credentials_changed
@@ -202,6 +198,10 @@ class Coordinator(ops.Object):
         # tracing
         self.framework.observe(self.on.peers_relation_created, self._on_peers_relation_created)
         self.framework.observe(self.on.peers_relation_changed, self._on_peers_relation_changed)
+
+        # logging
+        self.framework.observe(self._logging.on.loki_push_api_endpoint_joined, self._on_loki_relation_changed)
+        self.framework.observe(self._logging.on.loki_push_api_endpoint_departed, self._on_loki_relation_changed)
 
         # tls
         self.framework.observe(self.cert_handler.on.cert_changed, self._on_cert_handler_changed)
@@ -344,19 +344,72 @@ class Coordinator(ops.Object):
             )
             return None
 
+    @property
+    def _workers_scrape_jobs(self) -> List[Dict[str, Any]]:
+        scrape_jobs = []
+        worker_topologies = self.cluster.gather_topology()
+        
+        for worker in worker_topologies:
+            job = {
+                "static_configs": [
+                    {
+                        "targets": [f"{worker['address']}:{self._metrics_port}"],
+                    }
+                ],
+                # setting these as "labels" in the static config gets some of them
+                # replaced by the coordinator topology
+                # https://github.com/canonical/prometheus-k8s-operator/issues/571
+                "relabel_configs": [
+                    # TODO: also pass the charm name in the worker relation data
+                    {"target_label": "juju_charm", "replacement": worker["charm"]},
+                    {"target_label": "juju_unit", "replacement": worker["unit"]},
+                    {"target_label": "juju_application", "replacement": worker["app"]},
+                    {"target_label": "juju_model", "replacement": self.model.name},
+                    {"target_label": "juju_model_uuid", "replacement": self.model.uuid},
+                ],
+            }
+            scrape_jobs.append(job)
+        return scrape_jobs
+
+    @property
+    def _nginx_scrape_jobs(self) -> List[Dict[str, Any]]:
+        job: Dict[str, Any] = {
+            "static_configs": [{"targets": [f"{self.hostname}:{NGINX_PROMETHEUS_EXPORTER_PORT}"]}]
+        }
+        return [job]
+
+    @property
+    def _scrape_jobs(self) -> List[Dict[str, Any]]:
+        return self._workers_scrape_jobs + self._nginx_scrape_jobs
+
     ##################
     # EVENT HANDLERS #
     ##################
     def _on_cert_handler_changed(self, _: ops.RelationChangedEvent):
         if self.tls_available:
             logger.debug("enabling TLS")
+            self.nginx.configure_tls(
+                server_cert=self.cert_handler.server_cert,
+                ca_cert=self.cert_handler.ca_cert,
+                private_key=self.cert_handler.private_key
+            )
         else:
             logger.debug("disabling TLS")
+            self.nginx.delete_certificates()
 
         # notify the cluster
         self.update_cluster()
 
     def _on_cluster_changed(self, _: ops.RelationEvent):
+        self.update_cluster()
+
+    def _on_nginx_pebble_ready(self, _: ops.PebbleReadyEvent):
+        self.update_cluster()
+
+    def _on_nginx_prometheus_exporter_pebble_ready(self, _: ops.PebbleReadyEvent):
+        self.update_cluster()
+
+    def _on_loki_relation_changed(self, _: ops.EventBase):
         self.update_cluster()
 
     def _on_s3_credentials_changed(self, _: ops.RelationChangedEvent):
@@ -440,6 +493,7 @@ class Coordinator(ops.Object):
             logger.error("skipped cluster update: incoherent deployment")
             return
 
+        self.nginx.configure_pebble_layer()
         # we share the certs in plaintext as they're not sensitive information
         # On every function call, we always publish everything to the databag; however, if there
         # are no changes, Juju will notice there's no delta and do nothing
@@ -454,3 +508,41 @@ class Coordinator(ops.Object):
             } if self.tls_available else {}),
         )
 
+    def _render_workers_alert_rules(self):
+        self._remove_rendered_alert_rules()
+
+        apps = set()
+        for worker in self.cluster.gather_topology():
+            if worker["app"] in apps:
+                continue
+
+            apps.add(worker["app"])
+            topology_dict = {
+                "model": self.model.name,
+                "model_uuid": self.model.uuid,
+                "application": worker["app"],
+                "unit": worker["unit"],
+                "charm_name": worker["charm"],
+            }
+            topology = JujuTopology.from_dict(topology_dict)
+            alert_rules = AlertRules(query_type="promql", topology=topology)
+            alert_rules.add_path(WORKER_ORIGINAL_ALERT_RULES_PATH, recursive=True)
+            alert_rules_contents = yaml.dump(alert_rules.as_dict())
+
+            file_name = f"{CONSOLIDATED_ALERT_RULES_PATH}/rendered_{worker['app']}.rules"
+            with open(file_name, "w") as writer:
+                writer.write(alert_rules_contents)
+
+    def _remove_rendered_alert_rules(self):
+        files = glob.glob(f"{CONSOLIDATED_ALERT_RULES_PATH}/rendered_*")
+        for f in files:
+            os.remove(f)
+
+    def _consolidate_nginx_alert_rules(self):
+        os.makedirs(CONSOLIDATED_ALERT_RULES_PATH, exist_ok=True)
+        for filename in glob.glob(os.path.join(NGINX_ORIGINAL_ALERT_RULES_PATH, "*.*")):
+            shutil.copy(filename, f"{CONSOLIDATED_ALERT_RULES_PATH}/")
+
+    def _render_alert_rules(self):
+        self._render_workers_alert_rules()
+        self._consolidate_nginx_alert_rules()
