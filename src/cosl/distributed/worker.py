@@ -6,8 +6,9 @@ import json
 import logging
 import socket
 import subprocess
+from functools import partial
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, TypedDict
+from typing import Any, Callable, Dict, Iterable, List, Optional, TypedDict
 
 import ops
 import yaml
@@ -57,13 +58,13 @@ class Worker(ops.Object):
                  charm: ops.CharmBase,
                  name: str, # name of the workload container and service
                  ports: Iterable[int],
-                 pebble_layer: Layer,
+                 pebble_layer: Callable[["Worker"], Layer],
 
                  endpoints: Optional[_EndpointMappingOverrides] = None,
                  ):
         self._charm = charm
         self._name = name
-        self._pebble_layer = pebble_layer
+        self._pebble_layer = partial(pebble_layer, self)
         self.topology = JujuTopology.from_charm(self._charm)
         self._container = self._charm.unit.get_container(name)
 
@@ -103,10 +104,15 @@ class Worker(ops.Object):
         self.framework.observe(self.cluster.on.changed, self._on_cluster_changed)
         self.framework.observe(self.cluster.on.created, self._on_cluster_created)
         self.framework.observe(self.cluster.on.removed, self._log_forwarder.disable_logging)
-        # TODO: also listen to pebble ready ???
+        # TODO: does this work ???
+        self.framework.observe(self.on[self._name].pebble_ready, self._on_pebble_ready)
 
 
     # Event handlers
+
+    def _on_pebble_ready(self, _: ops.PebbleReadyEvent):
+        logger.warn("PEBBLE READY FROM worker.py WORKS!") # TODO: remove this log line
+        self._update_config()
 
     def _on_worker_config_received(self, _: ops.EventBase):
         self._update_config()
@@ -139,13 +145,13 @@ class Worker(ops.Object):
             e.add_status(WaitingStatus("Cluster relation not ready"))
         if not self.cluster.get_worker_config():
             e.add_status(WaitingStatus("Waiting for coordinator to publish a config"))
-        if not self._roles:
+        if not self.roles:
             e.add_status(BlockedStatus("No roles assigned: please configure some roles"))
         e.add_status(ActiveStatus(""))
 
     # Utility functions
     @property
-    def _roles(self) -> List[str]:
+    def roles(self) -> List[str]:
         """Return a list of the roles this worker should take on."""
         existing_roles = [
             role.removeprefix("role-") for role in self._charm.config.keys() if role.startswith("role-")
@@ -176,11 +182,11 @@ class Worker(ops.Object):
         """
         if not self._container.can_connect():
             return False
-        if not self._roles:
+        if not self.roles:
             return False
 
         current_layer = self._container.get_plan()
-        new_layer = self._pebble_layer
+        new_layer = self._pebble_layer()
 
         if (
             "services" not in current_layer.to_dict()
@@ -194,9 +200,9 @@ class Worker(ops.Object):
     def _update_cluster_relation(self) -> None:
         """Publish all the worker information to relation data."""
         self.cluster.publish_unit_address(socket.getfqdn())
-        if self._charm.unit.is_leader() and self._roles:
-            logger.info(f"publishing roles: {self._roles}")
-            self.cluster.publish_app_roles(self._roles)
+        if self._charm.unit.is_leader() and self.roles:
+            logger.info(f"publishing roles: {self.roles}")
+            self.cluster.publish_app_roles(self.roles)
 
         if self.cluster.get_worker_config():
             self._update_config()
@@ -282,7 +288,7 @@ class Worker(ops.Object):
         if not self._container.exists(CONFIG_FILE):
             logger.error("cannot restart worker: config file doesn't exist (yet).")
 
-        if not self._roles:
+        if not self.roles:
             logger.debug("cannot restart worker: no roles have been configured.")
             return
 
