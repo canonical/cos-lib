@@ -19,7 +19,7 @@ import ops
 import pydantic
 import yaml
 from cosl import JujuTopology
-from databag_model import DatabagModel
+from cosl.databag_model import DatabagModel
 
 # The only reason we need the tracing lib is this enum. Not super nice.
 from ops import EventSource, Object, ObjectEvents, RelationCreatedEvent
@@ -89,7 +89,7 @@ class ClusterProviderAppData(DatabagModel):
     """ClusterProviderAppData."""
 
     ### worker node configuration
-    worker_config: str
+    worker_config: Optional[str] # TODO: remove the Optional
     """The whole worker workload configuration, whatever it is. E.g. yaml-encoded things."""
 
     ### self-monitoring stuff
@@ -324,13 +324,13 @@ class ClusterRequirer(Object):
         )
 
         self.framework.observe(
-            self._charm.on[endpoint].relation_changed, self._on_cluster_changed  # type: ignore
+            self._charm.on[endpoint].relation_changed, self._on_cluster_relation_changed  # type: ignore
         )
         self.framework.observe(
-            self._charm.on[endpoint].relation_created, self._on_cluster_changed  # type: ignore
+            self._charm.on[endpoint].relation_created, self._on_cluster_relation_created  # type: ignore
         )
         self.framework.observe(
-            self._charm.on[endpoint].relation_broken, self._on_cluster_changed  # type: ignore
+            self._charm.on[endpoint].relation_broken, self._on_cluster_relation_broken  # type: ignore
         )
 
     def _on_cluster_relation_broken(self, _event: ops.RelationBrokenEvent):

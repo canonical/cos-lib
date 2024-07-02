@@ -130,6 +130,8 @@ class Coordinator(ops.Object):
 
         _endpoints = self._endpoints
         _endpoints.update(endpoints or {})
+        # TODO: probably change this to only have self._endpoints
+        self._endpoints = _endpoints
 
         validate_roles_config(roles_config)
         self.roles_config = roles_config
@@ -174,7 +176,7 @@ class Coordinator(ops.Object):
 
         self._render_alert_rules()
         self._scraping = MetricsEndpointProvider(
-            self,
+            self._charm,
             relation_name=_endpoints["metrics"],
             alert_rules_path=CONSOLIDATED_ALERT_RULES_PATH,
             jobs=self._scrape_jobs,
@@ -189,23 +191,38 @@ class Coordinator(ops.Object):
         )
 
         # We always listen to collect-status
-        self.framework.observe(self.on.collect_unit_status, self._on_collect_unit_status)
+        self.framework.observe(self._charm.on.collect_unit_status, self._on_collect_unit_status)
 
+        # TODO: add warning about no workers
+        if self.workers_count == 0:
+            logger.warning(
+                f"Incoherent deployment. {charm.unit.name} is missing relation to workers. "
+                "This charm will be unresponsive and refuse to handle any event until "
+                "the situation is resolved by the cloud admin, to avoid data loss."
+            )
+            return  # refuse to handle any other event as we can't possibly know what to do.
         if not self.is_coherent:
+            logger.error(
+                f"Incoherent deployment. {charm.unit.name} will be shutting down. "
+                "This likely means you are lacking some required roles in your workers. "
+                "This charm will be unresponsive and refuse to handle any event until "
+                "the situation is resolved by the cloud admin, to avoid data loss."
+            )
+            return  # refuse to handle any other event as we can't possibly know what to do.
+        if self.workers_count > 1 and not self.s3_ready:
             logger.error(
                 f"Incoherent deployment. {charm.unit.name} will be shutting down. "
                 "This likely means you need to add an s3 integration. "
                 "This charm will be unresponsive and refuse to handle any event until "
                 "the situation is resolved by the cloud admin, to avoid data loss."
             )
-            return  # refuse to handle any other event as we can't possibly know what to do.
 
         # lifecycle
-        self.framework.observe(self.on.config_changed, self._on_config_changed)
+        self.framework.observe(self._charm.on.config_changed, self._on_config_changed)
 
         # nginx
-        self.framework.observe(self.on.nginx_pebble_ready, self._on_nginx_pebble_ready)
-        self.framework.observe(self.on.nginx_prometheus_exporter_pebble_ready, self._on_nginx_prometheus_exporter_pebble_ready)
+        self.framework.observe(self._charm.on.nginx_pebble_ready, self._on_nginx_pebble_ready)
+        self.framework.observe(self._charm.on.nginx_prometheus_exporter_pebble_ready, self._on_nginx_prometheus_exporter_pebble_ready)
 
         # s3
         self.framework.observe(
@@ -214,8 +231,8 @@ class Coordinator(ops.Object):
         self.framework.observe(self.s3_requirer.on.credentials_gone, self._on_s3_credentials_gone)
 
         # tracing
-        self.framework.observe(self.on.peers_relation_created, self._on_peers_relation_created)
-        self.framework.observe(self.on.peers_relation_changed, self._on_peers_relation_changed)
+        self.framework.observe(self._charm.on.peers_relation_created, self._on_peers_relation_created)
+        self.framework.observe(self._charm.on.peers_relation_changed, self._on_peers_relation_changed)
 
         # logging
         self.framework.observe(self._logging.on.loki_push_api_endpoint_joined, self._on_loki_relation_changed)
@@ -377,9 +394,9 @@ class Coordinator(ops.Object):
                 # https://github.com/canonical/prometheus-k8s-operator/issues/571
                 "relabel_configs": [
                     # TODO: also pass the charm name in the worker relation data
-                    {"target_label": "juju_charm", "replacement": worker["charm"]},
+                    {"target_label": "juju_charm", "replacement": worker["charm_name"]},
                     {"target_label": "juju_unit", "replacement": worker["unit"]},
-                    {"target_label": "juju_application", "replacement": worker["app"]},
+                    {"target_label": "juju_application", "replacement": worker["application"]},
                     {"target_label": "juju_model", "replacement": self.model.name},
                     {"target_label": "juju_model_uuid", "replacement": self.model.uuid},
                 ],
@@ -397,6 +414,16 @@ class Coordinator(ops.Object):
     @property
     def _scrape_jobs(self) -> List[Dict[str, Any]]:
         return self._workers_scrape_jobs + self._nginx_scrape_jobs
+
+    @property
+    def workers_count(self) -> int:
+        cluster_relations = self.model.relations.get(self._endpoints["cluster"], [])
+        remote_units_count = sum(
+            len(relation.units)
+            for relation in cluster_relations
+            if relation.app != self.model.app
+        )
+        return remote_units_count
 
 
     ##################
@@ -454,6 +481,8 @@ class Coordinator(ops.Object):
         # todo add [nginx.workload] statuses
 
         # TODO: should we set these statuses on the leader only, or on all units?
+        if self.workers_count == 0:
+            e.add_status(ops.BlockedStatus("[consistency] Missing any worker relation."))
         if not self.is_coherent:
             e.add_status(ops.BlockedStatus("[consistency] Cluster inconsistent."))
         else:

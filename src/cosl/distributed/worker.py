@@ -62,6 +62,7 @@ class Worker(ops.Object):
 
                  endpoints: Optional[_EndpointMappingOverrides] = None,
                  ):
+        super().__init__(charm, key="worker")
         self._charm = charm
         self._name = name
         self._pebble_layer = partial(pebble_layer, self)
@@ -70,6 +71,8 @@ class Worker(ops.Object):
 
         _endpoints = self._endpoints
         _endpoints.update(endpoints or {})
+        # TODO: change this to only have self._endpoints
+        self._endpoints = _endpoints
 
         self.ports = ports
         self._charm.unit.set_ports(*ports)
@@ -83,8 +86,9 @@ class Worker(ops.Object):
             charm=self._charm,
             loki_endpoints=self.cluster.get_loki_endpoints(),
             refresh_events=[
+                self.cluster.on.config_received,
                 self.cluster.on.created,
-                self.cluster.on.changed,
+                self.cluster.on.removed,
             ]
         )
 
@@ -96,16 +100,15 @@ class Worker(ops.Object):
 
 
         # Event listeners
-        self.framework.observe(self.on.config_changed, self._on_config_changed)
-        self.framework.observe(self.on.upgrade_charm, self._on_upgrade_charm)
-        self.framework.observe(self.on.collect_unit_status, self._on_collect_status)
+        self.framework.observe(self._charm.on.config_changed, self._on_config_changed)
+        self.framework.observe(self._charm.on.upgrade_charm, self._on_upgrade_charm)
+        self.framework.observe(self._charm.on.collect_unit_status, self._on_collect_status)
 
         self.framework.observe(self.cluster.on.config_received, self._on_worker_config_received)
-        self.framework.observe(self.cluster.on.changed, self._on_cluster_changed)
         self.framework.observe(self.cluster.on.created, self._on_cluster_created)
         self.framework.observe(self.cluster.on.removed, self._log_forwarder.disable_logging)
         # TODO: does this work ???
-        self.framework.observe(self.on[self._name].pebble_ready, self._on_pebble_ready)
+        self.framework.observe(self._charm.on[self._name].pebble_ready, self._on_pebble_ready)
 
 
     # Event handlers
@@ -137,9 +140,9 @@ class Worker(ops.Object):
     def _on_collect_status(self, e: ops.CollectStatusEvent):
         if not self._container.can_connect():
             e.add_status(WaitingStatus(f"Waiting for `{self._name}` container"))
-        if not self.model.get_relation("-cluster"):
+        if not self.model.get_relation(self._endpoints["cluster"]):
             e.add_status(
-                BlockedStatus("Missing -cluster relation to a coordinator charm")
+                BlockedStatus("Missing relation to a coordinator charm")
             )
         elif not self.cluster.relation:
             e.add_status(WaitingStatus("Cluster relation not ready"))
@@ -313,7 +316,7 @@ class ManualLogForwarder(ops.Object):
         refresh_events: Optional[List[ops.BoundEvent]] = None,
     ):
         _PebbleLogClient.check_juju_version()
-        super().__init__(charm, "-cluster")
+        super().__init__(charm, "worker-log-forwarder")
         self._charm = charm
         self._loki_endpoints = loki_endpoints
         self._topology = JujuTopology.from_charm(charm)

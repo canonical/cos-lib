@@ -18,7 +18,7 @@ def check_libs_installed(*path: str):
     if libs_not_found:
         install_script = "\n".join(f"charmcraft fetch-lib {libname}" for libname in libs_not_found)
         raise RuntimeError(
-            f"Unmet dependencies: the coordinator charm base is missing some charm libs.
+            f"Unmet dependencies: the coordinator charm base is missing some charm libs. \
             Please install them with: \n\n{install_script}"
             )
 
