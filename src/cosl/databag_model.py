@@ -4,10 +4,12 @@
 
 """DatabagModel implementation from traefik.v1.ingress charm lib."""
 
-import pydantic
 import json
-from typing import MutableMapping, Optional, cast
 import logging
+from typing import MutableMapping, Optional, cast
+
+import pydantic
+
 logger = logging.getLogger(__name__)
 
 

@@ -12,18 +12,17 @@ it does not live in a charm lib as most other relation endpoint wrappers do.
 import collections
 import json
 import logging
-import yaml
-from cosl import JujuTopology
-from typing import Any, Counter, Dict, List, Optional, Set, FrozenSet, Iterable, Mapping
+from typing import Any, Counter, Dict, FrozenSet, Iterable, List, Mapping, Optional, Set
 from urllib.parse import urlparse
 
 import ops
 import pydantic
+import yaml
+from cosl import JujuTopology
+from databag_model import DatabagModel
 
 # The only reason we need the tracing lib is this enum. Not super nice.
 from ops import EventSource, Object, ObjectEvents, RelationCreatedEvent
-
-from databag_model import DatabagModel
 
 log = logging.getLogger("_cluster")
 

@@ -9,17 +9,16 @@ import logging
 import os
 import shutil
 import socket
-import yaml
 from functools import partial
-from typing import Any, Callable, Dict, List, Optional, Protocol, Set, Iterable, TypedDict
+from typing import Any, Callable, Dict, Iterable, List, Optional, Protocol, Set, TypedDict
 
 import ops
-
-from cosl.juju_topology import JujuTopology
-from cosl.distributed.cluster import ClusterProvider
-from cosl.helpers import check_libs_installed
-from cosl.distributed.nginx import Nginx, NGINX_PROMETHEUS_EXPORTER_PORT
+import yaml
 from cosl import AlertRules
+from cosl.distributed.cluster import ClusterProvider
+from cosl.distributed.nginx import NGINX_PROMETHEUS_EXPORTER_PORT, Nginx
+from cosl.helpers import check_libs_installed
+from cosl.juju_topology import JujuTopology
 
 check_libs_installed(
         "charms.data_platform_libs.v0.s3",
@@ -33,13 +32,12 @@ check_libs_installed(
     )
 
 
-from charms.observability_libs.v1.cert_handler import VAULT_SECRET_LABEL, CertHandler
+from charms.data_platform_libs.v0.s3 import S3Requirer
 from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
 from charms.loki_k8s.v1.loki_push_api import LokiPushApiConsumer
+from charms.observability_libs.v1.cert_handler import VAULT_SECRET_LABEL, CertHandler
 from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.tempo_k8s.v2.tracing import TracingEndpointRequirer
-from charms.data_platform_libs.v0.s3 import S3Requirer
-
 
 logger = logging.getLogger(__name__)
 

@@ -3,10 +3,10 @@
 
 """Nginx workload."""
 
-from typing import Callable
-from ops import CharmBase, pebble
-
 import logging
+from typing import Callable
+
+from ops import CharmBase, pebble
 
 logger = logging.getLogger(__name__)
 

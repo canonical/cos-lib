@@ -1,12 +1,13 @@
 import enum
 import socket
 
-from cosl.coordinator.coordinator_charm_base import Coordinator
+from cosl.distributed.coordinator import Coordinator
 from ops import CharmBase
 
 
 class MyClusterRolesConfig:
     class Role(str, enum.Enum):
+        """Define the roles for the cluster."""
         write = "write"
         read = "read"
         foo = "foo"
@@ -17,7 +18,7 @@ class MyClusterRolesConfig:
         Role.write: [Role.foo, Role.bar],
         Role.read: [Role.baz],
     }
-    
+
     minimal_deployment = (Role.foo, Role.bar)
 
     recommended_deployment = {
@@ -34,7 +35,6 @@ def generate_nginx_config(coordinator: Coordinator) -> str:
 def generate_worker_config(coordinator: Coordinator) -> str:
     # use peers to determine scaling factor and gossip rings
     ...
-    
 
 
 
@@ -46,13 +46,13 @@ class LokiCoordinator(CharmBase):
         self.coordinator = Coordinator(
             self,
             roles_config=MyClusterRolesConfig,
+            metrics_port="8080",
             # nginx config
             nginx_config=generate_nginx_config,
             # worker node config
             workers_config=generate_worker_config,
 
             s3_bucket_name="BuckyMcBucket",
-            grafana_datasource_type="mydstype",
             external_url=self.external_url,
         )
 

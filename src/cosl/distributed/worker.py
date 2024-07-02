@@ -4,27 +4,26 @@
 
 import json
 import logging
-import ops
 import socket
 import subprocess
-import yaml
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, TypedDict
 
+import ops
+import yaml
 from cosl import JujuTopology
-from cosl.helpers import check_libs_installed
 from cosl.distributed.cluster import ClusterRequirer
-
-from charms.loki_k8s.v1.loki_push_api import _PebbleLogClient
-from charms.tempo_k8s.v2.tracing import TracingEndpointRequirer
-
+from cosl.helpers import check_libs_installed
 from ops.model import ActiveStatus, BlockedStatus, WaitingStatus
 from ops.pebble import Layer, PathError, ProtocolError
 
 check_libs_installed(
     "charms.loki_k8s.v1.loki_push_api",
+    "charms.tempo_k8s.v2.tracing",
 )
 
+from charms.loki_k8s.v1.loki_push_api import _PebbleLogClient
+from charms.tempo_k8s.v2.tracing import TracingEndpointRequirer
 
 BASE_DIR = "/worker"
 CONFIG_FILE = "/etc/worker/config.yaml"
@@ -108,7 +107,7 @@ class Worker(ops.Object):
 
 
     # Event handlers
-    
+
     def _on_worker_config_received(self, _: ops.EventBase):
         self._update_config()
 
@@ -240,7 +239,7 @@ class Worker(ops.Object):
         return False
 
     def _update_tls_certificates(self) -> bool:
-        """Update the TLS certficates on disk according to their availability."""
+        """Update the TLS certificates on disk according to their availability."""
         if not self._container.can_connect():
             return False
 
