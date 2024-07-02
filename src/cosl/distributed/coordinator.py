@@ -1,20 +1,25 @@
 #!/usr/bin/env python3
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
+"""Generic coordinator for a distributed charm deployment."""
 
-
-from functools import partial
+import glob
 import json
 import logging
+import os
+import shutil
 import socket
-from typing import Any, Callable, Dict, List, Optional, Protocol, Set, Mapping, Iterable, Type, TypedDict
+import yaml
+from functools import partial
+from typing import Any, Callable, Dict, List, Optional, Protocol, Set, Iterable, TypedDict
 
 import ops
 
 from cosl.juju_topology import JujuTopology
-from cosl.coordinator.cluster_provider import ClusterProvider
+from cosl.distributed.cluster import ClusterProvider
 from cosl.helpers import check_libs_installed
-from cosl.coordinator.nginx import Nginx, NGINX_PROMETHEUS_EXPORTER_PORT
+from cosl.distributed.nginx import Nginx, NGINX_PROMETHEUS_EXPORTER_PORT
+from cosl import AlertRules
 
 check_libs_installed(
         "charms.data_platform_libs.v0.s3",
@@ -28,14 +33,12 @@ check_libs_installed(
     )
 
 
+from charms.observability_libs.v1.cert_handler import VAULT_SECRET_LABEL, CertHandler
 from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
-from charms.observability_libs.v1.cert_handler import CertHandler
-from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.loki_k8s.v1.loki_push_api import LokiPushApiConsumer
+from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.tempo_k8s.v2.tracing import TracingEndpointRequirer
 from charms.data_platform_libs.v0.s3 import S3Requirer
-from charms.grafana_k8s.v0.grafana_source import GrafanaSourceProvider
-from charms.observability_libs.v1.cert_handler import VAULT_SECRET_LABEL, CertHandler
 
 
 logger = logging.getLogger(__name__)
@@ -50,6 +53,7 @@ class S3NotFoundError(Exception):
 
 
 class ClusterRolesConfig(Protocol):
+    """Worker roles and deployment requirements."""
     Role: Iterable[str]
     meta_roles: Dict[str, Iterable[str]]
     minimal_deployment: Iterable[str]
@@ -59,6 +63,7 @@ class ClusterRolesConfig(Protocol):
 _EndpointMapping=TypedDict(
     '_EndpointMapping',
     {'certificates':str,
+    'cluster':str,
     'tracing':str,
     'logging':str,
     'grafana-dashboards':str,
@@ -70,6 +75,7 @@ _EndpointMapping=TypedDict(
 _EndpointMappingOverrides=TypedDict(
     '_EndpointMappingOverrides',
     {'certificates':str,
+    'cluster':str,
     'tracing':str,
     'logging':str,
     'grafana-dashboards':str,
@@ -82,6 +88,7 @@ class Coordinator(ops.Object):
     """Charming coordinator."""
     _endpoints:_EndpointMapping = {
                  "certificates": "certificates",
+                 "cluster": "cluster",
                  "tracing": "tracing",
                  "logging": "logging",
                  "grafana-dashboards": "grafana-dashboards",
@@ -96,10 +103,11 @@ class Coordinator(ops.Object):
                  s3_bucket_name: str,
                  external_url: str, # the ingressed url if we have ingress, else fqdn
                  metrics_port: str,
-                 
+
                  nginx_config: Callable[["Coordinator"], str],
                  workers_config: Callable[["Coordinator"], str],
 
+                 nginx_container: str = "nginx",
                  endpoints: Optional[_EndpointMappingOverrides] = None,
                  is_coherent: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
                  is_recommended: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
@@ -109,8 +117,8 @@ class Coordinator(ops.Object):
         self._topology = JujuTopology.from_charm(self._charm)
         self._external_url = external_url
         self._metrics_port = metrics_port
-        
-        self._nginx_container = nginx_container or self.charm.unit.get_container("nginx")
+
+        self._nginx_container = self._charm.unit.get_container(nginx_container)
 
         _endpoints = self._endpoints
         _endpoints.update(endpoints or {})
@@ -120,13 +128,14 @@ class Coordinator(ops.Object):
         # TODO: get and pass the cluster relation name
         self.cluster = ClusterProvider(
             self._charm, frozenset(roles_config.Role),
-            roles_config.meta_roles
+            roles_config.meta_roles,
+            endpoint=_endpoints["cluster"],
             )
-        
+
         self._is_coherent = is_coherent
         self._is_recommended = is_recommended
-        
-        self.nginx = Nginx(self._charm, 
+
+        self.nginx = Nginx(self._charm,
                            partial(nginx_config, self)  # type:ignore
                            )
         self._workers_config_getter = partial(workers_config, self)
@@ -149,8 +158,8 @@ class Coordinator(ops.Object):
         self._logging = LokiPushApiConsumer(self._charm, relation_name=_endpoints["logging"])
 
         # Provide ability for this to be scraped by Prometheus using prometheus_scrape
-        refresh_events = [self._charm.on.update_status]
-        # TODO: add cluster joined/changed/departed/broken events to refresh_events
+        refresh_events = [self._charm.on.update_status, self.cluster.on.changed]
+        # TODO: add cluster joined/departed/broken events to refresh_events ???
         if self.cert_handler:
             refresh_events.append(self.cert_handler.on.cert_changed)
 
@@ -169,7 +178,7 @@ class Coordinator(ops.Object):
             relation_name=_endpoints['tracing'],
             protocols=["otlp_http"]
         )
-        
+
         # We always listen to collect-status
         self.framework.observe(self.on.collect_unit_status, self._on_collect_unit_status)
 
@@ -216,10 +225,9 @@ class Coordinator(ops.Object):
     @property
     def is_coherent(self) -> bool:
         """Check whether this coordinator is coherent."""
-
         if manual_coherency_checker := self._is_coherent:
             return manual_coherency_checker(self.cluster, self.roles_config)
-            
+
         rc = self.roles_config
         minimal_deployment = set(rc.minimal_deployment)
         cluster = self.cluster
@@ -227,20 +235,20 @@ class Coordinator(ops.Object):
 
         # Whether the roles list makes up a coherent mimir deployment.
         is_coherent = set(roles.keys()).issuperset(minimal_deployment)
-        
+
         return is_coherent
-        
+
     @property
     def missing_roles(self) -> Set[str]:
         """What roles are missing from this cluster, if any."""
         roles = self.cluster.gather_roles()
         missing_roles: Set[str] = set(self.roles_config.minimal_deployment).difference(roles.keys())
         return missing_roles
-        
+
     @property
     def is_recommended(self) -> Optional[bool]:
         """Check whether this coordinator is connected to the recommended number of workers.
-        
+
         Will return None if no recommended criterion is defined.
         """
         if manual_recommended_checker := self._is_recommended:
@@ -254,10 +262,9 @@ class Coordinator(ops.Object):
                 if roles.get(role, 0) < min_n:
                     return False
             return True
-        
-        else:
-            # we don't have a definition of recommended: return None
-            return None
+
+        # we don't have a definition of recommended: return None
+        return None
 
 
     @property
@@ -282,7 +289,7 @@ class Coordinator(ops.Object):
         return (
             self.cert_handler.enabled
             and (self.cert_handler.server_cert is not None)
-            and (self.cert_handler.private_key is not None)  # type: ignore 
+            and (self.cert_handler.private_key is not None)  # type: ignore
             and (self.cert_handler.ca_cert is not None)
         )
 
@@ -346,9 +353,9 @@ class Coordinator(ops.Object):
 
     @property
     def _workers_scrape_jobs(self) -> List[Dict[str, Any]]:
-        scrape_jobs = []
+        scrape_jobs: List[Dict[str, Any]] = []
         worker_topologies = self.cluster.gather_topology()
-        
+
         for worker in worker_topologies:
             job = {
                 "static_configs": [
@@ -389,9 +396,9 @@ class Coordinator(ops.Object):
         if self.tls_available:
             logger.debug("enabling TLS")
             self.nginx.configure_tls(
-                server_cert=self.cert_handler.server_cert,
-                ca_cert=self.cert_handler.ca_cert,
-                private_key=self.cert_handler.private_key
+                server_cert=self.cert_handler.server_cert,  # type: ignore
+                ca_cert=self.cert_handler.ca_cert,  # type: ignore
+                private_key=self.cert_handler.private_key,  # type: ignore
             )
         else:
             logger.debug("disabling TLS")
@@ -511,18 +518,18 @@ class Coordinator(ops.Object):
     def _render_workers_alert_rules(self):
         self._remove_rendered_alert_rules()
 
-        apps = set()
+        apps: Set[str] = set()
         for worker in self.cluster.gather_topology():
-            if worker["app"] in apps:
+            if worker["application"] in apps:
                 continue
 
-            apps.add(worker["app"])
+            apps.add(worker["application"])
             topology_dict = {
-                "model": self.model.name,
-                "model_uuid": self.model.uuid,
-                "application": worker["app"],
+                "model": worker["model"],
+                "model_uuid": worker["model_uuid"],
+                "application": worker["application"],
                 "unit": worker["unit"],
-                "charm_name": worker["charm"],
+                "charm_name": worker["charm_name"],
             }
             topology = JujuTopology.from_dict(topology_dict)
             alert_rules = AlertRules(query_type="promql", topology=topology)

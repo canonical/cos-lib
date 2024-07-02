@@ -2,12 +2,14 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import json
 import logging
 import ops
 import socket
 import subprocess
 import yaml
-from typing import cast, Dict, Iterable, List, Optional
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional, TypedDict
 
 from cosl import JujuTopology
 from cosl.helpers import check_libs_installed
@@ -32,34 +34,60 @@ CLIENT_CA_FILE = "/etc/worker/ca.cert"
 
 logger = logging.getLogger(__name__)
 
+_EndpointMapping=TypedDict(
+    '_EndpointMapping',
+    {'cluster':str,
+     'tracing':str},
+    total=True
+)
+
+_EndpointMappingOverrides=TypedDict(
+    '_EndpointMappingOverrides',
+    {'cluster':str,
+     'tracing':str},
+    total=False
+)
+
 class Worker(ops.Object):
+    _endpoints:_EndpointMapping = {
+        "cluster": "cluster",
+        "tracing": "tracing",
+    }
+
     def __init__(self,
                  charm: ops.CharmBase,
-                 name: str,
+                 name: str, # name of the workload container and service
                  ports: Iterable[int],
                  pebble_layer: Layer,
+
+                 endpoints: Optional[_EndpointMappingOverrides] = None,
                  ):
         self._charm = charm
         self._name = name
-        self._container = self._charm.unit.get_container(name)
         self._pebble_layer = pebble_layer
         self.topology = JujuTopology.from_charm(self._charm)
+        self._container = self._charm.unit.get_container(name)
+
+        _endpoints = self._endpoints
+        _endpoints.update(endpoints or {})
 
         self.ports = ports
         self._charm.unit.set_ports(*ports)
 
         self.cluster = ClusterRequirer(
             charm=self._charm,
-            # TODO: get and pass the correct endpoint
+            endpoint=_endpoints["cluster"],
         )
 
         self._log_forwarder = ManualLogForwarder(
             charm=self._charm,
             loki_endpoints=self.cluster.get_loki_endpoints(),
-            refresh_events=[], # TODO: pass the cluster-joined/changed events
+            refresh_events=[
+                self.cluster.on.created,
+                self.cluster.on.changed,
+            ]
         )
 
-        _endpoints = {"tracing": "tracing"} # TODO: define endpoints like in the coordinator
         self.tracing = TracingEndpointRequirer(
             self._charm,
             relation_name=_endpoints['tracing'],
@@ -73,15 +101,9 @@ class Worker(ops.Object):
         self.framework.observe(self.on.collect_unit_status, self._on_collect_status)
 
         self.framework.observe(self.cluster.on.config_received, self._on_worker_config_received)
-        self.framework.observe(self.cluster.on.created, self._on_cluster_created)
         self.framework.observe(self.cluster.on.changed, self._on_cluster_changed)
-        # TODO: fix this to map to the actual departed/broken events
-        self.framework.observe(
-            self.on.cluster_relation_departed, self._log_forwarder.disable_logging
-        )
-        self.framework.observe(
-            self.on.cluster_relation_broken, self._log_forwarder.disable_logging
-        )
+        self.framework.observe(self.cluster.on.created, self._on_cluster_created)
+        self.framework.observe(self.cluster.on.removed, self._log_forwarder.disable_logging)
         # TODO: also listen to pebble ready ???
 
 
@@ -109,15 +131,15 @@ class Worker(ops.Object):
 
     def _on_collect_status(self, e: ops.CollectStatusEvent):
         if not self._container.can_connect():
-            e.add_status(WaitingStatus("Waiting for `mimir` container"))
-        if not self.model.get_relation("mimir-cluster"):
+            e.add_status(WaitingStatus(f"Waiting for `{self._name}` container"))
+        if not self.model.get_relation("-cluster"):
             e.add_status(
-                BlockedStatus("Missing mimir-cluster relation to a mimir-coordinator charm")
+                BlockedStatus("Missing -cluster relation to a coordinator charm")
             )
         elif not self.cluster.relation:
-            e.add_status(WaitingStatus("Mimir-Cluster relation not ready"))
+            e.add_status(WaitingStatus("Cluster relation not ready"))
         if not self.cluster.get_worker_config():
-            e.add_status(WaitingStatus("Waiting for coordinator to publish a mimir config"))
+            e.add_status(WaitingStatus("Waiting for coordinator to publish a config"))
         if not self._roles:
             e.add_status(BlockedStatus("No roles assigned: please configure some roles"))
         e.add_status(ActiveStatus(""))
@@ -163,9 +185,9 @@ class Worker(ops.Object):
 
         if (
             "services" not in current_layer.to_dict()
-            or current_layer.services != new_layer["services"]
+            or current_layer.services != new_layer.services
         ):
-            self._container.add_layer(self._name, new_layer, combine=True)  # pyright: ignore
+            self._container.add_layer(self._name, new_layer, combine=True)
             return True
 
         return False
@@ -180,7 +202,7 @@ class Worker(ops.Object):
         if self.cluster.get_worker_config():
             self._update_config()
 
-    def _running_worker_config(self) -> Optional[dict]:
+    def _running_worker_config(self) -> Optional[Dict[str,Any]]:
         """Return the worker config as dict, or None if retrieval failed."""
         if not self._container.can_connect():
             logger.debug("Could not connect to Mimir container")
@@ -198,7 +220,7 @@ class Worker(ops.Object):
             return None
 
     def _update_worker_config(self) -> bool:
-        """Set worker config.
+        """Set worker config for the workload.
 
         Returns: True if config has changed, otherwise False.
         Raises: BlockedStatusError exception if PebbleError, ProtocolError, PathError exceptions
@@ -275,7 +297,7 @@ class Worker(ops.Object):
             return
 
 
-class ManualLogForwarder:
+class ManualLogForwarder(ops.Object):
     """Forward the standard outputs of all workloads to explictly-provided Loki endpoints."""
 
     def __init__(
@@ -297,7 +319,7 @@ class ManualLogForwarder:
         for event in refresh_events:
             self.framework.observe(event, self.update_logging)
 
-    def update_logging(self, _=None):
+    def update_logging(self, _: Optional[ops.EventBase] = None):
         """Update the log forwarding to match the active Loki endpoints."""
         loki_endpoints = self._loki_endpoints
 
@@ -315,7 +337,7 @@ class ManualLogForwarder:
                 container=container, active_endpoints=loki_endpoints, topology=self._topology
             )
 
-    def disable_logging(self, _=None):
+    def disable_logging(self, _: Optional[ops.EventBase] = None):
         """Disable all log forwarding."""
         # This is currently necessary because, after a relation broken, the charm can still see
         # the Loki endpoints in the relation data.

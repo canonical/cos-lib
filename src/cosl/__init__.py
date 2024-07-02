@@ -8,7 +8,9 @@ from .grafana_dashboard import GrafanaDashboard
 from .juju_topology import JujuTopology
 from .mandatory_relation_pairs import MandatoryRelationPairs
 from .rules import AlertRules, RecordingRules
-from .coordinator.coordinator_charm_base import Coordinator
+from .distributed.coordinator import Coordinator
+from .distributed.cluster import ClusterProvider, ClusterRequirer
+from .distributed.worker import Worker
 
 __all__ = [
     "JujuTopology",
@@ -17,5 +19,8 @@ __all__ = [
     "AlertRules",
     "RecordingRules",
     "MandatoryRelationPairs",
-    "Coordinator"
+    "Coordinator",
+    "ClusterProvider",
+    "ClusterRequirer",
+    "Worker",
 ]

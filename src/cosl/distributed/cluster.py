@@ -13,7 +13,9 @@ import collections
 import json
 import logging
 import yaml
-from typing import Any, Dict, List, Optional, Set, FrozenSet, Iterable, Mapping
+from cosl import JujuTopology
+from typing import Any, Counter, Dict, List, Optional, Set, FrozenSet, Iterable, Mapping
+from urllib.parse import urlparse
 
 import ops
 import pydantic
@@ -22,8 +24,6 @@ import pydantic
 from ops import EventSource, Object, ObjectEvents, RelationCreatedEvent
 
 from databag_model import DatabagModel
-
-from charms.tempo_k8s.v2.tracing import ReceiverProtocol
 
 log = logging.getLogger("_cluster")
 
@@ -66,14 +66,13 @@ class DatabagAccessPermissionError(ClusterError):
     """Raised when a follower attempts to write leader settings."""
 
 
-class JujuTopology(pydantic.BaseModel):
+class Topology(pydantic.BaseModel):
     """JujuTopology."""
-
     model: str
+    model_uuid: str
+    application: str
     unit: str
-    app: str
-    # TODO: probably add charm here
-    # ...
+    charm_name: str
 
 
 class ClusterRequirerAppData(DatabagModel):
@@ -83,7 +82,7 @@ class ClusterRequirerAppData(DatabagModel):
 
 class ClusterRequirerUnitData(DatabagModel):
     """ClusterRequirerUnitData."""
-    juju_topology: JujuTopology
+    juju_topology: Topology
     address: str
 
 
@@ -116,7 +115,6 @@ class ClusterRemovedEvent(ops.EventBase):
     Or when the relation data has been wiped.
     """
 
-
 class ClusterProviderEvents(ObjectEvents):
     """Events emitted by the ClusterProvider "-cluster" endpoint wrapper."""
 
@@ -145,7 +143,9 @@ class ClusterProvider(Object):
     ):
         super().__init__(charm, key or endpoint)
         self._charm = charm
-        self.juju_topology = {"unit": self.model.unit.name, "model": self.model.name}
+        self._roles = roles
+        self._meta_roles = meta_roles or {}
+        self.juju_topology = JujuTopology.from_charm(self._charm)
 
         # filter out common unhappy relation states
         self._relations: List[ops.Relation] = [
@@ -208,7 +208,7 @@ class ClusterProvider(Object):
 
     def gather_addresses_by_role(self) -> Dict[str, Set[str]]:
         """Go through the worker's unit databags to collect all the addresses published by the units, by role."""
-        data = collections.defaultdict(set)
+        data: Dict[str, Set[str]] = collections.defaultdict(set)
         for relation in self._relations:
 
             if not relation.app:
@@ -234,16 +234,16 @@ class ClusterProvider(Object):
 
     def gather_addresses(self) -> Set[str]:
         """Go through the worker's unit databags to collect all the addresses published by the units."""
-        data = set()
+        data: Set[str] = set()
         addresses_by_role = self.gather_addresses_by_role()
-        for role, address_set in addresses_by_role.items():
+        for _, address_set in addresses_by_role.items():
             data.update(address_set)
 
         return data
 
     def gather_roles(self) -> Dict[str, int]:
         """Go through the worker's app databags and sum the available application roles."""
-        data:Counter[str] = collections.Counter()
+        data: Counter[str] = collections.Counter()
         for relation in self._relations:
             if relation.app:
                 remote_app_databag = relation.data[relation.app]
@@ -265,14 +265,11 @@ class ClusterProvider(Object):
                 data[worker_role] += role_n
 
         dct = dict(data)
-        # exclude all roles from the count, if any slipped through
-        if Role.all in data:
-            del data[Role.all]
         return dct
-    
+
     def gather_topology(self) -> List[Dict[str, str]]:
         """Gather Topology."""
-        data = []
+        data: List[Dict[str, str]] = []
         for relation in self._relations:
             if not relation.app:
                 continue
@@ -286,9 +283,15 @@ class ClusterProvider(Object):
                     continue
                 worker_topology = {
                     # TODO: these assignments might be wrong
-                    "unit": worker_unit.name,
-                    "app": worker_unit.app.name,
-                    "address": unit_address,
+                    # TODO: why don't we get these from relation data ???
+                    # "unit": worker_unit.name,
+                    # "app": worker_unit.app.name,
+                    # "address": unit_address,
+                    "model": worker_data.juju_topology.model,
+                    "model_uuid": worker_data.juju_topology.model_uuid,
+                    "application": worker_data.juju_topology.application,
+                    "unit": worker_data.juju_topology.unit,
+                    "charm_name": worker_data.juju_topology.charm_name,
                 }
                 data.append(worker_topology)
 
@@ -307,7 +310,7 @@ class ClusterRequirer(Object):
     ):
         super().__init__(charm, key or endpoint)
         self._charm = charm
-        self.juju_topology = {"unit": self.model.unit.name, "model": self.model.name}
+        self.juju_topology = JujuTopology.from_charm(self._charm)
 
         relation = self.model.get_relation(endpoint)
         self.relation: Optional[ops.Relation] = (
@@ -315,13 +318,13 @@ class ClusterRequirer(Object):
         )
 
         self.framework.observe(
-            self._charm.on[endpoint].relation_changed, self._on_cluster_changed
+            self._charm.on[endpoint].relation_changed, self._on_cluster_changed  # type: ignore
         )
         self.framework.observe(
-            self._charm.on[endpoint].relation_created, self._on_cluster_changed
+            self._charm.on[endpoint].relation_created, self._on_cluster_changed  # type: ignore
         )
         self.framework.observe(
-            self._charm.on[endpoint].relation_broken, self._on_cluster_changed
+            self._charm.on[endpoint].relation_broken, self._on_cluster_changed  # type: ignore
         )
 
     def _on_cluster_relation_broken(self, _event: ops.RelationBrokenEvent):
@@ -371,7 +374,8 @@ class ClusterRequirer(Object):
             raise ValueError(f"{url} is an invalid url") from e
 
         databag_model = ClusterRequirerUnitData(
-            juju_topology=self.juju_topology,  # type: ignore
+            # TODO: does this work ???
+            juju_topology=dict(self.juju_topology.as_dict()),  # type: ignore
             address=url,
         )
         relation = self.relation
@@ -386,9 +390,10 @@ class ClusterRequirer(Object):
 
         relation = self.relation
         if relation:
-            # TODO: is it fine to move the meta-roles expansion into the Coordinator ?
-            deduplicated_roles = list(expand_roles(roles))
-            databag_model = ClusterRequirerAppData(roles=deduplicated_roles)
+            # TODO: is it fine to move the meta-roles expansion into the Coordinator ? let's try
+            # deduplicated_roles = list(expand_roles(roles))
+            # databag_model = ClusterRequirerAppData(roles=deduplicated_roles)
+            databag_model = ClusterRequirerAppData(role=','.join(roles))
             databag_model.dump(relation.data[self.model.app])
 
     def _get_data_from_coordinator(self) -> Optional[ClusterProviderAppData]:
@@ -423,3 +428,4 @@ class ClusterRequirer(Object):
         """Fetch certificates secrets ids for the worker config."""
         if self.relation and self.relation.app:
             return self.relation.data[self.relation.app].get("secrets", None)
+        return None
