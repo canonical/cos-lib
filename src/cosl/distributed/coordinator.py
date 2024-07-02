@@ -10,7 +10,7 @@ import os
 import shutil
 import socket
 from functools import partial
-from typing import Any, Callable, Dict, Iterable, List, Optional, Protocol, Set, TypedDict
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Protocol, Set, TypedDict
 
 import ops
 import yaml
@@ -50,12 +50,22 @@ class S3NotFoundError(Exception):
     """Raised when the s3 integration is not present or not ready."""
 
 
+# TODO: figure out how to make this work as a protocol
 class ClusterRolesConfig(Protocol):
     """Worker roles and deployment requirements."""
-    Role: Iterable[str]
-    meta_roles: Dict[str, Iterable[str]]
+    roles: Iterable[str]
+    meta_roles: Mapping[str, Iterable[str]]
     minimal_deployment: Iterable[str]
     recommended_deployment: Dict[str, int]
+
+def validate_roles_config(roles_config: ClusterRolesConfig) -> None:
+    """Assert that all the used roles have been defined."""
+    roles = set(roles_config.roles)
+    assert set(roles_config.meta_roles.keys()).issubset(roles)
+    for role_set in roles_config.meta_roles.values():
+        assert set(role_set).issubset(roles)
+    assert set(roles_config.minimal_deployment).issubset(roles)
+    assert set(roles_config.recommended_deployment.keys()).issubset(roles)
 
 
 _EndpointMapping=TypedDict(
@@ -112,7 +122,7 @@ class Coordinator(ops.Object):
                  ):  # type: ignore
         super().__init__(charm, key="coordinator")
         self._charm = charm
-        self._topology = JujuTopology.from_charm(self._charm)
+        self.topology = JujuTopology.from_charm(self._charm)
         self._external_url = external_url
         self._metrics_port = metrics_port
 
@@ -121,11 +131,12 @@ class Coordinator(ops.Object):
         _endpoints = self._endpoints
         _endpoints.update(endpoints or {})
 
+        validate_roles_config(roles_config)
         self.roles_config = roles_config
 
         # TODO: get and pass the cluster relation name
         self.cluster = ClusterProvider(
-            self._charm, frozenset(roles_config.Role),
+            self._charm, frozenset(roles_config.roles),
             roles_config.meta_roles,
             endpoint=_endpoints["cluster"],
             )
@@ -386,6 +397,7 @@ class Coordinator(ops.Object):
     @property
     def _scrape_jobs(self) -> List[Dict[str, Any]]:
         return self._workers_scrape_jobs + self._nginx_scrape_jobs
+
 
     ##################
     # EVENT HANDLERS #

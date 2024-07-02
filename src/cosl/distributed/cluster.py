@@ -186,7 +186,7 @@ class ClusterProvider(Object):
         privkey_secret_id: Optional[str] = None,
         loki_endpoints: Optional[Dict[str, str]] = None,
     ) -> None:
-        """Publish the  config to all related  worker clusters."""
+        """Publish the config to all related worker clusters."""
         for relation in self._relations:
             if relation:
                 local_app_databag = ClusterProviderAppData(
@@ -295,6 +295,13 @@ class ClusterProvider(Object):
                 data.append(worker_topology)
 
         return data
+
+    def get_address_from_role(self, role: str) -> Optional[str]:
+        """Get datasource address."""
+        addresses_by_role = self.gather_addresses_by_role()
+        if address_set := addresses_by_role.get(role, None):
+            return address_set.pop()
+        return None
 
 class ClusterRequirer(Object):
     """``-cluster`` requirer endpoint wrapper."""
