@@ -213,7 +213,7 @@ class Worker(ops.Object):
     def _running_worker_config(self) -> Optional[Dict[str,Any]]:
         """Return the worker config as dict, or None if retrieval failed."""
         if not self._container.can_connect():
-            logger.debug("Could not connect to Mimir container")
+            logger.debug("Could not connect to the workload container")
             return None
 
         try:
@@ -221,7 +221,7 @@ class Worker(ops.Object):
             return yaml.safe_load(raw_current)
         except (ProtocolError, PathError) as e:
             logger.warning(
-                "Could not check the current Mimir configuration due to "
+                "Could not check the current worker configuration due to "
                 "a failure in retrieving the file: %s",
                 e,
             )

@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 
 NGINX_ORIGINAL_ALERT_RULES_PATH = "./src/prometheus_alert_rules/nginx"
-WORKER_ORIGINAL_ALERT_RULES_PATH = "./src/prometheus_alert_rules/mimir_workers"
+WORKER_ORIGINAL_ALERT_RULES_PATH = "./src/prometheus_alert_rules/workers"
 CONSOLIDATED_ALERT_RULES_PATH = "./src/prometheus_alert_rules/consolidated_rules"
 
 class S3NotFoundError(Exception):
@@ -146,9 +146,10 @@ class Coordinator(ops.Object):
         self._is_coherent = is_coherent
         self._is_recommended = is_recommended
 
-        self.nginx = Nginx(self._charm,
-                           partial(nginx_config, self)  # type:ignore
-                           )
+        self.nginx = Nginx(
+            self._charm,
+            partial(nginx_config, self),
+        )
         self._workers_config_getter = partial(workers_config, self)
 
 
@@ -231,8 +232,8 @@ class Coordinator(ops.Object):
         self.framework.observe(self.s3_requirer.on.credentials_gone, self._on_s3_credentials_gone)
 
         # tracing
-        self.framework.observe(self._charm.on.peers_relation_created, self._on_peers_relation_created)
-        self.framework.observe(self._charm.on.peers_relation_changed, self._on_peers_relation_changed)
+        # self.framework.observe(self._charm.on.peers_relation_created, self._on_peers_relation_created)
+        # self.framework.observe(self._charm.on.peers_relation_changed, self._on_peers_relation_changed)
 
         # logging
         self.framework.observe(self._logging.on.loki_push_api_endpoint_joined, self._on_loki_relation_changed)
@@ -485,16 +486,12 @@ class Coordinator(ops.Object):
             e.add_status(ops.BlockedStatus("[consistency] Missing any worker relation."))
         if not self.is_coherent:
             e.add_status(ops.BlockedStatus("[consistency] Cluster inconsistent."))
+        elif not self.is_recommended:
+            # if is_recommended is None: it means we don't have a recommended deployment criterion.
+            e.add_status(ops.ActiveStatus("[coordinator] Degraded."))
         else:
-            if self.is_clustered:
-                # no issues: tempo is consistent
-                if self.is_recommended is False:
-                    # if is_recommended is None: it means we don't have a recommended deployment criterion.
-                    e.add_status(ops.ActiveStatus("[coordinator] Degraded."))
-                else:
-                    e.add_status(ops.ActiveStatus())
-            else:
-                e.add_status(ops.ActiveStatus())
+            e.add_status(ops.ActiveStatus())
+
 
     ###################
     # UTILITY METHODS #
@@ -575,7 +572,7 @@ class Coordinator(ops.Object):
             alert_rules.add_path(WORKER_ORIGINAL_ALERT_RULES_PATH, recursive=True)
             alert_rules_contents = yaml.dump(alert_rules.as_dict())
 
-            file_name = f"{CONSOLIDATED_ALERT_RULES_PATH}/rendered_{worker['app']}.rules"
+            file_name = f"{CONSOLIDATED_ALERT_RULES_PATH}/rendered_{worker['application']}.rules"
             with open(file_name, "w") as writer:
                 writer.write(alert_rules_contents)
 

@@ -19,7 +19,7 @@ import ops
 import pydantic
 import yaml
 from cosl import JujuTopology
-from cosl.databag_model import DatabagModel
+from cosl.databag_model import DatabagModel, DataValidationError
 
 # The only reason we need the tracing lib is this enum. Not super nice.
 from ops import EventSource, Object, ObjectEvents, RelationCreatedEvent
@@ -58,17 +58,13 @@ class ConfigReceivedEvent(ops.EventBase):
 class ClusterError(Exception):
     """Base class for exceptions raised by this module."""
 
-class DataValidationError(ClusterError):
-    """Raised when relation databag validation fails."""
-
 class DatabagAccessPermissionError(ClusterError):
     """Raised when a follower attempts to write leader settings."""
-
 
 class Topology(pydantic.BaseModel):
     """JujuTopology."""
     model: str
-    model_uuid: str
+    model_uuid: str # TODO: do we need this? we get it for free
     application: str
     unit: str
     charm_name: str
@@ -89,7 +85,7 @@ class ClusterProviderAppData(DatabagModel):
     """ClusterProviderAppData."""
 
     ### worker node configuration
-    worker_config: Optional[str] # TODO: remove the Optional
+    worker_config: str
     """The whole worker workload configuration, whatever it is. E.g. yaml-encoded things."""
 
     ### self-monitoring stuff
@@ -154,6 +150,9 @@ class ClusterProvider(Object):
         # we coalesce all -cluster-relation-* events into a single cluster-changed API.
         # the coordinator uses a common exit hook reconciler, that's why.
         self.framework.observe(
+            self._charm.on[endpoint].relation_created, self._on_cluster_changed
+        )
+        self.framework.observe(
             self._charm.on[endpoint].relation_joined, self._on_cluster_changed
         )
         self.framework.observe(
@@ -200,10 +199,21 @@ class ClusterProvider(Object):
 
     @property
     def has_workers(self) -> bool:
-        """Return whether this  coordinator has any connected workers."""
+        """Return whether this coordinator has any connected workers."""
         # we use the presence of relations instead of addresses, because we want this
         # check to fail early
         return bool(self._relations)
+
+    def _expand_roles(self, role_string: str) -> Set[str]:
+        """Expand the meta-roles from a comma-separated list of roles."""
+        expanded_roles: Set[str] = set()
+        for role in role_string.split(","):
+            if role in self._meta_roles:
+                expanded_roles.update(self._meta_roles[role])
+            else:
+                expanded_roles.update(role)
+        return expanded_roles
+
 
     def gather_addresses_by_role(self) -> Dict[str, Set[str]]:
         """Go through the worker's unit databags to collect all the addresses published by the units, by role."""
@@ -224,7 +234,8 @@ class ClusterProvider(Object):
                 try:
                     worker_data = ClusterRequirerUnitData.load(relation.data[worker_unit])
                     unit_address = worker_data.address
-                    data[worker_app_data.role].add(unit_address)
+                    for role in self._expand_roles(worker_app_data.role):
+                        data[role].add(unit_address)
                 except DataValidationError as e:
                     log.info(f"invalid databag contents: {e}")
                     continue
@@ -251,23 +262,19 @@ class ClusterProvider(Object):
                         remote_app_databag
                     ).role
                 except DataValidationError as e:
-                    log.debug(f"invalid databag contents: {e}")
+                    log.error(f"invalid databag contents: {e}")
                     continue
 
                 # the number of units with each role is the number of remote units
                 role_n = len(relation.units)  # exclude this unit
-                if worker_role in self._meta_roles:
-                    for role in self._meta_roles[worker_role]:
-                        data[role] += role_n
-                    continue
-
-                data[worker_role] += role_n
+                for role in self._expand_roles(worker_role):
+                    data[role] += role_n
 
         dct = dict(data)
         return dct
 
     def gather_topology(self) -> List[Dict[str, str]]:
-        """Gather Topology."""
+        """Gather Topology by unit."""
         data: List[Dict[str, str]] = []
         for relation in self._relations:
             if not relation.app:
@@ -285,7 +292,7 @@ class ClusterProvider(Object):
                     # TODO: why don't we get these from relation data ???
                     # "unit": worker_unit.name,
                     # "app": worker_unit.app.name,
-                    # "address": unit_address,
+                    "address": unit_address,
                     "model": worker_data.juju_topology.model,
                     "model_uuid": worker_data.juju_topology.model_uuid,
                     "application": worker_data.juju_topology.application,
@@ -406,6 +413,7 @@ class ClusterRequirer(Object):
         """Fetch the contents of the doordinator databag."""
         data: Optional[ClusterProviderAppData] = None
         relation = self.relation
+        # TODO: does this need a leader guard ??? maybe?
         if relation:
             try:
                 databag = relation.data[relation.app]  # type: ignore # all checks are done in __init__

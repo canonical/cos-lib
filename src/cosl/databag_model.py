@@ -93,6 +93,9 @@ else:
             # Custom config key: whether to nest the whole datastructure (as json)
             # under a field or spread it out at the toplevel.
             _NEST_UNDER=None,
+            # TODO: Check if this is necessary / good to have
+            # Protected namespaces: will warn if keys starts with those
+            protected_namespaces=(),
         )  # type: ignore
         """Pydantic config."""
 
