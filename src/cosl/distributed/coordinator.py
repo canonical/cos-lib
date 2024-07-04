@@ -16,7 +16,7 @@ import ops
 import yaml
 from cosl import AlertRules
 from cosl.distributed.cluster import ClusterProvider
-from cosl.distributed.nginx import NGINX_PROMETHEUS_EXPORTER_PORT, Nginx
+from cosl.distributed.nginx import NGINX_PROMETHEUS_EXPORTER_PORT, Nginx, NginxPrometheusExporter
 from cosl.helpers import check_libs_installed
 from cosl.juju_topology import JujuTopology
 
@@ -30,7 +30,6 @@ check_libs_installed(
         "charms.loki_k8s.v1.loki_push_api",
         "charms.tempo_k8s.v2.tracing",
     )
-
 
 from charms.data_platform_libs.v0.s3 import S3Requirer
 from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
@@ -50,7 +49,6 @@ class S3NotFoundError(Exception):
     """Raised when the s3 integration is not present or not ready."""
 
 
-# TODO: figure out how to make this work as a protocol
 class ClusterRolesConfig(Protocol):
     """Worker roles and deployment requirements."""
     roles: Iterable[str]
@@ -94,7 +92,7 @@ _EndpointMappingOverrides=TypedDict(
 
 class Coordinator(ops.Object):
     """Charming coordinator."""
-    _endpoints:_EndpointMapping = {
+    _endpoints: _EndpointMapping = {
                  "certificates": "certificates",
                  "cluster": "cluster",
                  "tracing": "tracing",
@@ -115,7 +113,6 @@ class Coordinator(ops.Object):
                  nginx_config: Callable[["Coordinator"], str],
                  workers_config: Callable[["Coordinator"], str],
 
-                 nginx_container: str = "nginx",
                  endpoints: Optional[_EndpointMappingOverrides] = None,
                  is_coherent: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
                  is_recommended: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
@@ -126,22 +123,16 @@ class Coordinator(ops.Object):
         self._external_url = external_url
         self._metrics_port = metrics_port
 
-        self._nginx_container = self._charm.unit.get_container(nginx_container)
-
-        _endpoints = self._endpoints
-        _endpoints.update(endpoints or {})
-        # TODO: probably change this to only have self._endpoints
-        self._endpoints = _endpoints
+        self._endpoints.update(endpoints or {})
 
         validate_roles_config(roles_config)
         self.roles_config = roles_config
 
-        # TODO: get and pass the cluster relation name
         self.cluster = ClusterProvider(
             self._charm, frozenset(roles_config.roles),
             roles_config.meta_roles,
-            endpoint=_endpoints["cluster"],
-            )
+            endpoint=self._endpoints["cluster"],
+        )
 
         self._is_coherent = is_coherent
         self._is_recommended = is_recommended
@@ -151,34 +142,34 @@ class Coordinator(ops.Object):
             partial(nginx_config, self),
         )
         self._workers_config_getter = partial(workers_config, self)
-
+        self.nginx_exporter = NginxPrometheusExporter(self._charm)
 
         self.cert_handler = CertHandler(
             self._charm,
-            certificates_relation_name=_endpoints['certificates'],
+            certificates_relation_name=self._endpoints['certificates'],
             # let's assume we don't need the peer relation as all coordinator charms will assume juju secrets
             key="coordinator-server-cert",
             sans=[socket.getfqdn()],
         )
 
-        self.s3_requirer = S3Requirer(self._charm, _endpoints['s3'], s3_bucket_name)
+        self.s3_requirer = S3Requirer(self._charm, self._endpoints['s3'], s3_bucket_name)
 
         self._grafana_dashboards = GrafanaDashboardProvider(
-            self._charm, relation_name=_endpoints["grafana-dashboards"]
+            self._charm, relation_name=self._endpoints["grafana-dashboards"]
         )
 
-        self._logging = LokiPushApiConsumer(self._charm, relation_name=_endpoints["logging"])
+        self._logging = LokiPushApiConsumer(self._charm, relation_name=self._endpoints["logging"])
 
         # Provide ability for this to be scraped by Prometheus using prometheus_scrape
         refresh_events = [self._charm.on.update_status, self.cluster.on.changed]
-        # TODO: add cluster joined/departed/broken events to refresh_events ???
+        # TODO: do we need to add cluster joined/departed/broken events to refresh_events ???
         if self.cert_handler:
             refresh_events.append(self.cert_handler.on.cert_changed)
 
         self._render_alert_rules()
         self._scraping = MetricsEndpointProvider(
             self._charm,
-            relation_name=_endpoints["metrics"],
+            relation_name=self._endpoints["metrics"],
             alert_rules_path=CONSOLIDATED_ALERT_RULES_PATH,
             jobs=self._scrape_jobs,
             external_url=self._external_url,
@@ -187,21 +178,22 @@ class Coordinator(ops.Object):
 
         self.tracing = TracingEndpointRequirer(
             self._charm,
-            relation_name=_endpoints['tracing'],
+            relation_name=self._endpoints['tracing'],
             protocols=["otlp_http"]
         )
 
         # We always listen to collect-status
         self.framework.observe(self._charm.on.collect_unit_status, self._on_collect_unit_status)
 
-        # TODO: add warning about no workers
-        if self.workers_count == 0:
+
+        # If the cluster isn't ready, refuse to handle any other event as we can't possibly know what to do
+        if self.cluster.workers_count == 0:
             logger.warning(
                 f"Incoherent deployment. {charm.unit.name} is missing relation to workers. "
                 "This charm will be unresponsive and refuse to handle any event until "
                 "the situation is resolved by the cloud admin, to avoid data loss."
             )
-            return  # refuse to handle any other event as we can't possibly know what to do.
+            return
         if not self.is_coherent:
             logger.error(
                 f"Incoherent deployment. {charm.unit.name} will be shutting down. "
@@ -209,14 +201,15 @@ class Coordinator(ops.Object):
                 "This charm will be unresponsive and refuse to handle any event until "
                 "the situation is resolved by the cloud admin, to avoid data loss."
             )
-            return  # refuse to handle any other event as we can't possibly know what to do.
-        if self.workers_count > 1 and not self.s3_ready:
+            return
+        if self.cluster.workers_count > 1 and not self.s3_ready:
             logger.error(
                 f"Incoherent deployment. {charm.unit.name} will be shutting down. "
                 "This likely means you need to add an s3 integration. "
                 "This charm will be unresponsive and refuse to handle any event until "
                 "the situation is resolved by the cloud admin, to avoid data loss."
             )
+            return
 
         # lifecycle
         self.framework.observe(self._charm.on.config_changed, self._on_config_changed)
@@ -293,13 +286,6 @@ class Coordinator(ops.Object):
         # we don't have a definition of recommended: return None
         return None
 
-
-    @property
-    def is_clustered(self) -> bool:
-        """Check whether this coordinator has worker nodes connected to it."""
-        return self.cluster.has_workers
-
-
     @property
     def hostname(self) -> str:
         """Unit's hostname."""
@@ -343,6 +329,8 @@ class Coordinator(ops.Object):
 
     @property
     def peer_addresses(self) -> List[str]:
+        """If a peer relation is present, return the addresses of the peers."""
+        # TODO: do we need this? maybe for @tempo ???
         peers = self._peers
         relation = self.model.get_relation("peers")
         # get unit addresses for all the other units from a databag
@@ -394,7 +382,6 @@ class Coordinator(ops.Object):
                 # replaced by the coordinator topology
                 # https://github.com/canonical/prometheus-k8s-operator/issues/571
                 "relabel_configs": [
-                    # TODO: also pass the charm name in the worker relation data
                     {"target_label": "juju_charm", "replacement": worker["charm_name"]},
                     {"target_label": "juju_unit", "replacement": worker["unit"]},
                     {"target_label": "juju_application", "replacement": worker["application"]},
@@ -415,16 +402,6 @@ class Coordinator(ops.Object):
     @property
     def _scrape_jobs(self) -> List[Dict[str, Any]]:
         return self._workers_scrape_jobs + self._nginx_scrape_jobs
-
-    @property
-    def workers_count(self) -> int:
-        cluster_relations = self.model.relations.get(self._endpoints["cluster"], [])
-        remote_units_count = sum(
-            len(relation.units)
-            for relation in cluster_relations
-            if relation.app != self.model.app
-        )
-        return remote_units_count
 
 
     ##################
@@ -481,8 +458,7 @@ class Coordinator(ops.Object):
     def _on_collect_unit_status(self, e: ops.CollectStatusEvent):
         # todo add [nginx.workload] statuses
 
-        # TODO: should we set these statuses on the leader only, or on all units?
-        if self.workers_count == 0:
+        if self.cluster.workers_count == 0:
             e.add_status(ops.BlockedStatus("[consistency] Missing any worker relation."))
         if not self.is_coherent:
             e.add_status(ops.BlockedStatus("[consistency] Cluster inconsistent."))
@@ -537,6 +513,7 @@ class Coordinator(ops.Object):
             return
 
         self.nginx.configure_pebble_layer()
+        self.nginx_exporter.configure_pebble_layer()
         # we share the certs in plaintext as they're not sensitive information
         # On every function call, we always publish everything to the databag; however, if there
         # are no changes, Juju will notice there's no delta and do nothing

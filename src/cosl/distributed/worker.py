@@ -69,17 +69,14 @@ class Worker(ops.Object):
         self.topology = JujuTopology.from_charm(self._charm)
         self._container = self._charm.unit.get_container(name)
 
-        _endpoints = self._endpoints
-        _endpoints.update(endpoints or {})
-        # TODO: change this to only have self._endpoints
-        self._endpoints = _endpoints
+        self._endpoints.update(endpoints or {})
 
         self.ports = ports
         self._charm.unit.set_ports(*ports)
 
         self.cluster = ClusterRequirer(
             charm=self._charm,
-            endpoint=_endpoints["cluster"],
+            endpoint=self._endpoints["cluster"],
         )
 
         self._log_forwarder = ManualLogForwarder(
@@ -94,7 +91,7 @@ class Worker(ops.Object):
 
         self.tracing = TracingEndpointRequirer(
             self._charm,
-            relation_name=_endpoints['tracing'],
+            relation_name=self._endpoints["tracing"],
             protocols=["otlp_http"],
         )
 
@@ -107,14 +104,13 @@ class Worker(ops.Object):
         self.framework.observe(self.cluster.on.config_received, self._on_worker_config_received)
         self.framework.observe(self.cluster.on.created, self._on_cluster_created)
         self.framework.observe(self.cluster.on.removed, self._log_forwarder.disable_logging)
-        # TODO: does this work ???
+
         self.framework.observe(self._charm.on[self._name].pebble_ready, self._on_pebble_ready)
 
 
     # Event handlers
 
     def _on_pebble_ready(self, _: ops.PebbleReadyEvent):
-        logger.warn("PEBBLE READY FROM worker.py WORKS!") # TODO: remove this log line
         self._update_config()
 
     def _on_worker_config_received(self, _: ops.EventBase):
@@ -269,22 +265,18 @@ class Worker(ops.Object):
             self._container.push(KEY_FILE, private_key or "", make_dirs=True)
             self._container.push(CLIENT_CA_FILE, ca_cert or "", make_dirs=True)
             self._container.push(ca_cert_path, ca_cert or "", make_dirs=True)
-
-            self._container.exec(["update-ca-certificates", "--fresh"]).wait()
-            subprocess.run(["update-ca-certificates", "--fresh"])
-
-            return True
         else:
             self._container.remove_path(CERT_FILE, recursive=True)
             self._container.remove_path(KEY_FILE, recursive=True)
             self._container.remove_path(CLIENT_CA_FILE, recursive=True)
             self._container.remove_path(ca_cert_path, recursive=True)
-
             ca_cert_path.unlink(missing_ok=True)
-            self._container.exec(["update-ca-certificates", "--fresh"]).wait()
-            subprocess.run(["update-ca-certificates", "--fresh"])
 
-            return True
+        self._container.exec(["update-ca-certificates", "--fresh"]).wait()
+        subprocess.run(["update-ca-certificates", "--fresh"])
+
+        return True
+
 
     def restart(self):
         """Restart the pebble service or start if not already running."""

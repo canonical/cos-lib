@@ -31,6 +31,7 @@ class Nginx:
 
     @property
     def are_certificates_on_disk(self) -> bool:
+        """Return True if the certificates files are on disk."""
         return (
             self._container.can_connect()
             and self._container.exists(CERT_PATH)
@@ -39,6 +40,7 @@ class Nginx:
         )
 
     def configure_tls(self, private_key:str, server_cert:str, ca_cert:str) -> None:
+        """Save the certificates file to disk and run update-ca-certificates."""
         if self._container.can_connect():
             self._container.push(KEY_PATH, private_key)
             self._container.push(CERT_PATH, server_cert)
@@ -46,6 +48,7 @@ class Nginx:
             self._container.exec(["update-ca-certificates", "--fresh"])
 
     def delete_certificates(self) -> None:
+        """Delete the certificate files from disk and run update-ca-certificates."""
         if self._container.can_connect():
             self._container.remove_path(CERT_PATH, recursive=True)
             self._container.remove_path(KEY_PATH, recursive=True)
@@ -70,21 +73,9 @@ class Nginx:
 
         return current_config != new_config
 
-    def restart(self) -> None:
-        """Restart the pebble service or start if not already running."""
-        # TODO: change this to reload the config without restarting
+    def reload(self) -> None:
+        """Reload the nginx config without restarting the service."""
         self._container.exec(["nginx", "-s", "reload"])
-        # if not self._container.exists(self.config_path):
-        #     logger.error("cannot restart nginx: config file doesn't exist (yet).")
-
-        # try:
-        #     if self._container.get_service(self._name).is_running():
-        #         self._container.restart(self._name)
-        #     else:
-        #         self._container.start(self._name)
-        # except pebble.ChangeError as e:
-        #     logger.error(f"failed to (re)start nginx job: {e}", exc_info=True)
-        #     return
 
     def configure_pebble_layer(self) -> None:
         """Configure pebble layer."""
@@ -99,7 +90,7 @@ class Nginx:
 
             if should_restart:
                 logger.info("new nginx config: restarting the service")
-                self.restart()
+                self.reload()
 
     @property
     def layer(self) -> pebble.Layer:

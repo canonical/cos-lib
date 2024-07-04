@@ -64,7 +64,7 @@ class DatabagAccessPermissionError(ClusterError):
 class Topology(pydantic.BaseModel):
     """JujuTopology."""
     model: str
-    model_uuid: str # TODO: do we need this? we get it for free
+    model_uuid: str # TODO: do we need this? we get it for free but cause pydantic warnings
     application: str
     unit: str
     charm_name: str
@@ -198,11 +198,19 @@ class ClusterProvider(Object):
                 local_app_databag.dump(relation.data[self.model.app])
 
     @property
-    def has_workers(self) -> bool:
-        """Return whether this coordinator has any connected workers."""
+    def workers_count(self) -> int:
+        """Return how many workers are connected to the coordinator."""
         # we use the presence of relations instead of addresses, because we want this
         # check to fail early
-        return bool(self._relations)
+        if not self._relations:
+            return 0
+        remote_units_count = sum(
+            len(relation.units)
+            for relation in self._relations
+            if relation.app != self.model.app
+        )
+        return remote_units_count
+
 
     def _expand_roles(self, role_string: str) -> Set[str]:
         """Expand the meta-roles from a comma-separated list of roles."""
@@ -213,7 +221,6 @@ class ClusterProvider(Object):
             else:
                 expanded_roles.update(role)
         return expanded_roles
-
 
     def gather_addresses_by_role(self) -> Dict[str, Set[str]]:
         """Go through the worker's unit databags to collect all the addresses published by the units, by role."""
@@ -288,10 +295,6 @@ class ClusterProvider(Object):
                     log.info(f"invalid databag contents: {e}")
                     continue
                 worker_topology = {
-                    # TODO: these assignments might be wrong
-                    # TODO: why don't we get these from relation data ???
-                    # "unit": worker_unit.name,
-                    # "app": worker_unit.app.name,
                     "address": unit_address,
                     "model": worker_data.juju_topology.model,
                     "model_uuid": worker_data.juju_topology.model_uuid,
@@ -387,7 +390,6 @@ class ClusterRequirer(Object):
             raise ValueError(f"{url} is an invalid url") from e
 
         databag_model = ClusterRequirerUnitData(
-            # TODO: does this work ???
             juju_topology=dict(self.juju_topology.as_dict()),  # type: ignore
             address=url,
         )
@@ -403,9 +405,6 @@ class ClusterRequirer(Object):
 
         relation = self.relation
         if relation:
-            # TODO: is it fine to move the meta-roles expansion into the Coordinator ? let's try
-            # deduplicated_roles = list(expand_roles(roles))
-            # databag_model = ClusterRequirerAppData(roles=deduplicated_roles)
             databag_model = ClusterRequirerAppData(role=','.join(roles))
             databag_model.dump(relation.data[self.model.app])
 
