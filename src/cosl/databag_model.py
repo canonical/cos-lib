@@ -12,6 +12,9 @@ import pydantic
 
 logger = logging.getLogger(__name__)
 
+# Note: MutableMapping is imported from the typing module and not collections.abc
+# because subscripting collections.abc.MutableMapping was added in python 3.9, but
+# most of our charms are based on 20.04, which has python 3.8.
 
 _RawDatabag = MutableMapping[str, str]
 
@@ -23,7 +26,7 @@ PYDANTIC_IS_V1 = int(pydantic.version.VERSION.split(".")[0]) < 2
 if PYDANTIC_IS_V1:
 
     class DatabagModel(pydantic.BaseModel):  # type: ignore
-        """Base databag model."""
+        """Base class for serializing and de-serializing relation data using a schema."""
 
         class Config:
             """Pydantic config."""
@@ -58,7 +61,7 @@ if PYDANTIC_IS_V1:
                 logger.debug(msg, exc_info=True)
                 raise DataValidationError(msg) from e
 
-        def dump(self, databag: Optional[_RawDatabag] = None, clear: bool = True):
+        def dump(self, databag: Optional[_RawDatabag] = None, clear: bool = True) -> None:
             """Write the contents of this model to Juju databag.
 
             :param databag: the databag to write the data to.
@@ -72,12 +75,10 @@ if PYDANTIC_IS_V1:
 
             if self._NEST_UNDER:
                 databag[self._NEST_UNDER] = self.json(by_alias=True, exclude_defaults=True) # type: ignore
-                return databag
 
             for key, value in self.dict(by_alias=True, exclude_defaults=True).items():  # type: ignore
                 databag[key] = json.dumps(value)
 
-            return databag
 
 else:
     from pydantic import ConfigDict
@@ -125,7 +126,7 @@ else:
                 logger.debug(msg, exc_info=True)
                 raise DataValidationError(msg) from e
 
-        def dump(self, databag: Optional[_RawDatabag] = None, clear: bool = True):
+        def dump(self, databag: Optional[_RawDatabag] = None, clear: bool = True) -> None:
             """Write the contents of this model to Juju databag.
 
             :param databag: the databag to write the data to.
@@ -136,15 +137,12 @@ else:
 
             if databag is None:
                 databag = {}
-            nest_under = self.model_config.get("_NEST_UNDER")
-            if nest_under:
+            if nest_under := self.model_config.get("_NEST_UNDER"):
                 databag[nest_under] = self.model_dump_json(  # type: ignore
                     by_alias=True,
                     # skip keys whose values are default
                     exclude_defaults=True,
                 )
-                return databag
 
             dct = self.model_dump(mode="json", by_alias=True, exclude_defaults=True)  # type: ignore
             databag.update({k: json.dumps(v) for k, v in dct.items()})
-            return databag

@@ -524,7 +524,7 @@ class Coordinator(ops.Object):
             **({
               "ca_cert" : self.cert_handler.ca_cert,
               "server_cert" : self.cert_handler.server_cert,
-              "privkey_secret_id" : self.cluster.publish_privkey(VAULT_SECRET_LABEL),
+              "privkey_secret_id" : self.cluster.grant_privkey(VAULT_SECRET_LABEL),
             } if self.tls_available else {}),
         )
 

@@ -61,8 +61,8 @@ class ClusterError(Exception):
 class DatabagAccessPermissionError(ClusterError):
     """Raised when a follower attempts to write leader settings."""
 
-class Topology(pydantic.BaseModel):
-    """JujuTopology."""
+class _Topology(pydantic.BaseModel):
+    """Juju topology information."""
     model: str
     model_uuid: str # TODO: do we need this? we get it for free but cause pydantic warnings
     application: str
@@ -71,18 +71,18 @@ class Topology(pydantic.BaseModel):
 
 
 class ClusterRequirerAppData(DatabagModel):
-    """ClusterRequirerAppData."""
+    """App data that the worker sends to the coordinator."""
     role: str
 
 
 class ClusterRequirerUnitData(DatabagModel):
-    """ClusterRequirerUnitData."""
-    juju_topology: Topology
+    """Unit data the worker sends to the coordinator."""
+    juju_topology: _Topology
     address: str
 
 
 class ClusterProviderAppData(DatabagModel):
-    """ClusterProviderAppData."""
+    """App data the the coordinator sends to the worker."""
 
     ### worker node configuration
     worker_config: str
@@ -168,7 +168,7 @@ class ClusterProvider(Object):
     def _on_cluster_changed(self, _: ops.EventBase) -> None:
         self.on.changed.emit()
 
-    def publish_privkey(self, label: str) -> str:
+    def grant_privkey(self, label: str) -> str:
         """Grant the secret containing the privkey to all relations, and return the secret ID."""
         secret = self.model.get_secret(label=label)
         for relation in self._relations:
@@ -281,7 +281,7 @@ class ClusterProvider(Object):
         return dct
 
     def gather_topology(self) -> List[Dict[str, str]]:
-        """Gather Topology by unit."""
+        """Gather Juju topology by unit."""
         data: List[Dict[str, str]] = []
         for relation in self._relations:
             if not relation.app:

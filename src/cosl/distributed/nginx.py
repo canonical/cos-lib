@@ -75,7 +75,8 @@ class Nginx:
 
     def reload(self) -> None:
         """Reload the nginx config without restarting the service."""
-        self._container.exec(["nginx", "-s", "reload"])
+        if self._container.can_connect():
+            self._container.exec(["nginx", "-s", "reload"])
 
     def configure_pebble_layer(self) -> None:
         """Configure pebble layer."""
