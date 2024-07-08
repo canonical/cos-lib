@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
+"""Generic worker for a distributed charm deployment."""
 
 import json
 import logging
@@ -34,34 +35,29 @@ CLIENT_CA_FILE = "/etc/worker/ca.cert"
 
 logger = logging.getLogger(__name__)
 
-_EndpointMapping=TypedDict(
-    '_EndpointMapping',
-    {'cluster':str,
-     'tracing':str},
-    total=True
+_EndpointMapping = TypedDict("_EndpointMapping", {"cluster": str, "tracing": str}, total=True)
+
+_EndpointMappingOverrides = TypedDict(
+    "_EndpointMappingOverrides", {"cluster": str, "tracing": str}, total=False
 )
 
-_EndpointMappingOverrides=TypedDict(
-    '_EndpointMappingOverrides',
-    {'cluster':str,
-     'tracing':str},
-    total=False
-)
 
 class Worker(ops.Object):
-    _endpoints:_EndpointMapping = {
+    """Charming worker."""
+
+    _endpoints: _EndpointMapping = {
         "cluster": "cluster",
         "tracing": "tracing",
     }
 
-    def __init__(self,
-                 charm: ops.CharmBase,
-                 name: str, # name of the workload container and service
-                 ports: Iterable[int],
-                 pebble_layer: Callable[["Worker"], Layer],
-
-                 endpoints: Optional[_EndpointMappingOverrides] = None,
-                 ):
+    def __init__(
+        self,
+        charm: ops.CharmBase,
+        name: str,  # name of the workload container and service
+        ports: Iterable[int],
+        pebble_layer: Callable[["Worker"], Layer],
+        endpoints: Optional[_EndpointMappingOverrides] = None,
+    ):
         super().__init__(charm, key="worker")
         self._charm = charm
         self._name = name
@@ -86,7 +82,7 @@ class Worker(ops.Object):
                 self.cluster.on.config_received,
                 self.cluster.on.created,
                 self.cluster.on.removed,
-            ]
+            ],
         )
 
         self.tracing = TracingEndpointRequirer(
@@ -94,7 +90,6 @@ class Worker(ops.Object):
             relation_name=self._endpoints["tracing"],
             protocols=["otlp_http"],
         )
-
 
         # Event listeners
         self.framework.observe(self._charm.on.config_changed, self._on_config_changed)
@@ -106,7 +101,6 @@ class Worker(ops.Object):
         self.framework.observe(self.cluster.on.removed, self._log_forwarder.disable_logging)
 
         self.framework.observe(self._charm.on[self._name].pebble_ready, self._on_pebble_ready)
-
 
     # Event handlers
 
@@ -137,9 +131,7 @@ class Worker(ops.Object):
         if not self._container.can_connect():
             e.add_status(WaitingStatus(f"Waiting for `{self._name}` container"))
         if not self.model.get_relation(self._endpoints["cluster"]):
-            e.add_status(
-                BlockedStatus("Missing relation to a coordinator charm")
-            )
+            e.add_status(BlockedStatus("Missing relation to a coordinator charm"))
         elif not self.cluster.relation:
             e.add_status(WaitingStatus("Cluster relation not ready"))
         if not self.cluster.get_worker_config():
@@ -153,11 +145,11 @@ class Worker(ops.Object):
     def roles(self) -> List[str]:
         """Return a list of the roles this worker should take on."""
         existing_roles = [
-            role.removeprefix("role-") for role in self._charm.config.keys() if role.startswith("role-")
+            role.removeprefix("role-")
+            for role in self._charm.config.keys()
+            if role.startswith("role-")
         ]
-        roles: List[str] = [
-            role for role in existing_roles if self._charm.config[f"role-{role}"]
-        ]
+        roles: List[str] = [role for role in existing_roles if self._charm.config[f"role-{role}"]]
         return roles
 
     def _update_config(self) -> None:
@@ -172,7 +164,6 @@ class Worker(ops.Object):
 
         if restart:
             self.restart()
-
 
     def _set_pebble_layer(self) -> bool:
         """Set Pebble layer.
@@ -206,7 +197,7 @@ class Worker(ops.Object):
         if self.cluster.get_worker_config():
             self._update_config()
 
-    def _running_worker_config(self) -> Optional[Dict[str,Any]]:
+    def _running_worker_config(self) -> Optional[Dict[str, Any]]:
         """Return the worker config as dict, or None if retrieval failed."""
         if not self._container.can_connect():
             logger.debug("Could not connect to the workload container")
@@ -277,7 +268,6 @@ class Worker(ops.Object):
 
         return True
 
-
     def restart(self):
         """Restart the pebble service or start if not already running."""
         if not self._container.exists(CONFIG_FILE):
@@ -345,4 +335,3 @@ class ManualLogForwarder(ops.Object):
             _PebbleLogClient.disable_inactive_endpoints(
                 container=container, active_endpoints={}, topology=self._topology
             )
-

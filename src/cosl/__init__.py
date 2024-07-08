@@ -3,10 +3,10 @@
 
 """Utils for observability Juju charms."""
 
+from .coordinated_workers.cluster import ClusterProvider, ClusterRequirer
+from .coordinated_workers.coordinator import Coordinator
+from .coordinated_workers.worker import Worker
 from .cos_tool import CosTool
-from .distributed.cluster import ClusterProvider, ClusterRequirer
-from .distributed.coordinator import Coordinator
-from .distributed.worker import Worker
 from .grafana_dashboard import GrafanaDashboard
 from .juju_topology import JujuTopology
 from .mandatory_relation_pairs import MandatoryRelationPairs

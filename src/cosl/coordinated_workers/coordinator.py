@@ -15,21 +15,21 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Proto
 import ops
 import yaml
 from cosl import AlertRules
-from cosl.distributed.cluster import ClusterProvider
-from cosl.distributed.nginx import NGINX_PROMETHEUS_EXPORTER_PORT, Nginx, NginxPrometheusExporter
+from cosl.coordinated_workers.interface import ClusterProvider
+from cosl.coordinated_workers.nginx import Nginx, NginxMappingOverrides, NginxPrometheusExporter
 from cosl.helpers import check_libs_installed
 from cosl.juju_topology import JujuTopology
 
 check_libs_installed(
-        "charms.data_platform_libs.v0.s3",
-        "charms.grafana_k8s.v0.grafana_source",
-        "charms.observability_libs.v1.cert_handler",
-        "charms.grafana_k8s.v0.grafana_dashboard",
-        "charms.observability_libs.v1.cert_handler",
-        "charms.prometheus_k8s.v0.prometheus_scrape",
-        "charms.loki_k8s.v1.loki_push_api",
-        "charms.tempo_k8s.v2.tracing",
-    )
+    "charms.data_platform_libs.v0.s3",
+    "charms.grafana_k8s.v0.grafana_source",
+    "charms.observability_libs.v1.cert_handler",
+    "charms.grafana_k8s.v0.grafana_dashboard",
+    "charms.observability_libs.v1.cert_handler",
+    "charms.prometheus_k8s.v0.prometheus_scrape",
+    "charms.loki_k8s.v1.loki_push_api",
+    "charms.tempo_k8s.v2.tracing",
+)
 
 from charms.data_platform_libs.v0.s3 import S3Requirer
 from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
@@ -45,16 +45,19 @@ NGINX_ORIGINAL_ALERT_RULES_PATH = "./src/prometheus_alert_rules/nginx"
 WORKER_ORIGINAL_ALERT_RULES_PATH = "./src/prometheus_alert_rules/workers"
 CONSOLIDATED_ALERT_RULES_PATH = "./src/prometheus_alert_rules/consolidated_rules"
 
+
 class S3NotFoundError(Exception):
     """Raised when the s3 integration is not present or not ready."""
 
 
 class ClusterRolesConfig(Protocol):
     """Worker roles and deployment requirements."""
+
     roles: Iterable[str]
     meta_roles: Mapping[str, Iterable[str]]
     minimal_deployment: Iterable[str]
     recommended_deployment: Dict[str, int]
+
 
 def validate_roles_config(roles_config: ClusterRolesConfig) -> None:
     """Assert that all the used roles have been defined."""
@@ -66,57 +69,62 @@ def validate_roles_config(roles_config: ClusterRolesConfig) -> None:
     assert set(roles_config.recommended_deployment.keys()).issubset(roles)
 
 
-_EndpointMapping=TypedDict(
-    '_EndpointMapping',
-    {'certificates':str,
-    'cluster':str,
-    'tracing':str,
-    'logging':str,
-    'grafana-dashboards':str,
-    'metrics':str,
-    's3':str},
-    total=True
+_EndpointMapping = TypedDict(
+    "_EndpointMapping",
+    {
+        "certificates": str,
+        "cluster": str,
+        "tracing": str,
+        "logging": str,
+        "grafana-dashboards": str,
+        "metrics": str,
+        "s3": str,
+    },
+    total=True,
 )
 
-_EndpointMappingOverrides=TypedDict(
-    '_EndpointMappingOverrides',
-    {'certificates':str,
-    'cluster':str,
-    'tracing':str,
-    'logging':str,
-    'grafana-dashboards':str,
-    'metrics':str,
-    's3':str},
-    total=False
+_EndpointMappingOverrides = TypedDict(
+    "_EndpointMappingOverrides",
+    {
+        "certificates": str,
+        "cluster": str,
+        "tracing": str,
+        "logging": str,
+        "grafana-dashboards": str,
+        "metrics": str,
+        "s3": str,
+    },
+    total=False,
 )
+
 
 class Coordinator(ops.Object):
     """Charming coordinator."""
+
     _endpoints: _EndpointMapping = {
-                 "certificates": "certificates",
-                 "cluster": "cluster",
-                 "tracing": "tracing",
-                 "logging": "logging",
-                 "grafana-dashboards": "grafana-dashboards",
-                 "metrics": "metrics-endpoint",
-                 "s3": "s3",
-        }
+        "certificates": "certificates",
+        "cluster": "cluster",
+        "tracing": "tracing",
+        "logging": "logging",
+        "grafana-dashboards": "grafana-dashboards",
+        "metrics": "metrics-endpoint",
+        "s3": "s3",
+    }
 
-    def __init__(self,
-                 charm: ops.CharmBase,
-                 roles_config: ClusterRolesConfig,
-
-                 s3_bucket_name: str,
-                 external_url: str, # the ingressed url if we have ingress, else fqdn
-                 metrics_port: str,
-
-                 nginx_config: Callable[["Coordinator"], str],
-                 workers_config: Callable[["Coordinator"], str],
-
-                 endpoints: Optional[_EndpointMappingOverrides] = None,
-                 is_coherent: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
-                 is_recommended: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
-                 ):  # type: ignore
+    def __init__(
+        self,
+        charm: ops.CharmBase,
+        roles_config: ClusterRolesConfig,
+        s3_bucket_name: str,
+        external_url: str,  # the ingressed url if we have ingress, else fqdn
+        metrics_port: str,
+        nginx_config: Callable[["Coordinator"], str],
+        workers_config: Callable[["Coordinator"], str],
+        endpoints: Optional[_EndpointMappingOverrides] = None,
+        nginx_options: Optional[NginxMappingOverrides] = None,
+        is_coherent: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
+        is_recommended: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
+    ):  # type: ignore
         super().__init__(charm, key="coordinator")
         self._charm = charm
         self.topology = JujuTopology.from_charm(self._charm)
@@ -129,7 +137,8 @@ class Coordinator(ops.Object):
         self.roles_config = roles_config
 
         self.cluster = ClusterProvider(
-            self._charm, frozenset(roles_config.roles),
+            self._charm,
+            frozenset(roles_config.roles),
             roles_config.meta_roles,
             endpoint=self._endpoints["cluster"],
         )
@@ -140,19 +149,20 @@ class Coordinator(ops.Object):
         self.nginx = Nginx(
             self._charm,
             partial(nginx_config, self),
+            options=nginx_options,
         )
         self._workers_config_getter = partial(workers_config, self)
-        self.nginx_exporter = NginxPrometheusExporter(self._charm)
+        self.nginx_exporter = NginxPrometheusExporter(self._charm, options=nginx_options)
 
         self.cert_handler = CertHandler(
             self._charm,
-            certificates_relation_name=self._endpoints['certificates'],
+            certificates_relation_name=self._endpoints["certificates"],
             # let's assume we don't need the peer relation as all coordinator charms will assume juju secrets
             key="coordinator-server-cert",
             sans=[socket.getfqdn()],
         )
 
-        self.s3_requirer = S3Requirer(self._charm, self._endpoints['s3'], s3_bucket_name)
+        self.s3_requirer = S3Requirer(self._charm, self._endpoints["s3"], s3_bucket_name)
 
         self._grafana_dashboards = GrafanaDashboardProvider(
             self._charm, relation_name=self._endpoints["grafana-dashboards"]
@@ -173,18 +183,15 @@ class Coordinator(ops.Object):
             alert_rules_path=CONSOLIDATED_ALERT_RULES_PATH,
             jobs=self._scrape_jobs,
             external_url=self._external_url,
-            refresh_event=refresh_events
+            refresh_event=refresh_events,
         )
 
         self.tracing = TracingEndpointRequirer(
-            self._charm,
-            relation_name=self._endpoints['tracing'],
-            protocols=["otlp_http"]
+            self._charm, relation_name=self._endpoints["tracing"], protocols=["otlp_http"]
         )
 
         # We always listen to collect-status
         self.framework.observe(self._charm.on.collect_unit_status, self._on_collect_unit_status)
-
 
         # If the cluster isn't ready, refuse to handle any other event as we can't possibly know what to do
         if self.cluster.workers_count == 0:
@@ -216,7 +223,10 @@ class Coordinator(ops.Object):
 
         # nginx
         self.framework.observe(self._charm.on.nginx_pebble_ready, self._on_nginx_pebble_ready)
-        self.framework.observe(self._charm.on.nginx_prometheus_exporter_pebble_ready, self._on_nginx_prometheus_exporter_pebble_ready)
+        self.framework.observe(
+            self._charm.on.nginx_prometheus_exporter_pebble_ready,
+            self._on_nginx_prometheus_exporter_pebble_ready,
+        )
 
         # s3
         self.framework.observe(
@@ -229,8 +239,12 @@ class Coordinator(ops.Object):
         # self.framework.observe(self._charm.on.peers_relation_changed, self._on_peers_relation_changed)
 
         # logging
-        self.framework.observe(self._logging.on.loki_push_api_endpoint_joined, self._on_loki_relation_changed)
-        self.framework.observe(self._logging.on.loki_push_api_endpoint_departed, self._on_loki_relation_changed)
+        self.framework.observe(
+            self._logging.on.loki_push_api_endpoint_joined, self._on_loki_relation_changed
+        )
+        self.framework.observe(
+            self._logging.on.loki_push_api_endpoint_departed, self._on_loki_relation_changed
+        )
 
         # tls
         self.framework.observe(self.cert_handler.on.cert_changed, self._on_cert_handler_changed)
@@ -262,7 +276,9 @@ class Coordinator(ops.Object):
     def missing_roles(self) -> Set[str]:
         """What roles are missing from this cluster, if any."""
         roles = self.cluster.gather_roles()
-        missing_roles: Set[str] = set(self.roles_config.minimal_deployment).difference(roles.keys())
+        missing_roles: Set[str] = set(self.roles_config.minimal_deployment).difference(
+            roles.keys()
+        )
         return missing_roles
 
     @property
@@ -395,14 +411,15 @@ class Coordinator(ops.Object):
     @property
     def _nginx_scrape_jobs(self) -> List[Dict[str, Any]]:
         job: Dict[str, Any] = {
-            "static_configs": [{"targets": [f"{self.hostname}:{NGINX_PROMETHEUS_EXPORTER_PORT}"]}]
+            "static_configs": [
+                {"targets": [f"{self.hostname}:{self.nginx.options['nginx_port']}"]}
+            ]
         }
         return [job]
 
     @property
     def _scrape_jobs(self) -> List[Dict[str, Any]]:
         return self._workers_scrape_jobs + self._nginx_scrape_jobs
-
 
     ##################
     # EVENT HANDLERS #
@@ -468,7 +485,6 @@ class Coordinator(ops.Object):
         else:
             e.add_status(ops.ActiveStatus())
 
-
     ###################
     # UTILITY METHODS #
     ###################
@@ -521,11 +537,15 @@ class Coordinator(ops.Object):
             worker_config=self._workers_config_getter(),
             loki_endpoints=self.loki_endpoints_by_unit,
             # TODO tempo receiver for charm tracing
-            **({
-              "ca_cert" : self.cert_handler.ca_cert,
-              "server_cert" : self.cert_handler.server_cert,
-              "privkey_secret_id" : self.cluster.grant_privkey(VAULT_SECRET_LABEL),
-            } if self.tls_available else {}),
+            **(
+                {
+                    "ca_cert": self.cert_handler.ca_cert,
+                    "server_cert": self.cert_handler.server_cert,
+                    "privkey_secret_id": self.cluster.grant_privkey(VAULT_SECRET_LABEL),
+                }
+                if self.tls_available
+                else {}
+            ),
         )
 
     def _render_workers_alert_rules(self):

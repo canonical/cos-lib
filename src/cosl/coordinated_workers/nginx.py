@@ -4,7 +4,7 @@
 """Nginx workload."""
 
 import logging
-from typing import Callable
+from typing import Callable, Optional, TypedDict
 
 from ops import CharmBase, pebble
 
@@ -16,18 +16,39 @@ NGINX_CONFIG = f"{NGINX_DIR}/nginx.conf"
 NGINX_PORT = "8080"
 KEY_PATH = f"{NGINX_DIR}/certs/server.key"
 CERT_PATH = f"{NGINX_DIR}/certs/server.cert"
-CA_CERT_PATH = f"{NGINX_DIR}/certs/ca.cert" # TODO: this should probably be in /etc/certs , right ???
+CA_CERT_PATH = (
+    f"{NGINX_DIR}/certs/ca.cert"  # TODO: this should probably be in /etc/certs , right ???
+)
+
+_NginxMapping = TypedDict(
+    "_NginxMapping", {"nginx_port": int, "nginx_exporter_port": int}, total=True
+)
+NginxMappingOverrides = TypedDict(
+    "NginxMappingOverrides", {"nginx_port": int, "nginx_exporter_port": int}, total=False
+)
+DEFAULT_OPTIONS: _NginxMapping = {
+    "nginx_port": 8080,
+    "nginx_exporter_port": 9113,
+}
 
 
 class Nginx:
     """Helper class to manage the nginx workload."""
+
     config_path = NGINX_CONFIG
     _name = "nginx"
+    options: _NginxMapping = DEFAULT_OPTIONS
 
-    def __init__(self, charm: CharmBase, config_getter: Callable[[], str]):
+    def __init__(
+        self,
+        charm: CharmBase,
+        config_getter: Callable[[], str],
+        options: Optional[NginxMappingOverrides] = None,
+    ):
         self._charm = charm
         self._config_getter = config_getter
         self._container = self._charm.unit.get_container("nginx")
+        self.options.update(options or {})
 
     @property
     def are_certificates_on_disk(self) -> bool:
@@ -39,7 +60,7 @@ class Nginx:
             and self._container.exists(CA_CERT_PATH)
         )
 
-    def configure_tls(self, private_key:str, server_cert:str, ca_cert:str) -> None:
+    def configure_tls(self, private_key: str, server_cert: str, ca_cert: str) -> None:
         """Save the certificates file to disk and run update-ca-certificates."""
         if self._container.can_connect():
             self._container.push(KEY_PATH, private_key)
@@ -83,9 +104,7 @@ class Nginx:
         if self._container.can_connect():
             new_config: str = self._config_getter()
             should_restart: bool = self._has_config_changed(new_config)
-            self._container.push(
-                self.config_path, new_config, make_dirs=True  # type: ignore
-            )
+            self._container.push(self.config_path, new_config, make_dirs=True)  # type: ignore
             self._container.add_layer("nginx", self.layer, combine=True)
             self._container.autostart()
 
@@ -112,17 +131,15 @@ class Nginx:
         )
 
 
-
-
-NGINX_PROMETHEUS_EXPORTER_PORT = "9113"
-
-
 class NginxPrometheusExporter:
     """Helper class to manage the nginx prometheus exporter workload."""
 
-    def __init__(self, charm: CharmBase) -> None:
+    options: _NginxMapping = DEFAULT_OPTIONS
+
+    def __init__(self, charm: CharmBase, options: Optional[NginxMappingOverrides] = None) -> None:
         self._charm = charm
         self._container = self._charm.unit.get_container("nginx-prometheus-exporter")
+        self.options.update(options or {})
 
     def configure_pebble_layer(self) -> None:
         """Configure pebble layer."""
@@ -141,7 +158,7 @@ class NginxPrometheusExporter:
                     "nginx": {
                         "override": "replace",
                         "summary": "nginx prometheus exporter",
-                        "command": f"nginx-prometheus-exporter --no-nginx.ssl-verify --web.listen-address=:{NGINX_PROMETHEUS_EXPORTER_PORT}  --nginx.scrape-uri={scheme}://127.0.0.1:{NGINX_PORT}/status",
+                        "command": f"nginx-prometheus-exporter --no-nginx.ssl-verify --web.listen-address=:{self.options['nginx_exporter_port']}  --nginx.scrape-uri={scheme}://127.0.0.1:{self.options['nginx_port']}/status",
                         "startup": "enabled",
                     }
                 },

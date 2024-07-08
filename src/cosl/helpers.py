@@ -6,6 +6,7 @@
 import importlib
 from typing import List
 
+
 def check_libs_installed(*path: str):
     """Attempt to import these charm libs and raise an error if it fails."""
     libs_not_found: List[str] = []
@@ -20,5 +21,4 @@ def check_libs_installed(*path: str):
         raise RuntimeError(
             f"Unmet dependencies: the coordinator charm base is missing some charm libs. \
             Please install them with: \n\n{install_script}"
-            )
-
+        )
