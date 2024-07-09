@@ -291,16 +291,11 @@ class ClusterProvider(Object):
                 local_app_databag.dump(relation.data[self.model.app])
 
     @property
-    def workers_count(self) -> int:
-        """Return how many workers are connected to the coordinator."""
+    def has_workers(self) -> bool:
+        """Return True if the coordinator is connected to any worker."""
         # we use the presence of relations instead of addresses, because we want this
         # check to fail early
-        if not self._relations:
-            return 0
-        remote_units_count = sum(
-            len(relation.units) for relation in self._relations if relation.app != self.model.app
-        )
-        return remote_units_count
+        return bool(self._relations)
 
     def _expand_roles(self, role_string: str) -> Set[str]:
         """Expand the meta-roles from a comma-separated list of roles."""

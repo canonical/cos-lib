@@ -194,7 +194,7 @@ class Coordinator(ops.Object):
         self.framework.observe(self._charm.on.collect_unit_status, self._on_collect_unit_status)
 
         # If the cluster isn't ready, refuse to handle any other event as we can't possibly know what to do
-        if self.cluster.workers_count == 0:
+        if not self.cluster.has_workers:
             logger.warning(
                 f"Incoherent deployment. {charm.unit.name} is missing relation to workers. "
                 "This charm will be unresponsive and refuse to handle any event until "
@@ -209,7 +209,7 @@ class Coordinator(ops.Object):
                 "the situation is resolved by the cloud admin, to avoid data loss."
             )
             return
-        if self.cluster.workers_count > 1 and not self.s3_ready:
+        if self.cluster.has_workers and not self.s3_ready:
             logger.error(
                 f"Incoherent deployment. {charm.unit.name} will be shutting down. "
                 "This likely means you need to add an s3 integration. "
@@ -475,7 +475,7 @@ class Coordinator(ops.Object):
     def _on_collect_unit_status(self, e: ops.CollectStatusEvent):
         # todo add [nginx.workload] statuses
 
-        if self.cluster.workers_count == 0:
+        if not self.cluster.has_workers:
             e.add_status(ops.BlockedStatus("[consistency] Missing any worker relation."))
         if not self.is_coherent:
             e.add_status(ops.BlockedStatus("[consistency] Cluster inconsistent."))
