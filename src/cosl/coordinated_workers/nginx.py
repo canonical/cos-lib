@@ -15,9 +15,7 @@ NGINX_DIR = "/etc/nginx"
 NGINX_CONFIG = f"{NGINX_DIR}/nginx.conf"
 KEY_PATH = f"{NGINX_DIR}/certs/server.key"
 CERT_PATH = f"{NGINX_DIR}/certs/server.cert"
-CA_CERT_PATH = (
-    f"{NGINX_DIR}/certs/ca.cert"  # TODO: this should probably be in /etc/certs , right ???
-)
+CA_CERT_PATH = "/usr/loca/share/ca-certificates/ca.cert"
 
 _NginxMapping = TypedDict(
     "_NginxMapping", {"nginx_port": int, "nginx_exporter_port": int}, total=True

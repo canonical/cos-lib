@@ -159,7 +159,7 @@ class Coordinator(ops.Object):
             certificates_relation_name=self._endpoints["certificates"],
             # let's assume we don't need the peer relation as all coordinator charms will assume juju secrets
             key="coordinator-server-cert",
-            sans=[socket.getfqdn()],
+            sans=[self.hostname],
         )
 
         self.s3_requirer = S3Requirer(self._charm, self._endpoints["s3"], s3_bucket_name)
@@ -291,16 +291,16 @@ class Coordinator(ops.Object):
             return manual_recommended_checker(self.cluster, self.roles_config)
 
         rc = self.roles_config
-        if rc.recommended_deployment:
-            cluster = self.cluster
-            roles = cluster.gather_roles()
-            for role, min_n in rc.recommended_deployment.items():
-                if roles.get(role, 0) < min_n:
-                    return False
-            return True
+        if not rc.recommended_deployment:
+            # we don't have a definition of recommended: return None
+            return None
 
-        # we don't have a definition of recommended: return None
-        return None
+        cluster = self.cluster
+        roles = cluster.gather_roles()
+        for role, min_n in rc.recommended_deployment.items():
+            if roles.get(role, 0) < min_n:
+                return False
+        return True
 
     @property
     def hostname(self) -> str:
@@ -350,11 +350,10 @@ class Coordinator(ops.Object):
         peers = self._peers
         relation = self.model.get_relation("peers")
         # get unit addresses for all the other units from a databag
+        addresses = []
         if peers and relation:
             addresses = [relation.data[unit].get("local-ip") for unit in peers]
             addresses = list(filter(None, addresses))
-        else:
-            addresses = []
 
         # add own address
         if self._local_ip:
@@ -468,7 +467,14 @@ class Coordinator(ops.Object):
         self.update_cluster()
 
     def _on_config_changed(self, _: ops.ConfigChangedEvent):
-        # check if certificate files haven't disappeared and recreate them if needed
+        if self.tls_available:
+            self.nginx.configure_tls(
+                server_cert=self.cert_handler.server_cert,  # type: ignore
+                ca_cert=self.cert_handler.ca_cert,  # type: ignore
+                private_key=self.cert_handler.private_key,  # type: ignore
+            )
+        else:
+            self.nginx.delete_certificates()
         self.update_cluster()
 
     # keep this event handler at the bottom
