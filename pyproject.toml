@@ -66,6 +66,7 @@ extend-ignore = [
   "D408",
   "D409",
   "D413",
+  "E402",
 ]
 ignore = ["E501", "D107"]
 per-file-ignores = {"tests/*" = ["D100","D101","D102","D103","D104"]}
