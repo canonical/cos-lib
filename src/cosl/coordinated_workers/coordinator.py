@@ -23,7 +23,6 @@ from cosl.juju_topology import JujuTopology
 check_libs_installed(
     "charms.data_platform_libs.v0.s3",
     "charms.grafana_k8s.v0.grafana_source",
-    "charms.observability_libs.v1.cert_handler",
     "charms.grafana_k8s.v0.grafana_dashboard",
     "charms.observability_libs.v1.cert_handler",
     "charms.prometheus_k8s.v0.prometheus_scrape",

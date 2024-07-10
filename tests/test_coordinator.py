@@ -8,6 +8,7 @@ from ops import CharmBase
 class MyClusterRolesConfig:
     class Role(str, enum.Enum):
         """Define the roles for the cluster."""
+
         write = "write"
         read = "read"
         foo = "foo"
@@ -21,10 +22,7 @@ class MyClusterRolesConfig:
 
     minimal_deployment = (Role.foo, Role.bar)
 
-    recommended_deployment = {
-        Role.baz: 2,
-        Role.bar: 1
-    }
+    recommended_deployment = {Role.baz: 2, Role.bar: 1}
 
 
 def generate_nginx_config(coordinator: Coordinator) -> str:
@@ -37,10 +35,9 @@ def generate_worker_config(coordinator: Coordinator) -> str:
     ...
 
 
-
 class LokiCoordinator(CharmBase):
-    def __init__(self, *args, **kwargs): # type:ignore
-        super().__init__(*args, **kwargs) # type:ignore
+    def __init__(self, *args, **kwargs):  # type:ignore
+        super().__init__(*args, **kwargs)  # type:ignore
         self.ingress = ...  # could be IPA or route
 
         self.coordinator = Coordinator(
@@ -51,7 +48,6 @@ class LokiCoordinator(CharmBase):
             nginx_config=generate_nginx_config,
             # worker node config
             workers_config=generate_worker_config,
-
             s3_bucket_name="BuckyMcBucket",
             external_url=self.external_url,
         )
