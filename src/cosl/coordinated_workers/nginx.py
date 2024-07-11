@@ -71,7 +71,7 @@ class Nginx:
             self._container.remove_path(CERT_PATH, recursive=True)
             self._container.remove_path(KEY_PATH, recursive=True)
             self._container.remove_path(CA_CERT_PATH, recursive=True)
-            self._container.exec(["update-ca-certificates" "--fresh"])
+            self._container.exec(["update-ca-certificates", "--fresh"])
 
     def _has_config_changed(self, new_config: str) -> bool:
         """Return True if the passed config differs from the one on disk."""

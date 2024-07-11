@@ -3,7 +3,7 @@
 
 """Utils for observability Juju charms."""
 
-from .coordinated_workers.cluster import ClusterProvider, ClusterRequirer
+from .coordinated_workers.interface import ClusterProvider, ClusterRequirer
 from .coordinated_workers.coordinator import Coordinator
 from .coordinated_workers.worker import Worker
 from .cos_tool import CosTool
