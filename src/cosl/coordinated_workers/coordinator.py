@@ -40,8 +40,10 @@ from charms.tempo_k8s.v2.tracing import TracingEndpointRequirer
 logger = logging.getLogger(__name__)
 
 
+# The paths of the base rules to be rendered in CONSOLIDATED_ALERT_RULES_PATH
 NGINX_ORIGINAL_ALERT_RULES_PATH = "./src/prometheus_alert_rules/nginx"
 WORKER_ORIGINAL_ALERT_RULES_PATH = "./src/prometheus_alert_rules/workers"
+# The path of the rules that will be sent to Prometheus
 CONSOLIDATED_ALERT_RULES_PATH = "./src/prometheus_alert_rules/consolidated_rules"
 
 
@@ -73,42 +75,22 @@ _EndpointMapping = TypedDict(
     {
         "certificates": str,
         "cluster": str,
-        "tracing": str,
-        "logging": str,
         "grafana-dashboards": str,
+        "logging": str,
         "metrics": str,
+        "tracing": str,
         "s3": str,
     },
     total=True,
 )
-
-_EndpointMappingOverrides = TypedDict(
-    "_EndpointMappingOverrides",
-    {
-        "certificates": str,
-        "cluster": str,
-        "tracing": str,
-        "logging": str,
-        "grafana-dashboards": str,
-        "metrics": str,
-        "s3": str,
-    },
-    total=False,
-)
-
+"""Mapping of the relation endpoint names that the charms uses, as defined in metadata.yaml."""
 
 class Coordinator(ops.Object):
-    """Charming coordinator."""
+    """Charming coordinator.
 
-    _endpoints: _EndpointMapping = {
-        "certificates": "certificates",
-        "cluster": "cluster",
-        "tracing": "tracing",
-        "logging": "logging",
-        "grafana-dashboards": "grafana-dashboards",
-        "metrics": "metrics-endpoint",
-        "s3": "s3",
-    }
+    This class takes care of the shared tasks of a coordinator, including handling workers,
+    running Nginx, and implementing self-monitoring integrations.
+    """
 
     def __init__(
         self,
@@ -116,21 +98,37 @@ class Coordinator(ops.Object):
         roles_config: ClusterRolesConfig,
         s3_bucket_name: str,
         external_url: str,  # the ingressed url if we have ingress, else fqdn
-        metrics_port: str,
+        worker_metrics_port: str,
+        endpoints: _EndpointMapping,
         nginx_config: Callable[["Coordinator"], str],
         workers_config: Callable[["Coordinator"], str],
-        endpoints: Optional[_EndpointMappingOverrides] = None,
         nginx_options: Optional[NginxMappingOverrides] = None,
         is_coherent: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
         is_recommended: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
-    ):  # type: ignore
+    ):
+        """Constructor for a Coordinator object.
+
+        Args:
+            charm: The coordinator charm object.
+            roles_config: Definition of the roles and the deployment requirements.
+            s3_bucket_name: The name of the S3 Bucket to use.
+            external_url: The external (e.g., ingressed) URL of the coordinator charm.
+            worker_metrics_port: The port under which workers expose their metrics.
+            nginx_config: A function generating the Nginx configuration file for the workload.
+            workers_config: A function generating the configuration for the workers, to be
+                published in relation data.
+            endpoints: Endpoint names for coordinator relations, as defined in metadata.yaml.
+            nginx_options: Non-default config options for Nginx.
+            is_coherent: Custom coherency checker for a minimal deployment.
+            is_recommended: Custom coherency checker for a recommended deployment.
+        """
         super().__init__(charm, key="coordinator")
         self._charm = charm
         self.topology = JujuTopology.from_charm(self._charm)
         self._external_url = external_url
-        self._metrics_port = metrics_port
+        self._worker_metrics_port = worker_metrics_port
 
-        self._endpoints.update(endpoints or {})
+        self._endpoints = endpoints
 
         validate_roles_config(roles_config)
         self.roles_config = roles_config
@@ -171,7 +169,6 @@ class Coordinator(ops.Object):
 
         # Provide ability for this to be scraped by Prometheus using prometheus_scrape
         refresh_events = [self._charm.on.update_status, self.cluster.on.changed]
-        # TODO: do we need to add cluster joined/departed/broken events to refresh_events ???
         if self.cert_handler:
             refresh_events.append(self.cert_handler.on.cert_changed)
 
@@ -308,6 +305,7 @@ class Coordinator(ops.Object):
 
     @property
     def _internal_url(self) -> str:
+        """Unit's hostname including the scheme."""
         scheme = "https" if self.tls_available else "http"
         return f"{scheme}://{self.hostname}"
 
@@ -323,6 +321,11 @@ class Coordinator(ops.Object):
 
     @property
     def _s3_config(self) -> dict[str, Any]:
+        """The s3 configuration from relation data.
+
+        Raises:
+            S3NotFoundError: The s3 integration is inactive.
+        """
         s3_config = self.s3_requirer.get_s3_connection_info()
         if (
             s3_config
@@ -345,7 +348,6 @@ class Coordinator(ops.Object):
     @property
     def peer_addresses(self) -> List[str]:
         """If a peer relation is present, return the addresses of the peers."""
-        # TODO: do we need this? maybe for @tempo ???
         peers = self._peers
         relation = self.model.get_relation("peers")
         # get unit addresses for all the other units from a databag
@@ -362,6 +364,7 @@ class Coordinator(ops.Object):
 
     @property
     def _local_ip(self) -> Optional[str]:
+        """Local IP of the peers binding."""
         try:
             binding = self.model.get_binding("peers")
             if not binding:
@@ -382,6 +385,7 @@ class Coordinator(ops.Object):
 
     @property
     def _workers_scrape_jobs(self) -> List[Dict[str, Any]]:
+        """The Prometheus scrape jobs for the workers connected to the coordinator."""
         scrape_jobs: List[Dict[str, Any]] = []
         worker_topologies = self.cluster.gather_topology()
 
@@ -389,7 +393,7 @@ class Coordinator(ops.Object):
             job = {
                 "static_configs": [
                     {
-                        "targets": [f"{worker['address']}:{self._metrics_port}"],
+                        "targets": [f"{worker['address']}:{self._worker_metrics_port}"],
                     }
                 ],
                 # setting these as "labels" in the static config gets some of them
@@ -408,6 +412,7 @@ class Coordinator(ops.Object):
 
     @property
     def _nginx_scrape_jobs(self) -> List[Dict[str, Any]]:
+        """The Prometheus scrape job for Nginx."""
         job: Dict[str, Any] = {
             "static_configs": [
                 {"targets": [f"{self.hostname}:{self.nginx.options['nginx_port']}"]}
@@ -417,6 +422,7 @@ class Coordinator(ops.Object):
 
     @property
     def _scrape_jobs(self) -> List[Dict[str, Any]]:
+        """The scrape jobs to send to Prometheus."""
         return self._workers_scrape_jobs + self._nginx_scrape_jobs
 
     ##################
@@ -554,6 +560,7 @@ class Coordinator(ops.Object):
         )
 
     def _render_workers_alert_rules(self):
+        """Regenerate the worker alert rules from relation data."""
         self._remove_rendered_alert_rules()
 
         apps: Set[str] = set()
@@ -563,8 +570,8 @@ class Coordinator(ops.Object):
 
             apps.add(worker["application"])
             topology_dict = {
-                "model": worker["model"],
-                "model_uuid": worker["model_uuid"],
+                "model": self.model.name,
+                "model_uuid": self.model.uuid,
                 "application": worker["application"],
                 "unit": worker["unit"],
                 "charm_name": worker["charm_name"],
@@ -584,10 +591,12 @@ class Coordinator(ops.Object):
             os.remove(f)
 
     def _consolidate_nginx_alert_rules(self):
-        os.makedirs(CONSOLIDATED_ALERT_RULES_PATH, exist_ok=True)
+        """Copy Nginx alert rules to the consolidated alert folder."""
         for filename in glob.glob(os.path.join(NGINX_ORIGINAL_ALERT_RULES_PATH, "*.*")):
             shutil.copy(filename, f"{CONSOLIDATED_ALERT_RULES_PATH}/")
 
     def _render_alert_rules(self):
+        """Render the alert rules for Nginx and the connected workers."""
+        os.makedirs(CONSOLIDATED_ALERT_RULES_PATH, exist_ok=True)
         self._render_workers_alert_rules()
         self._consolidate_nginx_alert_rules()

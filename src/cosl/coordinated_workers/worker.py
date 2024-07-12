@@ -3,18 +3,17 @@
 # See LICENSE file for licensing details.
 """Generic worker for a distributed charm deployment."""
 
-import json
 import logging
 import socket
 import subprocess
 from functools import partial
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, TypedDict
+from typing import Any, Callable, Dict, List, Optional, TypedDict
 
 import ops
 import yaml
 from cosl import JujuTopology
-from cosl.distributed.cluster import ClusterRequirer
+from cosl.coordinated_workers.interface import ClusterRequirer
 from cosl.helpers import check_libs_installed
 from ops.model import ActiveStatus, BlockedStatus, WaitingStatus
 from ops.pebble import Layer, PathError, ProtocolError
@@ -36,11 +35,7 @@ CLIENT_CA_FILE = "/etc/worker/ca.cert"
 logger = logging.getLogger(__name__)
 
 _EndpointMapping = TypedDict("_EndpointMapping", {"cluster": str, "tracing": str}, total=True)
-
-_EndpointMappingOverrides = TypedDict(
-    "_EndpointMappingOverrides", {"cluster": str, "tracing": str}, total=False
-)
-
+"""Mapping of the relation endpoint names that the charms uses, as defined in metadata.yaml."""
 
 class Worker(ops.Object):
     """Charming worker."""
@@ -53,11 +48,18 @@ class Worker(ops.Object):
     def __init__(
         self,
         charm: ops.CharmBase,
-        name: str,  # name of the workload container and service
-        ports: Iterable[int],
+        name: str,
         pebble_layer: Callable[["Worker"], Layer],
-        endpoints: Optional[_EndpointMappingOverrides] = None,
+        endpoints: Optional[_EndpointMapping] = None,
     ):
+        """Constructor for a Worker object.
+
+        Args:
+            charm: The worker charm object.
+            name: The name of the workload container and service.
+            pebble_layer: The pebble layer of the workload.
+            endpoints: Endpoint names for coordinator relations, as defined in metadata.yaml.
+        """
         super().__init__(charm, key="worker")
         self._charm = charm
         self._name = name
@@ -66,9 +68,6 @@ class Worker(ops.Object):
         self._container = self._charm.unit.get_container(name)
 
         self._endpoints.update(endpoints or {})
-
-        self.ports = ports
-        self._charm.unit.set_ports(*ports)
 
         self.cluster = ClusterRequirer(
             charm=self._charm,
@@ -241,15 +240,12 @@ class Worker(ops.Object):
 
         ca_cert_path = Path("/usr/local/share/ca-certificates/ca.crt")
 
-        if cert_secrets := self.cluster.get_cert_secret_ids():
-            cert_secrets = json.loads(cert_secrets)
-
-            private_key_secret = self.model.get_secret(id=cert_secrets["private_key_secret_id"])
+        if tls_data := self.cluster.get_tls_data():
+            private_key_secret = self.model.get_secret(id=tls_data["privkey_secret_id"])
             private_key = private_key_secret.get_content().get("private-key")
 
-            ca_server_secret = self.model.get_secret(id=cert_secrets["ca_server_cert_secret_id"])
-            ca_cert = ca_server_secret.get_content().get("ca-cert")
-            server_cert = ca_server_secret.get_content().get("server-cert")
+            ca_cert = tls_data["ca_cert"]
+            server_cert = tls_data["server_cert"]
 
             # Save the workload certificates
             self._container.push(CERT_FILE, server_cert or "", make_dirs=True)
@@ -278,10 +274,7 @@ class Worker(ops.Object):
             return
 
         try:
-            if self._container.get_service(self._name).is_running():
-                self._container.restart(self._name)
-            else:
-                self._container.start(self._name)
+            self._container.restart(self._name)
         except ops.pebble.ChangeError as e:
             logger.error(f"failed to (re)start worker job: {e}", exc_info=True)
             return

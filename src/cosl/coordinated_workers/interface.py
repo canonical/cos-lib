@@ -64,9 +64,6 @@ class DatabagModel(pydantic.BaseModel):
         # Custom config key: whether to nest the whole datastructure (as json)
         # under a field or spread it out at the toplevel.
         _NEST_UNDER=None,
-        # TODO: Check if this is necessary / good to have
-        # Protected namespaces: will warn if keys starts with those
-        protected_namespaces=(),
     )  # type: ignore
     """Pydantic config."""
 
@@ -159,8 +156,6 @@ class DatabagAccessPermissionError(ClusterError):
 class _Topology(pydantic.BaseModel):
     """Juju topology information."""
 
-    model: str
-    model_uuid: str  # TODO: do we need this? we get it for free but causes pydantic warnings
     application: str
     unit: str
     charm_name: str
@@ -379,8 +374,6 @@ class ClusterProvider(Object):
                     continue
                 worker_topology = {
                     "address": unit_address,
-                    "model": worker_data.juju_topology.model,
-                    "model_uuid": worker_data.juju_topology.model_uuid,
                     "application": worker_data.juju_topology.application,
                     "unit": worker_data.juju_topology.unit,
                     "charm_name": worker_data.juju_topology.charm_name,
@@ -521,8 +514,13 @@ class ClusterRequirer(Object):
             return data.loki_endpoints or {}
         return {}
 
-    def get_cert_secret_ids(self) -> Optional[str]:
-        """Fetch certificates secrets ids for the worker config."""
-        if self.relation and self.relation.app:
-            return self.relation.data[self.relation.app].get("secrets", None)
-        return None
+    def get_tls_data(self) -> Optional[Dict[str,str]]:
+        """Fetch certificates and the private key secrets id for the worker config."""
+        data = self._get_data_from_coordinator()
+        if not data:
+            return None
+
+        if not data.ca_cert or not data.server_cert or not data.privkey_secret_id:
+            return None
+
+        return {"ca_cert": data.ca_cert, "server_cert": data.server_cert, "privkey_secret_id": data.privkey_secret_id}

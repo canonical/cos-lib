@@ -1,7 +1,7 @@
 # Copyright 2023 Canonical
 # See LICENSE file for licensing details.
 
-"""Nginx workload."""
+"""Workload manager for Nginx. Used by the coordinator to load-balance and group the workers."""
 
 import logging
 from typing import Callable, Optional, TypedDict
