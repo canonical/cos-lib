@@ -26,10 +26,10 @@ from typing import (
 )
 from urllib.parse import urlparse
 
+import cosl
 import ops
 import pydantic
 import yaml
-from cosl import JujuTopology
 from ops import EventSource, Object, ObjectEvents, RelationCreatedEvent
 from pydantic import ConfigDict
 
@@ -236,7 +236,7 @@ class ClusterProvider(Object):
         self._charm = charm
         self._roles = roles
         self._meta_roles = meta_roles or {}
-        self.juju_topology = JujuTopology.from_charm(self._charm)
+        self.juju_topology = cosl.JujuTopology.from_charm(self._charm)
 
         # filter out common unhappy relation states
         self._relations: List[ops.Relation] = [

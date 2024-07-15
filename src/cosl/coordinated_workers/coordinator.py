@@ -14,11 +14,10 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Proto
 
 import ops
 import yaml
-from cosl import AlertRules
+import cosl
 from cosl.coordinated_workers.interface import ClusterProvider
 from cosl.coordinated_workers.nginx import Nginx, NginxMappingOverrides, NginxPrometheusExporter
 from cosl.helpers import check_libs_installed
-from cosl.juju_topology import JujuTopology
 
 check_libs_installed(
     "charms.data_platform_libs.v0.s3",
@@ -124,7 +123,7 @@ class Coordinator(ops.Object):
         """
         super().__init__(charm, key="coordinator")
         self._charm = charm
-        self.topology = JujuTopology.from_charm(self._charm)
+        self.topology = cosl.JujuTopology.from_charm(self._charm)
         self._external_url = external_url
         self._worker_metrics_port = worker_metrics_port
 
@@ -576,8 +575,8 @@ class Coordinator(ops.Object):
                 "unit": worker["unit"],
                 "charm_name": worker["charm_name"],
             }
-            topology = JujuTopology.from_dict(topology_dict)
-            alert_rules = AlertRules(query_type="promql", topology=topology)
+            topology = cosl.JujuTopology.from_dict(topology_dict)
+            alert_rules = cosl.AlertRules(query_type="promql", topology=topology)
             alert_rules.add_path(WORKER_ORIGINAL_ALERT_RULES_PATH, recursive=True)
             alert_rules_contents = yaml.dump(alert_rules.as_dict())
 
