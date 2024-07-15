@@ -12,9 +12,9 @@ import socket
 from functools import partial
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Protocol, Set, TypedDict
 
+import cosl
 import ops
 import yaml
-import cosl
 from cosl.coordinated_workers.interface import ClusterProvider
 from cosl.coordinated_workers.nginx import Nginx, NginxMappingOverrides, NginxPrometheusExporter
 from cosl.helpers import check_libs_installed
@@ -83,6 +83,7 @@ _EndpointMapping = TypedDict(
     total=True,
 )
 """Mapping of the relation endpoint names that the charms uses, as defined in metadata.yaml."""
+
 
 class Coordinator(ops.Object):
     """Charming coordinator.

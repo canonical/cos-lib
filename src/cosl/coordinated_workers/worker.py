@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 _EndpointMapping = TypedDict("_EndpointMapping", {"cluster": str, "tracing": str}, total=True)
 """Mapping of the relation endpoint names that the charms uses, as defined in metadata.yaml."""
 
+
 class Worker(ops.Object):
     """Charming worker."""
 

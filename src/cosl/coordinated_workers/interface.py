@@ -403,7 +403,7 @@ class ClusterRequirer(Object):
     ):
         super().__init__(charm, key or endpoint)
         self._charm = charm
-        self.juju_topology = JujuTopology.from_charm(self._charm)
+        self.juju_topology = cosl.JujuTopology.from_charm(self._charm)
 
         relation = self.model.get_relation(endpoint)
         self.relation: Optional[ops.Relation] = (
@@ -514,7 +514,7 @@ class ClusterRequirer(Object):
             return data.loki_endpoints or {}
         return {}
 
-    def get_tls_data(self) -> Optional[Dict[str,str]]:
+    def get_tls_data(self) -> Optional[Dict[str, str]]:
         """Fetch certificates and the private key secrets id for the worker config."""
         data = self._get_data_from_coordinator()
         if not data:
@@ -523,4 +523,8 @@ class ClusterRequirer(Object):
         if not data.ca_cert or not data.server_cert or not data.privkey_secret_id:
             return None
 
-        return {"ca_cert": data.ca_cert, "server_cert": data.server_cert, "privkey_secret_id": data.privkey_secret_id}
+        return {
+            "ca_cert": data.ca_cert,
+            "server_cert": data.server_cert,
+            "privkey_secret_id": data.privkey_secret_id,
+        }
