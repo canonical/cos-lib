@@ -98,7 +98,7 @@ class Coordinator(ops.Object):
         roles_config: ClusterRolesConfig,
         s3_bucket_name: str,
         external_url: str,  # the ingressed url if we have ingress, else fqdn
-        worker_metrics_port: str,
+        worker_metrics_port: int,
         endpoints: _EndpointMapping,
         nginx_config: Callable[["Coordinator"], str],
         workers_config: Callable[["Coordinator"], str],
