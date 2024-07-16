@@ -183,9 +183,10 @@ class Coordinator(ops.Object):
             refresh_event=refresh_events,
         )
 
-        self.tracing = TracingEndpointRequirer(
-            self._charm, relation_name=self._endpoints["tracing"], protocols=["otlp_http"]
-        )
+        if "tracing" in self._endpoints:
+            self.tracing = TracingEndpointRequirer(
+                self._charm, relation_name=self._endpoints["tracing"], protocols=["otlp_http"]
+            )
 
         # We always listen to collect-status
         self.framework.observe(self._charm.on.collect_unit_status, self._on_collect_unit_status)
@@ -231,7 +232,7 @@ class Coordinator(ops.Object):
         )
         self.framework.observe(self.s3_requirer.on.credentials_gone, self._on_s3_credentials_gone)
 
-        # tracing
+        # WHY???
         # self.framework.observe(self._charm.on.peers_relation_created, self._on_peers_relation_created)
         # self.framework.observe(self._charm.on.peers_relation_changed, self._on_peers_relation_changed)
 
