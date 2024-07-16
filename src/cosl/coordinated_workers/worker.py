@@ -12,11 +12,12 @@ from typing import Any, Callable, Dict, List, Optional, TypedDict
 
 import ops
 import yaml
+from ops.model import ActiveStatus, BlockedStatus, WaitingStatus
+from ops.pebble import Layer, PathError, ProtocolError
+
 from cosl import JujuTopology
 from cosl.coordinated_workers.interface import ClusterRequirer
 from cosl.helpers import check_libs_installed
-from ops.model import ActiveStatus, BlockedStatus, WaitingStatus
-from ops.pebble import Layer, PathError, ProtocolError
 
 check_libs_installed(
     "charms.loki_k8s.v1.loki_push_api",

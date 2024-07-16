@@ -26,12 +26,13 @@ from typing import (
 )
 from urllib.parse import urlparse
 
-import cosl
 import ops
 import pydantic
 import yaml
 from ops import EventSource, Object, ObjectEvents, RelationCreatedEvent
 from pydantic import ConfigDict
+
+import cosl
 
 log = logging.getLogger("_cluster")
 
