@@ -106,6 +106,7 @@ class Coordinator(ops.Object):
         nginx_options: Optional[NginxMappingOverrides] = None,
         is_coherent: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
         is_recommended: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
+        tracing_receivers: Optional[Callable[[], Dict[str, str]]] = None,
     ):
         """Constructor for a Coordinator object.
 
@@ -122,6 +123,7 @@ class Coordinator(ops.Object):
             nginx_options: Non-default config options for Nginx.
             is_coherent: Custom coherency checker for a minimal deployment.
             is_recommended: Custom coherency checker for a recommended deployment.
+            tracing_receivers: Endpoints to which the workload (and the worker charm) can push traces to.
         """
         super().__init__(charm, key="coordinator")
         self._charm = charm
@@ -143,6 +145,7 @@ class Coordinator(ops.Object):
 
         self._is_coherent = is_coherent
         self._is_recommended = is_recommended
+        self._tracing_receivers_getter = tracing_receivers
 
         self.nginx = Nginx(
             self._charm,
@@ -492,6 +495,8 @@ class Coordinator(ops.Object):
             e.add_status(ops.BlockedStatus("[consistency] Missing any worker relation."))
         if not self.is_coherent:
             e.add_status(ops.BlockedStatus("[consistency] Cluster inconsistent."))
+        if not self.s3_ready:
+            e.add_status(ops.BlockedStatus("[consistency] Missing S3 integration."))
         elif not self.is_recommended:
             # if is_recommended is None: it means we don't have a recommended deployment criterion.
             e.add_status(ops.ActiveStatus("[coordinator] Degraded."))
@@ -537,19 +542,17 @@ class Coordinator(ops.Object):
 
     def update_cluster(self):
         """Build the workers config and distribute it to the relations."""
+        self.nginx.configure_pebble_layer()
+        self.nginx_exporter.configure_pebble_layer()
         if not self.is_coherent:
             logger.error("skipped cluster update: incoherent deployment")
             return
-
-        self.nginx.configure_pebble_layer()
-        self.nginx_exporter.configure_pebble_layer()
         # we share the certs in plaintext as they're not sensitive information
         # On every function call, we always publish everything to the databag; however, if there
         # are no changes, Juju will notice there's no delta and do nothing
         self.cluster.publish_data(
             worker_config=self._workers_config_getter(),
             loki_endpoints=self.loki_endpoints_by_unit,
-            # TODO tempo receiver for charm tracing
             **(
                 {
                     "ca_cert": self.cert_handler.ca_cert,
@@ -559,6 +562,14 @@ class Coordinator(ops.Object):
                 if self.tls_available
                 else {}
             ),
+            **(
+                {
+                    "tracing_receivers": self._tracing_receivers_getter(),
+                }
+                if self._tracing_receivers_getter
+                else {}
+            )
+           
         )
 
     def _render_workers_alert_rules(self):

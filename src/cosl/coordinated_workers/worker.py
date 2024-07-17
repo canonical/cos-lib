@@ -4,8 +4,8 @@
 """Generic worker for a distributed charm deployment."""
 
 import logging
+import re
 import socket
-import subprocess
 from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, TypedDict
@@ -69,7 +69,7 @@ class Worker(ops.Object):
         self.topology = JujuTopology.from_charm(self._charm)
         self._container = self._charm.unit.get_container(name)
 
-        self._endpoints.update(endpoints or {})
+        self._endpoints = endpoints
 
         self.cluster = ClusterRequirer(
             charm=self._charm,
@@ -86,11 +86,12 @@ class Worker(ops.Object):
             ],
         )
 
-        self.tracing = TracingEndpointRequirer(
-            self._charm,
-            relation_name=self._endpoints["tracing"],
-            protocols=["otlp_http"],
-        )
+        if "tracing" in self._endpoints:
+            self.tracing = TracingEndpointRequirer(
+                self._charm,
+                relation_name=self._endpoints["tracing"],
+                protocols=["otlp_http"],
+            )
 
         # Event listeners
         self.framework.observe(self._charm.on.config_changed, self._on_config_changed)
@@ -106,6 +107,7 @@ class Worker(ops.Object):
     # Event handlers
 
     def _on_pebble_ready(self, _: ops.PebbleReadyEvent):
+        self._charm.unit.set_workload_version(self.running_version() or "")
         self._update_config()
 
     def _on_worker_config_received(self, _: ops.EventBase):
@@ -138,19 +140,33 @@ class Worker(ops.Object):
         if not self.cluster.get_worker_config():
             e.add_status(WaitingStatus("Waiting for coordinator to publish a config"))
         if not self.roles:
-            e.add_status(BlockedStatus("No roles assigned: please configure some roles"))
-        e.add_status(ActiveStatus(""))
+            e.add_status(
+                BlockedStatus("Invalid or no roles assigned: please configure some valid roles")
+            )
+        e.add_status(
+            ActiveStatus(
+                "(all roles) ready."
+                if ",".join(self.roles) == "all"
+                else f"{','.join(self.roles)} ready."
+            )
+        )
 
     # Utility functions
     @property
     def roles(self) -> List[str]:
         """Return a list of the roles this worker should take on."""
-        existing_roles = [
+        config = self._charm.config
+
+        roles: List[str] = [
             role.removeprefix("role-")
-            for role in self._charm.config.keys()
-            if role.startswith("role-")
+            for role in config.keys()
+            if isinstance(config[role], bool) and config[role]
         ]
-        roles: List[str] = [role for role in existing_roles if self._charm.config[f"role-{role}"]]
+
+        roles.extend(
+            [config[role] for role in config.keys() if not isinstance(config[role], bool)]
+        )
+
         return roles
 
     def _update_config(self) -> None:
@@ -222,6 +238,14 @@ class Worker(ops.Object):
         Raises: BlockedStatusError exception if PebbleError, ProtocolError, PathError exceptions
             are raised by container.remove_path
         """
+        if not self._container.can_connect():
+            logger.warning("cannot update worker config: container cannot connect.")
+            return False
+
+        if len(self.roles) == 0:
+            logger.warning("cannot update worker config: role misconfigured.")
+            return False
+
         worker_config = self.cluster.get_worker_config()
         if not worker_config:
             logger.warning("cannot update worker config: coordinator hasn't published one yet.")
@@ -261,8 +285,8 @@ class Worker(ops.Object):
             self._container.remove_path(ca_cert_path, recursive=True)
             ca_cert_path.unlink(missing_ok=True)
 
-        self._container.exec(["update-ca-certificates", "--fresh"]).wait()
-        subprocess.run(["update-ca-certificates", "--fresh"])
+        # self._container.exec(["update-ca-certificates", "--fresh"]).wait()
+        # subprocess.run(["update-ca-certificates", "--fresh"])
 
         return True
 
@@ -280,6 +304,18 @@ class Worker(ops.Object):
         except ops.pebble.ChangeError as e:
             logger.error(f"failed to (re)start worker job: {e}", exc_info=True)
             return
+
+    def running_version(self) -> Optional[str]:
+        """Get the running version from the worker process."""
+        if not self._container.can_connect():
+            return None
+
+        version_output, _ = self._container.exec([f"/bin/{self._name}", "-version"]).wait_output()
+        # Output looks like this:
+        # <WORKLOAD_NAME>, version 2.4.0 (branch: HEAD, revision 32137ee...)
+        if result := re.search(r"[Vv]ersion:?\s*(\S+)", version_output):
+            return result.group(1)
+        return None
 
 
 class ManualLogForwarder(ops.Object):
