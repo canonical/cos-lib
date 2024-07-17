@@ -235,7 +235,7 @@ class Coordinator(ops.Object):
         )
         self.framework.observe(self.s3_requirer.on.credentials_gone, self._on_s3_credentials_gone)
 
-        # WHY???
+        # tracing
         # self.framework.observe(self._charm.on.peers_relation_created, self._on_peers_relation_created)
         # self.framework.observe(self._charm.on.peers_relation_changed, self._on_peers_relation_changed)
 
