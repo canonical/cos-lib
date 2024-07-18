@@ -533,7 +533,7 @@ class ClusterRequirer(Object):
             "privkey_secret_id": data.privkey_secret_id,
         }
 
-    def get_tracing_receivers(self) -> Optional[Dict[str,str]]:
+    def get_tracing_receivers(self) -> Optional[Dict[str, str]]:
         """Fetch the tracing receivers from the coordinator databag."""
         data = self._get_data_from_coordinator()
         if data:

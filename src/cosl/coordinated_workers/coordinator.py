@@ -7,10 +7,12 @@ import glob
 import json
 import logging
 import os
+import re
 import shutil
 import socket
 from functools import partial
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Protocol, Set, TypedDict
+from urllib.parse import urlparse
 
 import ops
 import yaml
@@ -341,7 +343,9 @@ class Coordinator(ops.Object):
         ):
             raise S3NotFoundError("s3 integration inactive")
         s3_config["insecure"] = "false" if s3_config["endpoint"].startswith("https://") else "true"
-        s3_config["endpoint"] = re.sub(rf"^{urlparse(s3_config["endpoint"]).scheme}://", "", s3_config["endpoint"])
+        s3_config["endpoint"] = re.sub(
+            rf"^{urlparse(s3_config["endpoint"]).scheme}://", "", s3_config["endpoint"]
+        )
         s3_config["region"] = s3_config.get("region", "")
         s3_config["access_key_id"] = s3_config.pop("access-key")
         s3_config["secret_access_key"] = s3_config.pop("secret-key")
@@ -574,8 +578,7 @@ class Coordinator(ops.Object):
                 }
                 if self._tracing_receivers_getter
                 else {}
-            )
-           
+            ),
         )
 
     def _render_workers_alert_rules(self):
