@@ -332,15 +332,16 @@ class Coordinator(ops.Object):
             S3NotFoundError: The s3 integration is inactive.
         """
         s3_config = self.s3_requirer.get_s3_connection_info()
-        if (
+        if not (
             s3_config
             and "bucket" in s3_config
             and "endpoint" in s3_config
             and "access-key" in s3_config
             and "secret-key" in s3_config
         ):
-            return s3_config
-        raise S3NotFoundError("s3 integration inactive")
+            raise S3NotFoundError("s3 integration inactive")
+        s3_config["insecure"] = "false" if s3_config["endpoint"].startswith("https://") else "true"
+        return s3_config
 
     @property
     def s3_ready(self) -> bool:
