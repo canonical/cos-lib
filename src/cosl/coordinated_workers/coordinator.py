@@ -341,6 +341,11 @@ class Coordinator(ops.Object):
         ):
             raise S3NotFoundError("s3 integration inactive")
         s3_config["insecure"] = "false" if s3_config["endpoint"].startswith("https://") else "true"
+        s3_config["endpoint"] = re.sub(rf"^{urlparse(s3_config["endpoint"]).scheme}://", "", s3_config["endpoint"])
+        s3_config["region"] = s3_config.get("region", "")
+        s3_config["access_key_id"] = s3_config.pop("access-key")
+        s3_config["secret_access_key"] = s3_config.pop("secret-key")
+        s3_config["bucket_name"] = s3_config.pop("bucket")
         return s3_config
 
     @property
