@@ -21,11 +21,9 @@ from cosl.helpers import check_libs_installed
 
 check_libs_installed(
     "charms.loki_k8s.v1.loki_push_api",
-    "charms.tempo_k8s.v2.tracing",
 )
 
 from charms.loki_k8s.v1.loki_push_api import _PebbleLogClient
-from charms.tempo_k8s.v2.tracing import TracingEndpointRequirer
 
 BASE_DIR = "/worker"
 CONFIG_FILE = "/etc/worker/config.yaml"
@@ -35,7 +33,7 @@ CLIENT_CA_FILE = "/etc/worker/ca.cert"
 
 logger = logging.getLogger(__name__)
 
-_EndpointMapping = TypedDict("_EndpointMapping", {"cluster": str, "tracing": str}, total=True)
+_EndpointMapping = TypedDict("_EndpointMapping", {"cluster": str}, total=True)
 """Mapping of the relation endpoint names that the charms uses, as defined in metadata.yaml."""
 
 
@@ -44,7 +42,6 @@ class Worker(ops.Object):
 
     _endpoints: _EndpointMapping = {
         "cluster": "cluster",
-        "tracing": "tracing",
     }
 
     def __init__(
@@ -85,13 +82,6 @@ class Worker(ops.Object):
                 self.cluster.on.removed,
             ],
         )
-
-        if "tracing" in self._endpoints:
-            self.tracing = TracingEndpointRequirer(
-                self._charm,
-                relation_name=self._endpoints["tracing"],
-                protocols=["otlp_http"],
-            )
 
         # Event listeners
         self.framework.observe(self._charm.on.config_changed, self._on_config_changed)
@@ -243,7 +233,7 @@ class Worker(ops.Object):
             return False
 
         if len(self.roles) == 0:
-            logger.warning("cannot update worker config: role misconfigured.")
+            logger.warning("cannot update worker config: role missing or misconfigured.")
             return False
 
         worker_config = self.cluster.get_worker_config()
@@ -285,6 +275,7 @@ class Worker(ops.Object):
             self._container.remove_path(ca_cert_path, recursive=True)
             ca_cert_path.unlink(missing_ok=True)
 
+        # FIXME: uncomment as soon as the nginx image contains the ca-certificates package
         # self._container.exec(["update-ca-certificates", "--fresh"]).wait()
         # subprocess.run(["update-ca-certificates", "--fresh"])
 

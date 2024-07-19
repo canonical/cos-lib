@@ -63,6 +63,7 @@ class Nginx:
             self._container.push(KEY_PATH, private_key, make_dirs=True)
             self._container.push(CERT_PATH, server_cert, make_dirs=True)
             self._container.push(CA_CERT_PATH, ca_cert, make_dirs=True)
+            # FIXME: uncomment as soon as the nginx image contains the ca-certificates package
             # self._container.exec(["update-ca-certificates", "--fresh"])
 
     def delete_certificates(self) -> None:
@@ -71,6 +72,7 @@ class Nginx:
             self._container.remove_path(CERT_PATH, recursive=True)
             self._container.remove_path(KEY_PATH, recursive=True)
             self._container.remove_path(CA_CERT_PATH, recursive=True)
+            # FIXME: uncomment as soon as the nginx image contains the ca-certificates package
             # self._container.exec(["update-ca-certificates", "--fresh"])
 
     def _has_config_changed(self, new_config: str) -> bool:
