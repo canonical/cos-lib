@@ -557,6 +557,9 @@ class Coordinator(ops.Object):
         if not self.is_coherent:
             logger.error("skipped cluster update: incoherent deployment")
             return
+
+        if not self._charm.unit.is_leader():
+            return
         # we share the certs in plaintext as they're not sensitive information
         # On every function call, we always publish everything to the databag; however, if there
         # are no changes, Juju will notice there's no delta and do nothing

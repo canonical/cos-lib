@@ -329,7 +329,6 @@ class ClusterProvider(Object):
                 except DataValidationError as e:
                     log.info(f"invalid databag contents: {e}")
                     continue
-
         return data
 
     def gather_addresses(self) -> Set[str]:
