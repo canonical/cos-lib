@@ -188,10 +188,9 @@ class Coordinator(ops.Object):
             refresh_event=refresh_events,
         )
 
-        if "tracing" in self._endpoints:
-            self.tracing = TracingEndpointRequirer(
-                self._charm, relation_name=self._endpoints["tracing"], protocols=["otlp_http"]
-            )
+        self.tracing = TracingEndpointRequirer(
+            self._charm, relation_name=self._endpoints["tracing"], protocols=["otlp_http"]
+        )
 
         # We always listen to collect-status
         self.framework.observe(self._charm.on.collect_unit_status, self._on_collect_unit_status)
