@@ -305,6 +305,11 @@ class Coordinator(ops.Object):
         return True
 
     @property
+    def can_handle_events(self) -> bool:
+        """Check whether the coordinaator should handle events."""
+        return self.cluster.has_workers and self.is_coherent and self.s3_ready
+
+    @property
     def hostname(self) -> str:
         """Unit's hostname."""
         return socket.getfqdn()
