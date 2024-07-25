@@ -346,7 +346,7 @@ class Coordinator(ops.Object):
             and "secret-key" in s3_config
         ):
             raise S3NotFoundError("s3 integration inactive")
-        s3_config["insecure"] = "false" if s3_config["endpoint"].startswith("https://") else "true"
+        s3_config["insecure"] = False if s3_config["endpoint"].startswith("https://") else True
         s3_config["endpoint"] = re.sub(
             rf"^{urlparse(s3_config['endpoint']).scheme}://", "", s3_config["endpoint"]
         )
