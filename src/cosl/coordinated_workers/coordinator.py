@@ -349,6 +349,7 @@ class Coordinator(ops.Object):
         s3_config["access_key_id"] = s3_config.pop("access-key")
         s3_config["secret_access_key"] = s3_config.pop("secret-key")
         s3_config["bucket_name"] = s3_config.pop("bucket")
+        s3_config.pop("data")
         return s3_config
 
     @property
