@@ -156,8 +156,7 @@ class Worker(ops.Object):
         roles: List[str] = [
             role.removeprefix("role-")
             for role in config.keys()
-            if role.startswith("role-")
-            and config[role] is True
+            if role.startswith("role-") and config[role] is True
         ]
 
         if roles:
