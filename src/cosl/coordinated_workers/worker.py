@@ -36,11 +36,11 @@ logger = logging.getLogger(__name__)
 _EndpointMapping = TypedDict("_EndpointMapping", {"cluster": str}, total=True)
 """Mapping of the relation endpoint names that the charms uses, as defined in metadata.yaml."""
 
+ROOT_CA_CERT = Path("/usr/local/share/ca-certificates/ca.crt")
+
 
 class Worker(ops.Object):
     """Charming worker."""
-
-    ca_cert_path = Path("/usr/local/share/ca-certificates/ca.crt")
 
     _endpoints: _EndpointMapping = {
         "cluster": "cluster",
@@ -267,18 +267,18 @@ class Worker(ops.Object):
             self._container.push(CERT_FILE, server_cert or "", make_dirs=True)
             self._container.push(KEY_FILE, private_key or "", make_dirs=True)
             self._container.push(CLIENT_CA_FILE, ca_cert or "", make_dirs=True)
-            self._container.push(self.ca_cert_path, ca_cert or "", make_dirs=True)
+            self._container.push(ROOT_CA_CERT, ca_cert or "", make_dirs=True)
 
             # Save the cacert in the charm container for charm traces
-            self.ca_cert_path.write_text(ca_cert)
+            ROOT_CA_CERT.write_text(ca_cert)
         else:
             self._container.remove_path(CERT_FILE, recursive=True)
             self._container.remove_path(KEY_FILE, recursive=True)
             self._container.remove_path(CLIENT_CA_FILE, recursive=True)
-            self._container.remove_path(self.ca_cert_path, recursive=True)
+            self._container.remove_path(ROOT_CA_CERT, recursive=True)
 
             # Remove from charm container
-            self.ca_cert_path.unlink(missing_ok=True)
+            ROOT_CA_CERT.unlink(missing_ok=True)
 
         # FIXME: uncomment as soon as the nginx image contains the ca-certificates package
         # self._container.exec(["update-ca-certificates", "--fresh"]).wait()
@@ -343,19 +343,18 @@ class Worker(ops.Object):
         server_ca_cert = tls_data.get("server_cert") if tls_data else None
 
         if is_https:
-            ca_cert_path = self.ca_cert_path
             if server_ca_cert is None:
                 raise RuntimeError(
                     "Cannot send traces to an https endpoint without a certificate."
                 )
-            elif not ca_cert_path.exists():
+            elif not ROOT_CA_CERT.exists():
                 # if endpoint is https and we have a tls integration BUT we don't have the
                 # server_cert on disk yet (this could race with _update_tls_certificates):
                 # put it there and proceed
-                ca_cert_path.parent.mkdir(parents=True, exist_ok=True)
-                ca_cert_path.write_text(server_ca_cert)
+                ROOT_CA_CERT.parent.mkdir(parents=True, exist_ok=True)
+                ROOT_CA_CERT.write_text(server_ca_cert)
 
-            return endpoint, str(ca_cert_path)
+            return endpoint, str(ROOT_CA_CERT)
         else:
             return endpoint, None
 
