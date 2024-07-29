@@ -8,7 +8,7 @@ import re
 import socket
 from functools import partial
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, TypedDict
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypedDict
 
 import ops
 import yaml
@@ -39,6 +39,8 @@ _EndpointMapping = TypedDict("_EndpointMapping", {"cluster": str}, total=True)
 
 class Worker(ops.Object):
     """Charming worker."""
+
+    ca_cert_path = Path("/usr/local/share/ca-certificates/ca.crt")
 
     _endpoints: _EndpointMapping = {
         "cluster": "cluster",
@@ -254,8 +256,6 @@ class Worker(ops.Object):
         if not self._container.can_connect():
             return False
 
-        ca_cert_path = Path("/usr/local/share/ca-certificates/ca.crt")
-
         if tls_data := self.cluster.get_tls_data():
             private_key_secret = self.model.get_secret(id=tls_data["privkey_secret_id"])
             private_key = private_key_secret.get_content().get("private-key")
@@ -267,18 +267,18 @@ class Worker(ops.Object):
             self._container.push(CERT_FILE, server_cert or "", make_dirs=True)
             self._container.push(KEY_FILE, private_key or "", make_dirs=True)
             self._container.push(CLIENT_CA_FILE, ca_cert or "", make_dirs=True)
-            self._container.push(ca_cert_path, ca_cert or "", make_dirs=True)
+            self._container.push(self.ca_cert_path, ca_cert or "", make_dirs=True)
 
             # Save the cacert in the charm container for charm traces
-            ca_cert_path.write_text(ca_cert)
+            self.ca_cert_path.write_text(ca_cert)
         else:
             self._container.remove_path(CERT_FILE, recursive=True)
             self._container.remove_path(KEY_FILE, recursive=True)
             self._container.remove_path(CLIENT_CA_FILE, recursive=True)
-            self._container.remove_path(ca_cert_path, recursive=True)
+            self._container.remove_path(self.ca_cert_path, recursive=True)
 
             # Remove from charm container
-            ca_cert_path.unlink(missing_ok=True)
+            self.ca_cert_path.unlink(missing_ok=True)
 
         # FIXME: uncomment as soon as the nginx image contains the ca-certificates package
         # self._container.exec(["update-ca-certificates", "--fresh"]).wait()
@@ -313,6 +313,51 @@ class Worker(ops.Object):
         if result := re.search(r"[Vv]ersion:?\s*(\S+)", version_output):
             return result.group(1)
         return None
+
+    def charm_tracing_config(self) -> Tuple[Optional[str], Optional[str]]:
+        """Get the charm tracing configuration from the coordinator.
+
+        Usage:
+          assuming you are using charm_tracing >= v1.9:
+        >>> from ops import CharmBase
+        >>> from lib.charms.tempo_k8s.v1.charm_tracing import trace_charm
+        >>> from lib.charms.tempo_k8s.v2.tracing import charm_tracing_config
+        >>> @trace_charm(tracing_endpoint="my_endpoint", cert_path="cert_path")
+        >>> class MyCharm(CharmBase):
+        >>>     def __init__(self, ...):
+        >>>         self.worker = Worker(...)
+        >>>         self.my_endpoint, self.cert_path = self.worker.charm_tracing_config()
+        """
+        receivers = self.cluster.get_tracing_receivers()
+
+        if not receivers:
+            return None, None
+
+        endpoint = receivers.get("otlp_http")
+        if not endpoint:
+            return None, None
+
+        is_https = endpoint.startswith("https://")
+
+        tls_data = self.cluster.get_tls_data()
+        server_ca_cert = tls_data.get("server_cert") if tls_data else None
+
+        if is_https:
+            ca_cert_path = self.ca_cert_path
+            if server_ca_cert is None:
+                raise RuntimeError(
+                    "Cannot send traces to an https endpoint without a certificate."
+                )
+            elif not ca_cert_path.exists():
+                # if endpoint is https and we have a tls integration BUT we don't have the
+                # server_cert on disk yet (this could race with _update_tls_certificates):
+                # put it there and proceed
+                ca_cert_path.parent.mkdir(parents=True, exist_ok=True)
+                ca_cert_path.write_text(server_ca_cert)
+
+            return endpoint, str(ca_cert_path)
+        else:
+            return endpoint, None
 
 
 class ManualLogForwarder(ops.Object):
