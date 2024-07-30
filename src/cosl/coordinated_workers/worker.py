@@ -149,30 +149,21 @@ class Worker(ops.Object):
         """Return a list of the roles this worker should take on."""
         config = self._charm.config
 
+        role_config_options = [option for option in config.keys() if option.startswith("role-")]
+        if not role_config_options:
+            raise RuntimeError(
+                "The charm should define a set of `role-X` config "
+                "options for it to use the Worker."
+            )
         # IF the charm defines a set of roles by config like:
         # "role-a": bool
         # "role-b": bool
         # "role-b": bool
         roles: List[str] = [
-            role.removeprefix("role-")
-            for role in config.keys()
-            if role.startswith("role-") and config[role] is True
+            role.removeprefix("role-") for role in role_config_options if config[role] is True
         ]
 
-        if roles:
-            return roles
-
-        # this is not very nice, but the tempo worker defines a single role by a config
-        # option called "role", not several `role-X` boolean flags.
-        else:
-            # IF the charm defines a single role by config like:
-            # "role": str
-            role = config.get("role")
-
-            if not role:
-                raise RuntimeError("unable to determine roles from config")
-
-            return [role]
+        return roles
 
     def _update_config(self) -> None:
         """Update the worker config and restart the workload if necessary."""
