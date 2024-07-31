@@ -1,10 +1,6 @@
-from unittest.mock import patch
-
 import ops
 import pytest
-
 from cosl.coordinated_workers.worker import Worker
-
 from ops import Framework
 from ops.pebble import Layer
 from scenario import Container, Context, State
