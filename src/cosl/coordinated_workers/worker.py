@@ -51,7 +51,7 @@ class Worker(ops.Object):
         charm: ops.CharmBase,
         name: str,
         pebble_layer: Callable[["Worker"], Layer],
-        endpoints: Optional[_EndpointMapping] = None,
+        endpoints: _EndpointMapping,
     ):
         """Constructor for a Worker object.
 
@@ -164,7 +164,7 @@ class Worker(ops.Object):
             )
 
         active_roles: List[str] = [
-            role.removeprefix("role-") for role in role_config_options if config[role] is True
+            role[5:] for role in role_config_options if config[role] is True
         ]
         return active_roles
 
