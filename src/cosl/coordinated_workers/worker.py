@@ -146,7 +146,14 @@ class Worker(ops.Object):
     # Utility functions
     @property
     def roles(self) -> List[str]:
-        """Return a list of the roles this worker should take on."""
+        """Return a list of the roles this worker should take on.
+
+        Expects that the charm defines a set of roles by config like:
+            "role-a": bool
+            "role-b": bool
+            "role-b": bool
+        If this is not the case, it will raise an error.
+        """
         config = self._charm.config
 
         role_config_options = [option for option in config.keys() if option.startswith("role-")]
@@ -155,15 +162,11 @@ class Worker(ops.Object):
                 "The charm should define a set of `role-X` config "
                 "options for it to use the Worker."
             )
-        # IF the charm defines a set of roles by config like:
-        # "role-a": bool
-        # "role-b": bool
-        # "role-b": bool
-        roles: List[str] = [
+
+        active_roles: List[str] = [
             role.removeprefix("role-") for role in role_config_options if config[role] is True
         ]
-
-        return roles
+        return active_roles
 
     def _update_config(self) -> None:
         """Update the worker config and restart the workload if necessary."""
