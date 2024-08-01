@@ -95,19 +95,19 @@ class Coordinator(ops.Object):
     """
 
     def __init__(
-            self,
-            charm: ops.CharmBase,
-            roles_config: ClusterRolesConfig,
-            s3_bucket_name: str,
-            external_url: str,  # the ingressed url if we have ingress, else fqdn
-            worker_metrics_port: int,
-            endpoints: _EndpointMapping,
-            nginx_config: Callable[["Coordinator"], str],
-            workers_config: Callable[["Coordinator"], str],
-            nginx_options: Optional[NginxMappingOverrides] = None,
-            is_coherent: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
-            is_recommended: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
-            tracing_receivers: Optional[Callable[[], Optional[Dict[str, str]]]] = None,
+        self,
+        charm: ops.CharmBase,
+        roles_config: ClusterRolesConfig,
+        s3_bucket_name: str,
+        external_url: str,  # the ingressed url if we have ingress, else fqdn
+        worker_metrics_port: int,
+        endpoints: _EndpointMapping,
+        nginx_config: Callable[["Coordinator"], str],
+        workers_config: Callable[["Coordinator"], str],
+        nginx_options: Optional[NginxMappingOverrides] = None,
+        is_coherent: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
+        is_recommended: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
+        tracing_receivers: Optional[Callable[[], Optional[Dict[str, str]]]] = None,
     ):
         """Constructor for a Coordinator object.
 
@@ -323,10 +323,10 @@ class Coordinator(ops.Object):
     def tls_available(self) -> bool:
         """Return True if tls is enabled and the necessary certs are found."""
         return (
-                self.cert_handler.enabled
-                and (self.cert_handler.server_cert is not None)
-                and (self.cert_handler.private_key is not None)  # type: ignore
-                and (self.cert_handler.ca_cert is not None)
+            self.cert_handler.enabled
+            and (self.cert_handler.server_cert is not None)
+            and (self.cert_handler.private_key is not None)  # type: ignore
+            and (self.cert_handler.ca_cert is not None)
         )
 
     @property
@@ -341,11 +341,11 @@ class Coordinator(ops.Object):
         s3_data = self.s3_requirer.get_s3_connection_info()
         s3_config: Dict[str, Any] = {}
         if not (
-                s3_data
-                and "bucket" in s3_data
-                and "endpoint" in s3_data
-                and "access-key" in s3_data
-                and "secret-key" in s3_data
+            s3_data
+            and "bucket" in s3_data
+            and "endpoint" in s3_data
+            and "access-key" in s3_data
+            and "secret-key" in s3_data
         ):
             raise S3NotFoundError("s3 integration inactive")
         s3_config["insecure"] = not s3_data["endpoint"].startswith("https://")
@@ -577,7 +577,9 @@ class Coordinator(ops.Object):
             ca_cert=self.cert_handler.ca_cert,
             server_cert=self.cert_handler.server_cert,
             privkey_secret_id=self.cluster.grant_privkey(VAULT_SECRET_LABEL),
-            tracing_receivers=self._tracing_receivers_getter() if self._tracing_receivers_getter else None
+            tracing_receivers=(
+                self._tracing_receivers_getter() if self._tracing_receivers_getter else None
+            ),
         )
 
     def _render_workers_alert_rules(self):
