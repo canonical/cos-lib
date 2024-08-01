@@ -23,7 +23,7 @@ check_libs_installed(
     "charms.loki_k8s.v1.loki_push_api",
 )
 
-from charms.loki_k8s.v1.loki_push_api import _PebbleLogClient
+from charms.loki_k8s.v1.loki_push_api import _PebbleLogClient  # type: ignore
 
 BASE_DIR = "/worker"
 CONFIG_FILE = "/etc/worker/config.yaml"
@@ -163,7 +163,6 @@ class Worker(ops.Object):
                 "options for it to use the Worker."
             )
 
-        "ff".removeprefix("f")
         active_roles: List[str] = [
             role[5:] for role in role_config_options if config[role] is True
         ]
@@ -381,7 +380,7 @@ class ManualLogForwarder(ops.Object):
         super().__init__(charm, "worker-log-forwarder")
         self._charm = charm
         self._loki_endpoints = loki_endpoints
-        self._topology = JujuTopology.from_charm(charm)
+        self._topology: JujuTopology = JujuTopology.from_charm(charm)
 
         if not refresh_events:
             return
@@ -399,12 +398,12 @@ class ManualLogForwarder(ops.Object):
 
         for container in self._charm.unit.containers.values():
             if container.can_connect():
-                _PebbleLogClient.disable_inactive_endpoints(
+                _PebbleLogClient.disable_inactive_endpoints(  # type:ignore
                     container=container,
                     active_endpoints=loki_endpoints,
                     topology=self._topology,
                 )
-                _PebbleLogClient.enable_endpoints(
+                _PebbleLogClient.enable_endpoints(  # type:ignore
                     container=container, active_endpoints=loki_endpoints, topology=self._topology
                 )
 
@@ -414,6 +413,6 @@ class ManualLogForwarder(ops.Object):
         # the Loki endpoints in the relation data.
         for container in self._charm.unit.containers.values():
             if container.can_connect():
-                _PebbleLogClient.disable_inactive_endpoints(
+                _PebbleLogClient.disable_inactive_endpoints(  # type:ignore
                     container=container, active_endpoints={}, topology=self._topology
                 )
