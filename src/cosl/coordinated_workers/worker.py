@@ -39,6 +39,10 @@ _EndpointMapping = TypedDict("_EndpointMapping", {"cluster": str}, total=True)
 ROOT_CA_CERT = Path("/usr/local/share/ca-certificates/ca.crt")
 
 
+class WorkerError(Exception):
+    """Base class for exceptions raised by this module."""
+
+
 class Worker(ops.Object):
     """Charming worker."""
 
@@ -158,7 +162,7 @@ class Worker(ops.Object):
 
         role_config_options = [option for option in config.keys() if option.startswith("role-")]
         if not role_config_options:
-            raise RuntimeError(
+            raise WorkerError(
                 "The charm should define a set of `role-X` config "
                 "options for it to use the Worker."
             )
