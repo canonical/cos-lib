@@ -163,7 +163,6 @@ class Worker(ops.Object):
                 "options for it to use the Worker."
             )
 
-        "ff".removeprefix("f")
         active_roles: List[str] = [
             role[5:] for role in role_config_options if config[role] is True
         ]
