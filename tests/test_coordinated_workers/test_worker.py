@@ -4,6 +4,7 @@ from cosl.coordinated_workers.worker import Worker
 from ops import Framework
 from ops.pebble import Layer
 from scenario import Container, Context, State
+from scenario.runtime import UncaughtCharmError
 
 
 class MyCharm(ops.CharmBase):
@@ -13,6 +14,10 @@ class MyCharm(ops.CharmBase):
 
 
 def test_no_roles_error():
+    # Test that a charm that defines NO 'role-x' config options, when run,
+    # raises a WorkerError
+
+    # WHEN you define a charm with no role-x config options
     ctx = Context(
         MyCharm,
         meta={
@@ -23,20 +28,30 @@ def test_no_roles_error():
         config={},
     )
 
-    with pytest.raises(RuntimeError):
+    # IF the charm executes any event
+    # THEN the charm raises an error
+    with pytest.raises(UncaughtCharmError):
         ctx.run("update-status", State(containers=[Container("foo")]))
 
 
 @pytest.mark.parametrize(
     "roles_active, roles_inactive, expected",
     (
-        ("abc", "de", "abc"),
-        ("ac", "bde", "ac"),
-        ("ac", "", "ac"),
-        ("", "d", ""),
+        (
+            ["read", "write", "ingester", "all"],
+            ["alertmanager"],
+            ["read", "write", "ingester", "all"],
+        ),
+        (["read", "write"], ["alertmanager"], ["read", "write"]),
+        (["read"], ["alertmanager", "write", "ingester", "all"], ["read"]),
+        ([], ["read", "write", "ingester", "all", "alertmanager"], []),
     ),
 )
-def test_roles(roles_active, roles_inactive, expected):
+def test_roles_from_config(roles_active, roles_inactive, expected):
+    # Test that a charm that defines any 'role-x' config options, when run,
+    # correctly determines which ones are enabled through the Worker
+
+    # WHEN you define a charm with a few role-x config options
     ctx = Context(
         MyCharm,
         meta={
@@ -52,6 +67,7 @@ def test_roles(roles_active, roles_inactive, expected):
         },
     )
 
+    # AND the charm runs with a few of those set to true, the rest to false
     with ctx.manager(
         "update-status",
         State(
@@ -62,4 +78,5 @@ def test_roles(roles_active, roles_inactive, expected):
             },
         ),
     ) as mgr:
+        # THEN the Worker.roles method correctly returns the list of only those that are set to true
         assert set(mgr.charm.worker.roles) == set(expected)
