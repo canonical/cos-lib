@@ -1,11 +1,12 @@
+from pathlib import Path
 import ops
 import pytest
 from typing import List
-from src.cosl.coordinated_workers.interface import ClusterRequirerAppData, ClusterRequirerUnitData
-from src.cosl.coordinated_workers.worker import Worker
+from src.cosl.coordinated_workers.interface import ClusterProviderAppData, ClusterRequirerAppData, ClusterRequirerUnitData
+from src.cosl.coordinated_workers.worker import Worker, CERT_FILE, CONFIG_FILE, KEY_FILE, CLIENT_CA_FILE, ROOT_CA_CERT_LOCAL, ROOT_CA_CERT_CONTAINER
 from ops import Framework
 from ops.pebble import Layer
-from scenario import Container, Context, State, ExecOutput, Relation
+from scenario import Container, Context, Secret, State, ExecOutput, Relation
 from scenario.runtime import UncaughtCharmError
 
 
@@ -170,7 +171,6 @@ def test_pebble_layer_on_cluster_created(leader: bool):
     
 
 
-
 @pytest.mark.parametrize("leader", (True, False))
 @pytest.mark.parametrize("roles", (["read"], ["read", "write"]))
 def test_cluster_relation_data_on_cluster_created(leader: bool, roles: List[str]):
@@ -202,7 +202,7 @@ def test_cluster_relation_data_on_cluster_created(leader: bool, roles: List[str]
     if leader:
         # THEN the charm has published the right data to app data
         assert ClusterRequirerAppData.load(cluster_out.local_app_data).role == ",".join(roles)
-    else:
+    else: 
         # THEN the charm didn't publish anything to app data
         assert not cluster_out.local_app_data
 
@@ -211,4 +211,185 @@ def test_cluster_relation_data_on_cluster_created(leader: bool, roles: List[str]
 
 
     
+@pytest.fixture
+def privkey_secret():
+    return Secret(
+        id="secret:123312313",
+        contents={0: {"private-key": "verysecret"}}
+    )
+
+
+@pytest.fixture
+def foo_container():
+    return Container(
+        "foo", 
+        can_connect=True,
+        exec_mock={('/bin/foo', '-version'): 
+                    ExecOutput(
+                        return_code=0, 
+                        stdout="n/a")
+                    },
+        layers={
+            "foo": Layer( 
+                {
+                    'summary': "some",
+                    'description': "layer",
+                    'services': {"foo": {"command": "whoami"}},
+                }
+            )
+        }
+    )
+
+
+
+def test_config_created_on_pebble_ready(foo_container: Container):
+    ctx = Context(
+        MyWorker,
+        meta=MyWorker.META,
+        config=MyWorker.CONFIG
+    )
+    cluster = Relation("my-cluster",
+                       remote_app_data=ClusterProviderAppData(
+                           worker_config="some: yaml"
+                       ).dump())
+    # WHEN we receive any of:
+    # - pebble_ready
+    # - worker_config_received
+    # - cluster_created
+    # - cluster_changed
+    with ctx.manager(
+        cluster.created_event,
+        State(
+            leader=True,
+            config={f"role-{r}": True for r in {"read", "write"}},
+            relations=[cluster],
+            containers=[foo_container]
+            )
+    ) as mgr:
+        charm: MyCharm = mgr.charm
+        # we verify the cluster's get_tls_data sees it
+        worker_config = charm.worker.cluster.get_worker_config()
+        assert worker_config
+
+    # THEN the charm pushes the workload config to the workload container
+    fs = str(foo_container.get_filesystem(ctx))
     
+    config_file_path_relative_to_fs = Path(fs + str(CONFIG_FILE))
+    assert config_file_path_relative_to_fs.exists()
+    assert config_file_path_relative_to_fs.read_text().strip() == "some: yaml"
+
+
+@pytest.mark.parametrize("event_type", (
+        "cluster-changed", "cluster-created", "pebble-ready", "upgrade-charm"
+))
+def test_update_tls_certificates_workload_container(privkey_secret: Secret, foo_container: Container, root_ca_cert:Path, event_type: str):
+    # GIVEN the cluster has published TLS data
+    ctx = Context(
+        MyWorker,
+        meta=MyWorker.META,
+        config=MyWorker.CONFIG
+    )
+
+    cluster = Relation(
+        "my-cluster",
+        remote_app_data=ClusterProviderAppData(
+            worker_config="some: yaml",
+            ca_cert="cacert",
+            server_cert="servercert",
+            privkey_secret_id=privkey_secret.id,
+        ).dump()
+        )
+    
+    # WHEN we receive any of:
+    # - pebble_ready
+    # - _worker_config_received
+    # - upgrade_charm
+    # - cluster_created
+    # - cluster_changed
+    event = {
+        "cluster-changed": cluster.changed_event,
+        "cluster-created": cluster.created_event,
+        "pebble-ready": foo_container.pebble_ready_event,
+        "upgrade-charm": "upgrade-charm"
+    }[event_type]
+    with ctx.manager(
+        event=event,
+        state=State(
+            leader=True,
+            config={f"role-{r}": True for r in {"read", "write"}},
+            relations=[cluster],
+            containers=[foo_container],
+            secrets=[privkey_secret]
+            )
+    ) as mgr:
+        charm: MyCharm = mgr.charm
+        # we verify the cluster's get_tls_data sees it
+        tls_data = charm.worker.cluster.get_tls_data()
+        assert tls_data
+
+    # THEN the charm pushes TLS configs to the workload container 
+    fs = str(foo_container.get_filesystem(ctx))
+
+    for file, expected_content in zip(
+        (CERT_FILE,
+        KEY_FILE,
+        CLIENT_CA_FILE,
+        ROOT_CA_CERT_CONTAINER), (
+            "servercert", "verysecret", "cacert", "cacert"
+        ) ):
+        path_relative_to_fs = Path(fs + str(file))
+        assert path_relative_to_fs.exists(), file
+        assert path_relative_to_fs.read_text() == expected_content
+
+
+@pytest.mark.parametrize("event_type", (
+        "cluster-changed", "cluster-created", "pebble-ready", "upgrade-charm"
+))
+def test_update_tls_certificates_local_fs(privkey_secret: Secret, foo_container: Container, root_ca_cert:Path, event_type: str):
+    # GIVEN the cluster has published TLS data
+    ctx = Context(
+        MyWorker,
+        meta=MyWorker.META,
+        config=MyWorker.CONFIG
+    )
+
+    cluster = Relation(
+        "my-cluster",
+        remote_app_data=ClusterProviderAppData(
+            worker_config="some: yaml",
+            ca_cert="cacert",
+            server_cert="servercert",
+            privkey_secret_id=privkey_secret.id,
+        ).dump()
+    )
+
+    # WHEN we receive any of:
+    # - pebble_ready
+    # - _worker_config_received
+    # - upgrade_charm
+    # - cluster_created
+    # - cluster_changed
+    event = {
+        "cluster-changed": cluster.changed_event,
+        "cluster-created": cluster.created_event,
+        "pebble-ready": foo_container.pebble_ready_event,
+        "upgrade-charm": "upgrade-charm"
+    }[event_type]
+    with ctx.manager(
+            event=event,
+            state=State(
+                leader=True,
+                config={f"role-{r}": True for r in {"read", "write"}},
+                relations=[cluster],
+                containers=[foo_container],
+                secrets=[privkey_secret]
+            )
+    ) as mgr:
+        charm: MyCharm = mgr.charm
+        # we verify the cluster's get_tls_data sees it
+        tls_data = charm.worker.cluster.get_tls_data()
+        assert tls_data
+
+    # THEN the charm pushes TLS configs to the local filesystem
+    assert root_ca_cert.exists()
+    assert root_ca_cert.read_text() == "cacert"

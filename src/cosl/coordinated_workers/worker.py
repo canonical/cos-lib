@@ -36,7 +36,9 @@ logger = logging.getLogger(__name__)
 _EndpointMapping = TypedDict("_EndpointMapping", {"cluster": str}, total=True)
 """Mapping of the relation endpoint names that the charms uses, as defined in metadata.yaml."""
 
-ROOT_CA_CERT = Path("/usr/local/share/ca-certificates/ca.crt")
+_ROOT_CA_CERT_PATH = "/usr/local/share/ca-certificates/ca.crt"
+ROOT_CA_CERT_CONTAINER = Path(_ROOT_CA_CERT_PATH)
+ROOT_CA_CERT_LOCAL = Path(_ROOT_CA_CERT_PATH)
 
 
 class WorkerError(Exception):
@@ -278,18 +280,18 @@ class Worker(ops.Object):
             self._container.push(CERT_FILE, server_cert or "", make_dirs=True)
             self._container.push(KEY_FILE, private_key or "", make_dirs=True)
             self._container.push(CLIENT_CA_FILE, ca_cert or "", make_dirs=True)
-            self._container.push(ROOT_CA_CERT, ca_cert or "", make_dirs=True)
+            self._container.push(ROOT_CA_CERT_CONTAINER, ca_cert or "", make_dirs=True)
 
             # Save the cacert in the charm container for charm traces
-            ROOT_CA_CERT.write_text(ca_cert)
+            ROOT_CA_CERT_LOCAL.write_text(ca_cert)
         else:
             self._container.remove_path(CERT_FILE, recursive=True)
             self._container.remove_path(KEY_FILE, recursive=True)
             self._container.remove_path(CLIENT_CA_FILE, recursive=True)
-            self._container.remove_path(ROOT_CA_CERT, recursive=True)
+            self._container.remove_path(ROOT_CA_CERT_CONTAINER, recursive=True)
 
             # Remove from charm container
-            ROOT_CA_CERT.unlink(missing_ok=True)
+            ROOT_CA_CERT_LOCAL.unlink(missing_ok=True)
 
         # FIXME: uncomment as soon as the nginx image contains the ca-certificates package
         # self._container.exec(["update-ca-certificates", "--fresh"]).wait()
@@ -358,14 +360,14 @@ class Worker(ops.Object):
                 raise RuntimeError(
                     "Cannot send traces to an https endpoint without a certificate."
                 )
-            elif not ROOT_CA_CERT.exists():
+            elif not ROOT_CA_CERT_LOCAL.exists():
                 # if endpoint is https and we have a tls integration BUT we don't have the
                 # server_cert on disk yet (this could race with _update_tls_certificates):
                 # put it there and proceed
-                ROOT_CA_CERT.parent.mkdir(parents=True, exist_ok=True)
-                ROOT_CA_CERT.write_text(server_ca_cert)
+                ROOT_CA_CERT_LOCAL.parent.mkdir(parents=True, exist_ok=True)
+                ROOT_CA_CERT_LOCAL.write_text(server_ca_cert)
 
-            return endpoint, str(ROOT_CA_CERT)
+            return endpoint, str(ROOT_CA_CERT_LOCAL)
         else:
             return endpoint, None
 
