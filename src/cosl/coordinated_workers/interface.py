@@ -257,13 +257,9 @@ class ClusterProvider(Object):
     def _on_cluster_changed(self, _: ops.EventBase) -> None:
         self.on.changed.emit()
 
-    def grant_privkey(self, label: str) -> Optional[str]:
+    def grant_privkey(self, label: str) -> str:
         """Grant the secret containing the privkey to all relations, and return the secret ID."""
-        try:
-            secret = self.model.get_secret(label=label)
-        except ops.model.SecretNotFoundError:
-            # we are fetching the secret that isn't there as there were no certs, skip privkey
-            return None
+        secret = self.model.get_secret(label=label)
         for relation in self._relations:
             secret.grant(relation)
         # can't return secret.id because secret was obtained by label, and so
