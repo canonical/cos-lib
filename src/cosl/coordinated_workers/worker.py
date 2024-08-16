@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, TypedDict
 import ops
 import yaml
 from ops.model import ActiveStatus, BlockedStatus, WaitingStatus
-from ops.pebble import Layer, PathError, ProtocolError, Plan, Check
+from ops.pebble import Check, Layer, PathError, Plan, ProtocolError
 
 from cosl import JujuTopology
 from cosl.coordinated_workers.interface import ClusterRequirer
@@ -47,6 +47,7 @@ class WorkerError(Exception):
 
 class ServiceEndpointStatus(Enum):
     """Status of the worker service managed by pebble."""
+
     starting = "starting"
     up = "up"
     down = "down"
@@ -60,12 +61,12 @@ class Worker(ops.Object):
     }
 
     def __init__(
-            self,
-            charm: ops.CharmBase,
-            name: str,
-            pebble_layer: Callable[["Worker"], Layer],
-            endpoints: _EndpointMapping,
-            readiness_check_endpoint: Optional[str] = None
+        self,
+        charm: ops.CharmBase,
+        name: str,
+        pebble_layer: Callable[["Worker"], Layer],
+        endpoints: _EndpointMapping,
+        readiness_check_endpoint: Optional[str] = None,
     ):
         """Constructor for a Worker object.
 
@@ -162,9 +163,13 @@ class Worker(ops.Object):
 
     @property
     def status(self) -> ServiceEndpointStatus:
-        if not self._readiness_check_endpoint:
-            raise WorkerError("cannot check readiness without a readiness_check_endpoint configured. "
-                              "Pass one to Worker on __init__.")
+        """Determine the status of the service's endpoint."""
+        check_endpoint = self._readiness_check_endpoint
+        if not check_endpoint:
+            raise WorkerError(
+                "cannot check readiness without a readiness_check_endpoint configured. "
+                "Pass one to Worker on __init__."
+            )
 
         if not self._container.can_connect():
             logger.debug("Container cannot connect. Skipping status check.")
@@ -181,32 +186,42 @@ class Worker(ops.Object):
             running_status = {name: svc.is_running() for name, svc in services.items()}
             if not all(running_status.values()):
                 if any(running_status.values()):
-                    starting_services = tuple(name for name, running in running_status.items() if not running)
+                    starting_services = tuple(
+                        name for name, running in running_status.items() if not running
+                    )
                     logger.info(f"Some services are not running: {starting_services}.")
                     return ServiceEndpointStatus.starting
 
-                logger.info(f"All services are down.")
+                logger.info("All services are down.")
                 return ServiceEndpointStatus.down
 
-            with urllib.request.urlopen("http://localhost:3200/ready") as response:
+            with urllib.request.urlopen(check_endpoint) as response:
                 html: bytes = response.read()
-            # TODO: this was tested with Tempo. Do Loki and Mimir have the same output format?
-            # response looks like:
+
+            # ready response should simply be a string:
+            #   "ready"
+            raw_out = html.decode("utf-8").strip()
+            if raw_out == "ready":
+                return ServiceEndpointStatus.up
+
+            # depending on the workload, we get something like:
             #   Some services are not Running:
             #   Starting: 1
             #   Running: 16
-            # or simply:
-            #   ready
-            raw_out = html.decode("utf-8").strip()
-            if "Starting: " in raw_out:
-                return ServiceEndpointStatus.starting
-            elif raw_out == "ready":
-                return ServiceEndpointStatus.up
-            return ServiceEndpointStatus.down
+            # (tempo)
+            #   Ingester not ready: waiting for 15s after being ready
+            # (mimir)
+
+            # anything that isn't 'ready' but also is a 2xx response will be interpreted as:
+            # we're not ready yet, but we're working on it.
+            logger.debug(f"GET {check_endpoint} returned: {raw_out!r}.")
+            return ServiceEndpointStatus.starting
 
         except Exception:
-            logger.exception("Error while getting worker status. "
-                             "This could mean that the worker is still starting.")
+            logger.exception(
+                "Error while getting worker status. "
+                "This could mean that the worker is still starting."
+            )
             return ServiceEndpointStatus.down
 
     def _on_collect_status(self, e: ops.CollectStatusEvent):
@@ -314,10 +329,7 @@ class Worker(ops.Object):
             return
 
         new_layer.checks["ready"] = Check(
-            "ready", {
-                "override": "replace",
-                "http": {"url": self._readiness_check_endpoint}
-            }
+            "ready", {"override": "replace", "http": {"url": self._readiness_check_endpoint}}
         )
 
     def _update_cluster_relation(self) -> None:
@@ -487,11 +499,11 @@ class ManualLogForwarder(ops.Object):
     """Forward the standard outputs of all workloads to explictly-provided Loki endpoints."""
 
     def __init__(
-            self,
-            charm: ops.CharmBase,
-            *,
-            loki_endpoints: Optional[Dict[str, str]],
-            refresh_events: Optional[List[ops.BoundEvent]] = None,
+        self,
+        charm: ops.CharmBase,
+        *,
+        loki_endpoints: Optional[Dict[str, str]],
+        refresh_events: Optional[List[ops.BoundEvent]] = None,
     ):
         _PebbleLogClient.check_juju_version()
         super().__init__(charm, "worker-log-forwarder")

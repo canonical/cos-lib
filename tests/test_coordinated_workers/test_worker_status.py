@@ -1,16 +1,13 @@
 from contextlib import contextmanager
 from functools import partial
-from unittest.mock import MagicMock
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-from ops import ActiveStatus, WaitingStatus, BlockedStatus, CharmBase, Framework
-from ops.pebble import Layer
-from scenario import Context
-from scenario import State, Container, Relation
-
 from cosl.coordinated_workers.interface import ClusterProviderAppData
 from cosl.coordinated_workers.worker import Worker, WorkerError
+from ops import ActiveStatus, BlockedStatus, CharmBase, Framework, WaitingStatus
+from ops.pebble import Layer
+from scenario import Container, Context, Relation, State
 
 
 @contextmanager
@@ -33,7 +30,7 @@ def ctx():
                 "workload",
                 lambda _: Layer(""),
                 {"cluster": "cluster"},
-                readiness_check_endpoint="http://localhost:3200/ready"
+                readiness_check_endpoint="http://localhost:3200/ready",
             )
 
     return Context(
@@ -41,15 +38,15 @@ def ctx():
         meta={
             "name": "lilith",
             "requires": {"cluster": {"interface": "cluster"}},
-            "containers": {"workload": {"type": "oci-image"}}
+            "containers": {"workload": {"type": "oci-image"}},
         },
-        config={"options":
-            {
+        config={
+            "options": {
                 "role-all": {"type": "bool", "default": False},
                 "role-read": {"type": "bool", "default": True},
-                "role-write": {"type": "bool", "default": True}
+                "role-write": {"type": "bool", "default": True},
             }
-        }
+        },
     )
 
 
@@ -60,32 +57,28 @@ def base_state(request):
     return State(
         leader=request.param,
         containers=[Container("workload")],
-        relations=[Relation("cluster", remote_app_data=app_data)]
+        relations=[Relation("cluster", remote_app_data=app_data)],
     )
 
 
 @contextmanager
 def endpoint_starting():
     with patch(
-            "urllib.request.urlopen",
-            new=partial(_urlopen_patch, resp="foo\nStarting: 10\n bar")
+        "urllib.request.urlopen", new=partial(_urlopen_patch, resp="foo\nStarting: 10\n bar")
     ):
         yield
 
 
 @contextmanager
 def endpoint_ready():
-    with patch(
-            "urllib.request.urlopen",
-            new=partial(_urlopen_patch, resp="ready")
-    ):
+    with patch("urllib.request.urlopen", new=partial(_urlopen_patch, resp="ready")):
         yield
 
 
 @contextmanager
 def config_on_disk():
     with patch(
-            "cosl.coordinated_workers.worker.Worker._running_worker_config", new=lambda _: True
+        "cosl.coordinated_workers.worker.Worker._running_worker_config", new=lambda _: True
     ):
         yield
 
@@ -159,15 +152,15 @@ def test_status_no_endpoint(ctx, base_state, caplog):
         meta={
             "name": "damian",
             "requires": {"cluster": {"interface": "cluster"}},
-            "containers": {"workload": {"type": "oci-image"}}
+            "containers": {"workload": {"type": "oci-image"}},
         },
-        config={"options":
-            {
+        config={
+            "options": {
                 "role-all": {"type": "bool", "default": False},
                 "role-read": {"type": "bool", "default": True},
-                "role-write": {"type": "bool", "default": True}
+                "role-write": {"type": "bool", "default": True},
             }
-        }
+        },
     )
     # AND GIVEN that the container can connect
     state = base_state.with_can_connect("workload", True)
@@ -183,7 +176,7 @@ def test_access_status_no_endpoint_raises():
     # GIVEN the caller doesn't pass an endpoint to Worker
     caller = MagicMock()
     with patch("cosl.juju_topology.JujuTopology.from_charm"):
-        worker= Worker(
+        worker = Worker(
             caller,
             "workload",
             lambda _: Layer(""),
@@ -192,5 +185,4 @@ def test_access_status_no_endpoint_raises():
 
     # THEN calling .status raises
     with pytest.raises(WorkerError):
-       worker.status  # noqa
-
+        worker.status  # noqa
