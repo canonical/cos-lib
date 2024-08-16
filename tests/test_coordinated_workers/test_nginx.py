@@ -4,6 +4,7 @@ import tempfile
 import pytest
 from ops import CharmBase
 from scenario import Container, Context, ExecOutput, Mount, State
+from unittest.mock import patch, MagicMock
 
 from src.cosl.coordinated_workers.nginx import (
     CA_CERT_PATH,
@@ -31,9 +32,14 @@ def certificate_mounts():
     return mounts
 
 
-def test_certs_on_disk(certificate_mounts: dict):
+@pytest.fixture
+def nginx_context():
+    return Context(CharmBase, meta={"name": "foo", "containers": {"nginx": {"type": "oci-image"}}})
+
+
+def test_certs_on_disk(certificate_mounts: dict, nginx_context: Context):
     # GIVEN any charm with a container
-    ctx = Context(CharmBase, meta={"name": "foo", "containers": {"nginx": {"type": "oci-image"}}})
+    ctx = nginx_context
 
     # WHEN we process any event
     with ctx.manager(
@@ -47,11 +53,11 @@ def test_certs_on_disk(certificate_mounts: dict):
         assert nginx.are_certificates_on_disk
 
 
-def test_certs_deleted(certificate_mounts):
+def test_certs_deleted(certificate_mounts: dict, nginx_context: Context):
     # Test deleting the certificates.
 
     # GIVEN any charm with a container
-    ctx = Context(CharmBase, meta={"name": "foo", "containers": {"nginx": {"type": "oci-image"}}})
+    ctx = nginx_context
 
     # WHEN we process any event
     with ctx.manager(
@@ -68,11 +74,11 @@ def test_certs_deleted(certificate_mounts):
         assert not nginx.are_certificates_on_disk
 
 
-def test_reload_config_without_restart():
-    # Test reloading the nginx config without restarting the service.
+def test_reload_calls_nginx_binary_successfully(nginx_context: Context):
+    # Test that the reload method calls the nginx binary without error.
 
     # GIVEN any charm with a container
-    ctx = Context(CharmBase, meta={"name": "foo", "containers": {"nginx": {"type": "oci-image"}}})
+    ctx = nginx_context
 
     # WHEN we process any event
     with ctx.manager(
@@ -91,28 +97,32 @@ def test_reload_config_without_restart():
         nginx = Nginx(charm, lambda: "foo_string", None)
 
         # AND when we call reload
-        nginx.reload()
-        # THEN the certs get deleted from disk
-        # TODO: How do I verify this? Does nginx or mgr have ops knowledge for container state?
-        # Note: mgr has the app_status and unit_status attributes but I believe these are only useful with event handles setting statuses
-        assert 1
+        # THEN the nginx binary is used rather than container restart
+        assert nginx.reload() is None
 
 
-def test_has_config_changed():
+def test_has_config_changed(nginx_context: Context):
     # Test changing the nginx config and catching the change.
 
-    test_config = tempfile.NamedTemporaryFile(delete=False, mode='w+')
-
-    # GIVEN any charm with a container
-    ctx = Context(CharmBase, meta={"name": "foo", "containers": {"nginx": {"type": "oci-image"}}})
+    # GIVEN any charm with a container and a nginx config file
+    test_config = tempfile.NamedTemporaryFile(delete=False, mode="w+")
+    ctx = nginx_context
     # AND when we write to the config file
-    with open(test_config.name, 'w') as f:
+    with open(test_config.name, "w") as f:
         f.write("foo")
 
     # WHEN we process any event
     with ctx.manager(
         "update-status",
-        state=State(containers=[Container("nginx", can_connect=True, mounts={"config": Mount(NGINX_CONFIG, test_config.name)})]),
+        state=State(
+            containers=[
+                Container(
+                    "nginx",
+                    can_connect=True,
+                    mounts={"config": Mount(NGINX_CONFIG, test_config.name)},
+                )
+            ]
+        ),
     ) as mgr:
         charm = mgr.charm
         nginx = Nginx(charm, lambda: "foo_string", None)
