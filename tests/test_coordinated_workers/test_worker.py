@@ -103,6 +103,7 @@ def test_worker_restarts_if_some_service_not_up(tmp_path):
                     "summary": "foos all the things",
                     "description": "bar",
                     "startup": "enabled",
+                    "override": "merge",
                     "command": "ls -la",
                 },
                 "bar": {
@@ -151,6 +152,79 @@ def test_worker_restarts_if_some_service_not_up(tmp_path):
     assert all(svc is ServiceStatus.ACTIVE for svc in service_statuses), [
         stat.value for stat in service_statuses
     ]
+
+
+def test_worker_does_not_restart_external_services(tmp_path):
+    # GIVEN a worker with some services and a layer with some other services
+    MyCharm.layer = Layer(
+        {
+            "services": {
+                "foo": {
+                    "summary": "foos all the things",
+                    "override": "merge",
+                    "description": "bar",
+                    "startup": "enabled",
+                    "command": "ls -la",
+                }
+            }
+        }
+    )
+    other_layer = Layer(
+        {
+            "services": {
+                "bar": {
+                    "summary": "bars the foos",
+                    "description": "bar",
+                    "startup": "enabled",
+                    "command": "exit 1",
+                },
+                "baz": {
+                    "summary": "bazzes all of the bars",
+                    "description": "bar",
+                    "startup": "enabled",
+                    "command": "echo hi",
+                },
+            }
+        }
+    )
+
+    ctx = Context(
+        MyCharm,
+        meta={
+            "name": "foo",
+            "requires": {"cluster": {"interface": "cluster"}},
+            "containers": {"foo": {"type": "oci-image"}},
+        },
+        config={"options": {"role-all": {"type": "boolean", "default": True}}},
+    )
+    # WHEN the charm receives any event and there are no changes to the config or the layer,
+    #  but some of the services are down
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text("some: yaml")
+    container = Container(
+        "foo",
+        can_connect=True,
+        mounts={"local": Mount(CONFIG_FILE, cfg)},
+        layers={"foo": MyCharm.layer, "bar": other_layer},
+        service_status={
+            # layer foo has some inactive
+            "foo": ServiceStatus.INACTIVE,
+            # layer bar has some inactive
+            "bar": ServiceStatus.ACTIVE,
+            "baz": ServiceStatus.INACTIVE,
+        },
+    )
+    state_out = ctx.run(container.pebble_ready_event, State(containers=[container]))
+
+    # THEN the charm restarts all the services that are down
+    container_out = state_out.get_container("foo")
+    assert container_out.service_status == {
+        # layer foo service is now active
+        "foo": ServiceStatus.ACTIVE,
+        # layer bar services is unchanged
+        "bar": ServiceStatus.ACTIVE,
+        "baz": ServiceStatus.INACTIVE,
+    }
 
 
 def test_worker_raises_if_service_restart_fails_for_too_long(tmp_path):

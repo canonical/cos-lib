@@ -354,7 +354,7 @@ class Worker(ops.Object):
                         f"restarting... (attempt #{attempt.retry_state.attempt_number})"
                     )
                     # restart all services that our layer is responsible for
-                    self._container.restart(*self._container.get_services().keys())
+                    self._container.restart(*self._pebble_layer().services.keys())
 
         except ops.pebble.ChangeError:
             logger.error(
