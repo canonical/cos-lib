@@ -94,27 +94,27 @@ class DatabagModel(pydantic.BaseModel):
             log.debug(msg, exc_info=True)
             raise DataValidationError(msg) from e
 
-    def dump(self, databag: Optional[_RawDatabag] = None, clear: bool = True) -> Dict[str, str]:
+    def dump(self, databag: Optional[_RawDatabag] = None, clear: bool = True) -> _RawDatabag:
         """Write the contents of this model to Juju databag.
 
         :param databag: the databag to write the data to.
         :param clear: ensure the databag is cleared before writing it.
         """
-        if clear and databag:
-            databag.clear()
+        _databag: _RawDatabag = databag or {}
 
-        if databag is None:
-            databag: Dict[str, str] = {}
+        if clear:
+            _databag.clear()
+
         if nest_under := self.model_config.get("_NEST_UNDER"):
-            databag[nest_under] = self.model_dump_json(  # type: ignore
+            _databag[nest_under] = self.model_dump_json(  # type: ignore
                 by_alias=True,
                 # skip keys whose values are default
                 exclude_defaults=True,
             )
 
         dct = self.model_dump(mode="json", by_alias=True, exclude_defaults=True)  # type: ignore
-        databag.update({k: json.dumps(v) for k, v in dct.items()})
-        return databag
+        _databag.update({k: json.dumps(v) for k, v in dct.items()})
+        return _databag
 
 
 # =============
