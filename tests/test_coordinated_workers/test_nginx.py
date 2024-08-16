@@ -90,7 +90,7 @@ def test_reload_config_without_restart():
         charm = mgr.charm
         nginx = Nginx(charm, lambda: "foo_string", None)
 
-        # AND when we call reload (re)
+        # AND when we call reload
         nginx.reload()
         # THEN the certs get deleted from disk
         # TODO: How do I verify this? Does nginx or mgr have ops knowledge for container state?
