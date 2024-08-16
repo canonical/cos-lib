@@ -3,11 +3,12 @@ from functools import partial
 from unittest.mock import MagicMock, patch
 
 import pytest
-from cosl.coordinated_workers.interface import ClusterProviderAppData
-from cosl.coordinated_workers.worker import Worker, WorkerError
 from ops import ActiveStatus, BlockedStatus, CharmBase, Framework, WaitingStatus
 from ops.pebble import Layer
 from scenario import Container, Context, Relation, State
+
+from cosl.coordinated_workers.interface import ClusterProviderAppData
+from cosl.coordinated_workers.worker import Worker, WorkerError
 
 
 @contextmanager
