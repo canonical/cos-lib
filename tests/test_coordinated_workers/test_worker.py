@@ -198,5 +198,5 @@ def test_worker_raises_if_service_restart_fails_for_too_long(tmp_path):
 
             with ctx.manager(container.pebble_ready_event, State(containers=[container])) as mgr:
                 # so we don't have to wait for minutes:
-                mgr.charm.worker.restart.retry.wait = tenacity.wait_none()
-                mgr.charm.worker.restart.retry.stop = tenacity.stop_after_delay(2)
+                mgr.charm.worker.SERVICE_START_RETRY_WAIT = tenacity.wait_none()
+                mgr.charm.worker.SERVICE_START_RETRY_STOP = tenacity.stop_after_delay(2)

@@ -13,6 +13,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, TypedDict
 import ops
 import tenacity
 import yaml
+from ops import MaintenanceStatus
 from ops.model import ActiveStatus, BlockedStatus, WaitingStatus
 from ops.pebble import Layer, PathError, ProtocolError
 
@@ -308,23 +309,16 @@ class Worker(ops.Object):
 
         return True
 
-    SERVICE_START_RETRY_TIMEOUT = 60 * 15
+    SERVICE_START_RETRY_STOP = tenacity.stop_after_delay(60 * 15)
+    SERVICE_START_RETRY_WAIT = tenacity.wait_fixed(60)
+    SERVICE_START_RETRY_IF = tenacity.retry_if_exception_type(ops.pebble.ChangeError)
 
-    @tenacity.retry(
-        # this method may fail with ChangeError (exited quickly with code...)
-        retry=tenacity.retry_if_exception_type(ops.pebble.ChangeError),
-        # give this method some time to pass (by default 15 minutes)
-        stop=tenacity.stop_after_delay(SERVICE_START_RETRY_TIMEOUT),
-        # wait 1 minute between tries
-        wait=tenacity.wait_fixed(60),
-        # if you don't succeed raise the last caught exception when you're done
-        reraise=True,
-    )
     def restart(self):
         """Restart the pebble service or start it if not already running.
 
         Default timeout is 15 minutes. Configure it by setting this class attr:
-        >>> Worker.SERVICE_START_RETRY_TIMEOUT = 60*30  # 30 minutes
+        >>> Worker.SERVICE_START_RETRY_STOP = tenacity.stop_after_delay(60 * 30)  # 30 minutes
+        You can also configure SERVICE_START_RETRY_WAIT and SERVICE_START_RETRY_IF.
 
         This method will raise an exception if it fails to start the service within a
         specified timeframe. This will presumably bring the charm in error status, so
@@ -340,14 +334,28 @@ class Worker(ops.Object):
         if not self._container.exists(CONFIG_FILE):
             logger.error("cannot restart worker: config file doesn't exist (yet).")
             return
-
         if not self.roles:
             logger.debug("cannot restart worker: no roles have been configured.")
             return
 
         try:
-            # restart all services that our layer is responsible for
-            self._container.restart(*self._container.get_services().keys())
+            for attempt in tenacity.Retrying(
+                # this method may fail with ChangeError (exited quickly with code...)
+                retry=self.SERVICE_START_RETRY_IF,
+                # give this method some time to pass (by default 15 minutes)
+                stop=self.SERVICE_START_RETRY_STOP,
+                # wait 1 minute between tries
+                wait=self.SERVICE_START_RETRY_WAIT,
+                # if you don't succeed raise the last caught exception when you're done
+                reraise=True,
+            ):
+                with attempt:
+                    self._charm.unit.status = MaintenanceStatus(
+                        f"restarting... (attempt #{attempt.retry_state.attempt_number})"
+                    )
+                    # restart all services that our layer is responsible for
+                    self._container.restart(*self._container.get_services().keys())
+
         except ops.pebble.ChangeError:
             logger.error(
                 "failed to (re)start worker jobs. This usually means that an external resource (such as s3) "
