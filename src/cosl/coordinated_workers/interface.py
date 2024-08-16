@@ -100,7 +100,7 @@ class DatabagModel(pydantic.BaseModel):
         :param databag: the databag to write the data to.
         :param clear: ensure the databag is cleared before writing it.
         """
-        _databag: _RawDatabag = databag or {}
+        _databag: _RawDatabag = {} if databag is None else databag
 
         if clear:
             _databag.clear()
