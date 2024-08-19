@@ -1,0 +1,42 @@
+type: charm
+name: test-coordinator-k8s
+title: Coordinator tester charm
+summary: Foo
+description: Baz
+
+provides:
+  cluster:
+    interface: cluster
+  grafana-dashboard:
+    interface: grafana_dashboard
+  metrics:
+    interface: prometheus_scrape
+
+requires:
+  certificates:
+    interface: tls-certificates
+  s3:
+    interface: s3
+  ingress:
+    interface: traefik_route
+  logging:
+    interface: loki_push_api
+  tracing:
+    interface: tracing
+
+
+containers:
+  nginx:
+    resource: nginx-image
+  nginx-prometheus-exporter:
+    resource: nginx-prometheus-exporter-image
+
+resources:
+  nginx-image:
+    type: oci-image
+    description: OCI image for nginx
+    upstream-source: ubuntu/nginx:1.24-24.04_beta
+  nginx-prometheus-exporter-image:
+    type: oci-image
+    description: OCI image for nginx-prometheus-exporter
+    upstream-source: nginx/nginx-prometheus-exporter:1.1.0

@@ -58,7 +58,7 @@ class ServiceEndpointStatus(Enum):
 class Worker(ops.Object):
     """Charming worker."""
 
-    _endpoints: _EndpointMapping = {
+    _default_endpoints: _EndpointMapping = {
         "cluster": "cluster",
     }
 
@@ -67,7 +67,7 @@ class Worker(ops.Object):
         charm: ops.CharmBase,
         name: str,
         pebble_layer: Callable[["Worker"], Layer],
-        endpoints: _EndpointMapping,
+        endpoints: Optional[_EndpointMapping] = None,
         readiness_check_endpoint: Optional[str] = None,
     ):
         """Constructor for a Worker object.
@@ -77,6 +77,7 @@ class Worker(ops.Object):
             name: The name of the workload container.
             pebble_layer: The pebble layer of the workload.
             endpoints: Endpoint names for coordinator relations, as defined in metadata.yaml.
+              Defaults to `{"cluster":"cluster"}`.
             readiness_check_endpoint: URL to probe with a pebble check to determine
                 whether the worker node is ready. Passing None will effectively disable it.
         """
@@ -87,7 +88,7 @@ class Worker(ops.Object):
         self.topology = JujuTopology.from_charm(self._charm)
         self._container = self._charm.unit.get_container(name)
 
-        self._endpoints = endpoints
+        self._endpoints = endpoints or self._default_endpoints
         self._readiness_check_endpoint = readiness_check_endpoint
 
         self.cluster = ClusterRequirer(

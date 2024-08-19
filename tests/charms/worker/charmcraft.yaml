@@ -1,0 +1,55 @@
+type: charm
+name: test-worker-k8s
+title: Worker tester charm
+summary: Foo
+description: Baz
+
+requires:
+  cluster:
+    interface: cluster
+    limit: 1
+
+containers:
+  workload:
+    resource: workload-image
+
+resources:
+  workload-image:
+    type: oci-image
+    description: OCI image for dommy workload
+    upstream-source: docker.io/alpine/alpine:3.20
+
+config:
+  options:
+    role-all:
+      type: boolean
+      default: true
+      description: some dommy role
+    role-read:
+      type: boolean
+      default: false
+      description: some dommy role
+    role-write:
+      type: boolean
+      default: false
+      description: some dommy role
+    role-querier:
+      type: boolean
+      default: false
+      description: some dommy role
+    role-interrogator:
+      type: boolean
+      default: false
+      description: some dommy role
+    role-ingester:
+      type: boolean
+      default: false
+      description: some dommy role
+    role-compactor:
+      type: boolean
+      default: false
+      description: some dommy role
+    role-metrics_generator:
+      type: boolean
+      default: false
+      description: some dommy role
