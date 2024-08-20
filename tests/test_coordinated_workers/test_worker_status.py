@@ -73,7 +73,8 @@ def base_state(request):
 @contextmanager
 def endpoint_starting(tls):
     with patch(
-        "urllib.request.urlopen", new=partial(_urlopen_patch, tls=tls, resp="foo\nStarting: 10\n bar")
+        "urllib.request.urlopen",
+        new=partial(_urlopen_patch, tls=tls, resp="foo\nStarting: 10\n bar"),
     ):
         yield
 

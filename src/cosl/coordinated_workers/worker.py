@@ -134,18 +134,12 @@ class Worker(ops.Object):
 
     def _on_pebble_check_failed(self, event: ops.PebbleCheckFailedEvent):
         if event.info.name == "ready":
-            logger.warning(
-                f"Pebble `ready` check started to fail: "
-                f"worker node is down."
-            )
+            logger.warning("Pebble `ready` check started to fail: " "worker node is down.")
             # collect-status will detect that we're not ready and set waiting status.
 
     def _on_pebble_check_recovered(self, event: ops.PebbleCheckFailedEvent):
         if event.info.name == "ready":
-            logger.info(
-                f"Pebble `ready` check is now passing: "
-                f"worker node is up."
-            )
+            logger.info("Pebble `ready` check is now passing: " "worker node is up.")
             # collect-status will detect that we're ready and set active status.
 
     def _on_worker_config_received(self, _: ops.EventBase):
