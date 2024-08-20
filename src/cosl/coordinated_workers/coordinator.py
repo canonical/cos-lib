@@ -260,15 +260,15 @@ class Coordinator(ops.Object):
         cluster = self.cluster
         roles = cluster.gather_roles()
 
-        is_meta_keys_valid = set(rc.meta_roles.keys()).issubset(rc.roles)
-        is_meta_values_valid = all(
+        are_meta_keys_valid = set(rc.meta_roles.keys()).issubset(rc.roles)
+        are_meta_values_valid = all(
             set(meta_value).issubset(rc.roles) for meta_value in rc.meta_roles.values()
         )
         is_minimal_valid = set(rc.minimal_deployment).issubset(rc.roles)
         is_recommended_valid = set(rc.recommended_deployment).issubset(rc.roles)
 
         roles_config_valid = all(
-            [is_meta_keys_valid, is_meta_values_valid, is_minimal_valid, is_recommended_valid]
+            [are_meta_keys_valid, are_meta_values_valid, is_minimal_valid, is_recommended_valid]
         )
 
         # Whether the roles list makes up a coherent worker deployment.
