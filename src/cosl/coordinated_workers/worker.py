@@ -89,7 +89,7 @@ class Worker(ops.Object):
 
         self._endpoints = endpoints
         # turn str to Callable[[Worker], str]
-        self._readiness_check_endpoint: Callable[[Worker], str]
+        self._readiness_check_endpoint: Optional[Callable[[Worker], str]]
         if isinstance(readiness_check_endpoint, str):
             self._readiness_check_endpoint = lambda _: readiness_check_endpoint
         else:
@@ -340,7 +340,7 @@ class Worker(ops.Object):
             return
 
         new_layer.checks["ready"] = Check(
-            "ready", {"override": "replace", "http": {"url": self._readiness_check_endpoint}}
+            "ready", {"override": "replace", "http": {"url": self._readiness_check_endpoint(self)}}
         )
 
     def _update_cluster_relation(self) -> None:
