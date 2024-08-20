@@ -1,209 +1,233 @@
 import logging
+from types import SimpleNamespace
+
 import ops
 import pytest
-
-from types import SimpleNamespace
 from ops import Framework
 from scenario import Container, Context, Relation, State
 from scenario.runtime import UncaughtCharmError
 
 from src.cosl.coordinated_workers.coordinator import (
-    ClusterRolesConfig,
     Coordinator,
     S3NotFoundError,
 )
+from src.cosl.coordinated_workers.interface import ClusterProviderAppData, ClusterRequirerAppData
 
 logger = logging.getLogger(__name__)
 
-# TODO Make a fixture that generates a valid Coordinator instantiation
 # TODO Make a fixture that generates a valid S3 Relation
 # TODO I can also patch _s3_config to return a random dict to test parts working
 
 
 @pytest.fixture
-def roles_config():
-    # Used loki-coordinator-k8s-operator as reference
-    return SimpleNamespace(
-        roles={"all", "read", "write", "backend"},
-        meta_roles={"all": {"all", "read", "write", "backend"}},
-        minimal_deployment={
-            "read",
-            "write",
-            "backend",
-        },
-        recommended_deployment={
-            "read": 3,
-            "write": 3,
-            "backend": 3,
-        },
-    )
-
-
-@pytest.fixture
 def coordinator_state():
     requires_relations = {
-        "my-certificates": {"interface": "certificates"},
-        "my-cluster": {"interface": "cluster"},
-        "my-logging": {"interface": "loki_push_api"},
-        "my-tracing": {"interface": "tracing"},
-        "my-s3": {"interface": "s3"},
+        endpoint: Relation(endpoint=endpoint, interface=interface["interface"])
+        for endpoint, interface in {
+            "my-certificates": {"interface": "certificates"},
+            "my-logging": {"interface": "loki_push_api"},
+            "my-tracing": {"interface": "tracing"},
+        }.items()
     }
+    requires_relations["my-s3"] = Relation(
+        "my-s3",
+        interface="s3",
+        remote_app_data={
+            "endpoint": "s3",
+            "bucket": "foo-bucket",
+            "access-key": "my-access-key",
+            "secret-key": "my-secret-key",
+        },
+    )
+    requires_relations["cluster_worker0"] = Relation(
+        "my-cluster",
+        remote_app_name="worker0",
+        remote_app_data=ClusterRequirerAppData(role="read").dump(),
+    )
+    requires_relations["cluster_worker1"] = Relation(
+        "my-cluster",
+        remote_app_name="worker1",
+        remote_app_data=ClusterRequirerAppData(role="write").dump(),
+    )
+    requires_relations["cluster_worker2"] = Relation(
+        "my-cluster",
+        remote_app_name="worker2",
+        remote_app_data=ClusterRequirerAppData(role="backend").dump(),
+    )
 
     provides_relations = {
-        "my-dashboards": {"interface": "grafana_dashboard"},
-        "my-metrics": {"interface": "prometheus_scrape"},
-    }
-
-    requires_relations = {
         endpoint: Relation(endpoint=endpoint, interface=interface["interface"])
-        for endpoint, interface in requires_relations.items()
-    }
-    provides_relations = {
-        endpoint: Relation(endpoint=endpoint, interface=interface["interface"])
-        for endpoint, interface in provides_relations.items()
+        for endpoint, interface in {
+            "my-dashboards": {"interface": "grafana_dashboard"},
+            "my-metrics": {"interface": "prometheus_scrape"},
+        }.items()
     }
 
     return State(
-        containers=[Container("nginx"), Container("nginx-prometheus-exporter")],
-        relations=list(requires_relations.values()),
+        containers=[
+            Container("nginx", can_connect=True),
+            Container("nginx-prometheus-exporter", can_connect=True),
+        ],
+        relations=list(requires_relations.values()) + list(provides_relations.values()),
     )
 
 
-@pytest.fixture
-def coordinator(charm: ops.CharmBase):
-    return Coordinator(
-        charm=charm,
-        roles_config=roles_config(),
-        s3_bucket_name="foo-s3",
-        external_url="https://foo.example.com",
-        worker_metrics_port=123,
-        endpoints={
-            "certificates": "my-certificates",
-            "cluster": "my-cluster",
-            "grafana-dashboards": "my-dashboards",
-            "logging": "my-logging",
-            "metrics": "my-metrics",
-            "tracing": "my-tracing",
-            "s3": "my-s3",
-        },
-        nginx_config=lambda coordinator: f"nginx configuration for {coordinator.name}",
-        workers_config=lambda coordinator: f"workers configuration for {coordinator.name}",
-        # nginx_options: Optional[NginxMappingOverrides] = None,
-        # is_coherent: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
-        # is_recommended: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
-        # tracing_receivers: Optional[Callable[[], Optional[Dict[str, str]]]] = None,
-    )
+@pytest.fixture()
+def coordinator_charm(request):
+    class MyCoordinator(ops.CharmBase):
+        META = {
+            "name": "foo-app",
+            "requires": {
+                "my-certificates": {"interface": "certificates"},
+                "my-cluster": {"interface": "cluster"},
+                "my-logging": {"interface": "loki_push_api"},
+                "my-tracing": {"interface": "tracing"},
+                "my-s3": {"interface": "s3"},
+            },
+            "provides": {
+                "my-dashboards": {"interface": "grafana_dashboard"},
+                "my-metrics": {"interface": "prometheus_scrape"},
+            },
+            "containers": {
+                "nginx": {"type": "oci-image"},
+                "nginx-prometheus-exporter": {"type": "oci-image"},
+            },
+        }
 
+        def __init__(self, framework: Framework):
+            super().__init__(framework)
+            # Note: Here it is a good idea not to use context mgr because it is "ops aware"
+            self.coordinator = Coordinator(
+                charm=self,
+                # Roles were take from loki-coordinator-k8s-operator
+                roles_config=SimpleNamespace(
+                    roles={"all", "read", "write", "backend"},
+                    meta_roles={"all": {"all", "read", "write", "backend"}},
+                    minimal_deployment={
+                        "read",
+                        "write",
+                        "backend",
+                    },
+                    recommended_deployment={
+                        "read": 3,
+                        "write": 3,
+                        "backend": 3,
+                    },
+                ),
+                s3_bucket_name="foo-bucket",
+                external_url="https://foo.example.com",
+                worker_metrics_port=123,
+                endpoints={
+                    "certificates": "my-certificates",
+                    "cluster": "my-cluster",
+                    "grafana-dashboards": "my-dashboards",
+                    "logging": "my-logging",
+                    "metrics": "my-metrics",
+                    "tracing": "my-tracing",
+                    "s3": "my-s3",
+                },
+                nginx_config=lambda coordinator: f"nginx configuration for {coordinator.name}",
+                workers_config=lambda coordinator: f"workers configuration for {coordinator.name}",
+                # nginx_options: Optional[NginxMappingOverrides] = None,
+                # is_coherent: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
+                # is_recommended: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
+                # tracing_receivers: Optional[Callable[[], Optional[Dict[str, str]]]] = None,
+            )
 
-class MyCoordinator(ops.CharmBase):
-    META = {
-        "name": "foo-app",
-        "requires": {
-            "my-certificates": {"interface": "certificates"},
-            "my-cluster": {"interface": "cluster"},
-            "my-logging": {"interface": "loki_push_api"},
-            "my-tracing": {"interface": "tracing"},
-            "my-s3": {"interface": "s3"},
-        },
-        "containers": {
-            "nginx": {"type": "oci-image"},
-            "nginx-prometheus-exporter": {"type": "oci-image"},
-        },
-    }
-    CONFIG = {"options": {f"role-{r}": {"type": "boolean", "default": "false"} for r in ("all")}}
-
-    def __init__(self, framework: Framework):
-        super().__init__(framework)
-        # Note: Here it is a good idea not to use context mgr because it is "ops aware"
-        self.coordinator = coordinator(self)
-
-
-def test_s3_not_found_error(coordinator_state: State):
-    # Test a charm without an s3 integration raises S3NotFoundError
-
-    # GIVEN a cluster without an s3 integration
-    ctx = Context(MyCoordinator, meta=MyCoordinator.META, config=MyCoordinator.CONFIG)
-
-    # logger.warning(f"STATE: {state.relations}")
-    # WHEN you
-    with ctx.manager("start", coordinator_state) as mgr:
-        logger.warning(
-            f"S3 CONNECTION INFO: {mgr.charm.coordinator.s3_requirer.get_s3_connection_info()}"
-        )
-        # THEN the Coordinator has an inactive S3 integration
-        with pytest.raises(S3NotFoundError):
-            mgr.charm.coordinator._s3_config
+    return MyCoordinator
 
 
 @pytest.mark.parametrize(
-    "roles_active, roles_inactive, expected",
+    "invalid_role_config",
     (
         (
-            ["read", "write", "ingester", "all"],
-            ["alertmanager"],
-            ["read", "write", "ingester", "all"],
+            SimpleNamespace(
+                roles={"read"},
+                meta_roles={"I AM NOT A SUBSET OF ROLES": {"read"}},
+                minimal_deployment={"read"},
+                recommended_deployment={"read": 3},
+            )
         ),
-        (["read", "write"], ["alertmanager"], ["read", "write"]),
-        (["read"], ["alertmanager", "write", "ingester", "all"], ["read"]),
-        ([], ["read", "write", "ingester", "all", "alertmanager"], []),
+        (
+            SimpleNamespace(
+                roles={"read"},
+                meta_roles={"read": {"I AM NOT A SUBSET OF ROLES"}},
+                minimal_deployment={"read"},
+                recommended_deployment={"read": 3},
+            )
+        ),
+        (
+            SimpleNamespace(
+                roles={"read"},
+                meta_roles={"read": {"read"}},
+                minimal_deployment={"I AM NOT A SUBSET OF ROLES"},
+                recommended_deployment={"read": 3},
+            )
+        ),
+        (
+            SimpleNamespace(
+                roles={"read"},
+                meta_roles={"read": {"read"}},
+                minimal_deployment={"read"},
+                recommended_deployment={"I AM NOT A SUBSET OF ROLES": 3},
+            )
+        ),
     ),
 )
-def test_roles_from_config(roles_active, roles_inactive, expected):
-    # Test that a charm that defines any 'role-x' config options, when run,
-    # correctly determines which ones are enabled through the Worker
+def test_incoherent_role_configs(
+    coordinator_state: State,
+    coordinator_charm: ops.CharmBase,
+    invalid_role_config: SimpleNamespace,
+):
+    # Test that the meta roles keys and values, minimal roles keys, and recommended roles keys must be a subset of roles
 
-    # WHEN you define a charm with a few role-x config options
-    ctx = Context(
-        MyCoordinator,
-        meta={"name": "foo-app"},
-        config={
-            "options": {
-                f"role-{r}": {"type": "boolean", "default": "false"}
-                for r in (roles_active + roles_inactive)
-            }
-        },
-    )
+    # GIVEN a coordinator charm
+    ctx = Context(coordinator_charm, meta=coordinator_charm.META)
 
-    # AND the charm runs with a few of those set to true, the rest to false
+    # WHEN we process any event
     with ctx.manager(
         "update-status",
-        State(
-            containers=[Container("nginx")],
-            config={
-                **{f"role-{r}": False for r in roles_inactive},
-                **{f"role-{r}": True for r in roles_active},
-            },
-        ),
+        state=coordinator_state,
     ) as mgr:
+        charm: coordinator_charm = mgr.charm
+
+        # AND an invalid role_config is applied
+        charm.coordinator.roles_config = invalid_role_config
+        # THEN the deployment is incoherent
+        assert not charm.coordinator.is_coherent
+
+
+def test_worker_roles_subset_of_minimal_deployment(coordinator_state: State, coordinator_charm: ops.CharmBase):
+    # Test that the combination of worker roles must be a subset of the minimal deployment roles
+
+    # GIVEN a coordinator charm with a valid roles_config
+    # AND related to worker charms with distributed roles
+    ctx = Context(coordinator_charm, meta=coordinator_charm.META)
+
+    # WHEN we process any event
+    with ctx.manager(
+        "update-status",
+        state=coordinator_state,
+    ) as mgr:
+        charm: coordinator_charm = mgr.charm
+
+        # THEN the deployment is coherent
+        assert charm.coordinator.is_coherent
+
+
+def test_without_s3_integration_raises_error(coordinator_state: State, coordinator_charm: ops.CharmBase):
+    # Test that a charm without an s3 integration raises S3NotFoundError
+
+    # GIVEN a coordinator charm without an s3 integration
+    ctx = Context(coordinator_charm, meta=coordinator_charm.META)
+    relations_without_s3 = [relation for relation in coordinator_state.relations if relation.endpoint != 'my-s3']
+
+    # WHEN we process any event
+    with ctx.manager(
+        "update-status",
+        state=coordinator_state.replace(relations=relations_without_s3),
+    ) as mgr:
+
+        # THEN the _s3_config method raises and S3NotFoundError
         with pytest.raises(S3NotFoundError):
-            # THEN the Worker.roles method correctly returns the list of only those that are set to true
-            assert set(mgr.charm.worker.roles) == set(expected)
-
-
-@pytest.mark.parametrize("leader", (True, False))
-def test_pebble_layer_on_cluster_created(leader: bool):
-    # verify that on cluster-created, the Worker initializes a pebble layer
-
-    # WHEN you define a charm with a standard coordinator charm
-    ctx = Context(MyCoordinator, meta=MyCoordinator.META, config=MyCoordinator.CONFIG)
-
-    # AND the charm runs a cluster-created event
-    relations = {name: Relation(name) for name in MyCoordinator.META["requires"]}
-    # logger.warning(f"CLUSTERS: {relations}")
-    foo_container = Container("nginx", can_connect=True)
-    # logger.warning(f"CONTAINER: {foo_container}")
-    logger.warning(f'EVENTS: {relations["my-cluster"].__dict__}')
-
-    state_out = ctx.run(
-        relations["my-cluster"].created_event,  # emit my-cluster-relation-created event
-        State(
-            leader=leader,
-            config={"role-read": True},
-            relations=list(relations.values()),
-            containers=[foo_container],
-        ),
-    )
-
-    # THEN the container has the expected layer
-    logger.warning(f"STATE OUT: {state_out.containers[0]}")
-    # assert state_out.get_container("foo").layers["foo"] == Layer("")
+            mgr.charm.coordinator._s3_config

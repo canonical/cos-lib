@@ -10,8 +10,9 @@ import os
 import re
 import shutil
 import socket
+from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Protocol, Set, TypedDict
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Set, TypedDict
 from urllib.parse import urlparse
 
 import ops
@@ -52,31 +53,14 @@ class S3NotFoundError(Exception):
     """Raised when the s3 integration is not present or not ready."""
 
 
-class ClusterRolesConfig(Protocol):
+@dataclass
+class ClusterRolesConfig:
     """Worker roles and deployment requirements."""
 
     roles: Iterable[str]
     meta_roles: Mapping[str, Iterable[str]]
     minimal_deployment: Iterable[str]
     recommended_deployment: Dict[str, int]
-
-# FROM LUCA:
-    # Not required
-    # Changes in this coordinator could break the HA add-on charms.
-    # Future: add tests for these charms to ensure changes here dont break there
-        # Ideally, I would point at this repo in the HA add-on repo integration tests
-        # i.e. pick one HA charm and deploy it. use the coordinator.py
-        # juju scp src/cosl/coordinated_workers worker/0:/var/lib/juju/agents/unit-worker-0/charm/venv/cosl && juju scp src/cosl/helpers.py worker/0:/var/lib/juju/agents/unit-worker-0/charm/venv/cosl
-
-# TODO Replace validate_roles_config and move the funnctionality into is_coherent
-# def validate_roles_config(roles_config: ClusterRolesConfig) -> None:
-#     """Assert that all the used roles have been defined."""
-#     roles = set(roles_config.roles)
-#     assert set(roles_config.meta_roles.keys()).issubset(roles)
-#     for role_set in roles_config.meta_roles.values():
-#         assert set(role_set).issubset(roles)
-#     assert set(roles_config.minimal_deployment).issubset(roles)
-#     assert set(roles_config.recommended_deployment.keys()).issubset(roles)
 
 
 _EndpointMapping = TypedDict(
@@ -277,11 +261,15 @@ class Coordinator(ops.Object):
         roles = cluster.gather_roles()
 
         is_meta_keys_valid = set(rc.meta_roles.keys()).issubset(rc.roles)
-        is_meta_values_valid = all(set(role_set).issubset(roles_set) for role_set in rc.meta_roles.values())
+        is_meta_values_valid = all(
+            set(meta_value).issubset(rc.roles) for meta_value in rc.meta_roles.values()
+        )
         is_minimal_valid = set(rc.minimal_deployment).issubset(rc.roles)
         is_recommended_valid = set(rc.recommended_deployment).issubset(rc.roles)
 
-        roles_config_valid = all([is_meta_keys_valid, is_meta_values_valid, is_minimal_valid, is_recommended_valid])
+        roles_config_valid = all(
+            [is_meta_keys_valid, is_meta_values_valid, is_minimal_valid, is_recommended_valid]
+        )
 
         # Whether the roles list makes up a coherent worker deployment.
         is_coherent = set(roles.keys()).issuperset(minimal_deployment)
