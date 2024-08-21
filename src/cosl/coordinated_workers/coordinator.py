@@ -52,8 +52,10 @@ CONSOLIDATED_ALERT_RULES_PATH = "./src/prometheus_alert_rules/consolidated_rules
 class S3NotFoundError(Exception):
     """Raised when the s3 integration is not present or not ready."""
 
+
 class ClusterRolesConfigError(Exception):
     """Raised when the ClusterRolesConfig instance is not properly configured."""
+
 
 @dataclass
 class ClusterRolesConfig:
@@ -72,8 +74,13 @@ class ClusterRolesConfig:
         )
         is_minimal_valid = set(self.minimal_deployment).issubset(self.roles)
         is_recommended_valid = set(self.recommended_deployment).issubset(self.roles)
-        if not all([are_meta_keys_valid, are_meta_values_valid, is_minimal_valid, is_recommended_valid]):
-            raise ClusterRolesConfigError("Invalid ClusterRolesConfig: The configuration is not coherent.")
+        if not all(
+            [are_meta_keys_valid, are_meta_values_valid, is_minimal_valid, is_recommended_valid]
+        ):
+            raise ClusterRolesConfigError(
+                "Invalid ClusterRolesConfig: The configuration is not coherent."
+            )
+
 
 _EndpointMapping = TypedDict(
     "_EndpointMapping",
