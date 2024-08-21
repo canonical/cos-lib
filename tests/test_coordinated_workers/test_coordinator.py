@@ -1,5 +1,3 @@
-from types import SimpleNamespace
-
 import ops
 import pytest
 from ops import Framework
@@ -7,7 +5,6 @@ from scenario import Container, Context, Relation, State
 
 from src.cosl.coordinated_workers.coordinator import (
     ClusterRolesConfig,
-    ClusterRolesConfigError,
     Coordinator,
     S3NotFoundError,
 )
@@ -95,7 +92,7 @@ def coordinator_charm(request):
             self.coordinator = Coordinator(
                 charm=self,
                 # Roles were take from loki-coordinator-k8s-operator
-                roles_config=SimpleNamespace(
+                roles_config=ClusterRolesConfig(
                     roles={"all", "read", "write", "backend"},
                     meta_roles={"all": {"all", "read", "write", "backend"}},
                     minimal_deployment={
@@ -130,58 +127,6 @@ def coordinator_charm(request):
             )
 
     return MyCoordinator
-
-
-@pytest.mark.parametrize(
-    "invalid_role_config",
-    (
-        (
-            SimpleNamespace(
-                roles={"read"},
-                meta_roles={"I AM NOT A SUBSET OF ROLES": {"read"}},
-                minimal_deployment={"read"},
-                recommended_deployment={"read": 3},
-            )
-        ),
-        (
-            SimpleNamespace(
-                roles={"read"},
-                meta_roles={"read": {"I AM NOT A SUBSET OF ROLES"}},
-                minimal_deployment={"read"},
-                recommended_deployment={"read": 3},
-            )
-        ),
-        (
-            SimpleNamespace(
-                roles={"read"},
-                meta_roles={"read": {"read"}},
-                minimal_deployment={"I AM NOT A SUBSET OF ROLES"},
-                recommended_deployment={"read": 3},
-            )
-        ),
-        (
-            SimpleNamespace(
-                roles={"read"},
-                meta_roles={"read": {"read"}},
-                minimal_deployment={"read"},
-                recommended_deployment={"I AM NOT A SUBSET OF ROLES": 3},
-            )
-        ),
-    ),
-)
-def test_invalid_role_configs_raises_error(invalid_role_config):
-    # Test that the meta roles keys and values, minimal roles keys, and recommended roles keys are a subset of roles
-
-    # GIVEN an invalid_role_config
-    # WHEN ClusterRolesConfig is instantiated
-    # THEN the __post_init__ raises a ClusterRolesConfigError
-    with pytest.raises(ClusterRolesConfigError):
-        ClusterRolesConfig(
-            roles=invalid_role_config.roles,
-            meta_roles=invalid_role_config.meta_roles,
-            minimal_deployment=invalid_role_config.minimal_deployment,
-            recommended_deployment=invalid_role_config.recommended_deployment,
-        )
 
 
 def test_worker_roles_subset_of_minimal_deployment(

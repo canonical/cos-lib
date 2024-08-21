@@ -67,7 +67,7 @@ class ClusterRolesConfig:
     recommended_deployment: Dict[str, int]
 
     def __post_init__(self):
-        """Whether the roles_config makes up a coherent worker deployment."""
+        """Ensure the roles_config makes up a coherent worker deployment."""
         are_meta_keys_valid = set(self.meta_roles.keys()).issubset(self.roles)
         are_meta_values_valid = all(
             set(meta_value).issubset(self.roles) for meta_value in self.meta_roles.values()
@@ -80,6 +80,10 @@ class ClusterRolesConfig:
             raise ClusterRolesConfigError(
                 "Invalid ClusterRolesConfig: The configuration is not coherent."
             )
+
+    def is_coherent_with(self, cluster_roles) -> bool:
+        """Validate the ClusterRolesConfig is coherent with the provided cluster roles."""
+        return set(self.minimal_deployment).issubset(set(cluster_roles))
 
 
 _EndpointMapping = TypedDict(
@@ -273,13 +277,7 @@ class Coordinator(ops.Object):
         if manual_coherency_checker := self._is_coherent:
             return manual_coherency_checker(self.cluster, self.roles_config)
 
-        rc = self.roles_config
-        minimal_deployment = set(rc.minimal_deployment)
-        cluster = self.cluster
-        roles = cluster.gather_roles()
-
-        # Whether the roles list makes up a coherent worker deployment.
-        return set(roles.keys()).issuperset(minimal_deployment)
+        return self.roles_config.is_coherent_with(self.cluster.gather_roles().keys())
 
     @property
     def missing_roles(self) -> Set[str]:
