@@ -81,7 +81,7 @@ class ClusterRolesConfig:
                 "Invalid ClusterRolesConfig: The configuration is not coherent."
             )
 
-    def is_coherent_with(self, cluster_roles) -> bool:
+    def is_coherent_with(self, cluster_roles: Iterable[str]) -> bool:
         """Validate the ClusterRolesConfig is coherent with the provided cluster roles."""
         return set(self.minimal_deployment).issubset(set(cluster_roles))
 
