@@ -169,7 +169,7 @@ def coordinator_charm(request):
         ),
     ),
 )
-def test_raise_on_invalid_role_configs(invalid_role_config):
+def test_invalid_role_configs_raises_error(invalid_role_config):
     # Test that the meta roles keys and values, minimal roles keys, and recommended roles keys are a subset of roles
 
     # GIVEN an invalid_role_config
