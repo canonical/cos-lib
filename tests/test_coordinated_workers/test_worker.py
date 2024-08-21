@@ -1,13 +1,26 @@
 from pathlib import Path
+from typing import List
+
 import ops
 import pytest
-from typing import List
-from src.cosl.coordinated_workers.interface import ClusterProviderAppData, ClusterRequirerAppData, ClusterRequirerUnitData
-from src.cosl.coordinated_workers.worker import Worker, CERT_FILE, CONFIG_FILE, KEY_FILE, CLIENT_CA_FILE, ROOT_CA_CERT_LOCAL, ROOT_CA_CERT_CONTAINER
 from ops import Framework
 from ops.pebble import Layer
-from scenario import Container, Context, Secret, State, ExecOutput, Relation
+from scenario import Container, Context, ExecOutput, Relation, Secret, State
 from scenario.runtime import UncaughtCharmError
+
+from src.cosl.coordinated_workers.interface import (
+    ClusterProviderAppData,
+    ClusterRequirerAppData,
+    ClusterRequirerUnitData,
+)
+from src.cosl.coordinated_workers.worker import (
+    CERT_FILE,
+    CLIENT_CA_FILE,
+    CONFIG_FILE,
+    KEY_FILE,
+    ROOT_CA_CERT_CONTAINER,
+    Worker,
+)
 
 
 class MyCharm(ops.CharmBase):
@@ -97,44 +110,39 @@ class MyWorker(ops.CharmBase):
             for r in ("read", "write", "backend")
         }
     }
+
     def __init__(self, framework: Framework):
         super().__init__(framework)
-        self.worker = Worker(
-            self, "foo", lambda _: Layer(""), 
-            {"cluster": "my-cluster"}
-        )
+        self.worker = Worker(self, "foo", lambda _: Layer(""), {"cluster": "my-cluster"})
 
 
 @pytest.mark.parametrize(
-    "output, expected_version", (
-        ("tempo, version 1.0.0 (branch: HEAD, revision 32137ee...)" , "1.0.0"),
-        ("mimir, version 2.1.45 (branch: HEAD, revision 32137ee...)" , "2.1.45"),
-        ("tempo, version WEIRD (branch: HEAD, revision 32137ee...)" , "WEIRD"),
-        ("gibberish" , None),
-    )
+    "output, expected_version",
+    (
+        ("tempo, version 1.0.0 (branch: HEAD, revision 32137ee...)", "1.0.0"),
+        ("mimir, version 2.1.45 (branch: HEAD, revision 32137ee...)", "2.1.45"),
+        ("tempo, version WEIRD (branch: HEAD, revision 32137ee...)", "WEIRD"),
+        ("gibberish", None),
+    ),
 )
 def test_running_version(output: str, expected_version: str):
     # Test the worker's running_version method
 
     # WHEN you define a standard worker charm
-    ctx = Context(
-        MyWorker,
-        meta=MyWorker.META,
-        config=MyWorker.CONFIG
-    )
+    ctx = Context(MyWorker, meta=MyWorker.META, config=MyWorker.CONFIG)
 
     # AND the charm runs with a few of those set to true, the rest to false
     with ctx.manager(
         "update-status",
         State(
-            containers=[Container("foo", can_connect=True,
-                                  exec_mock={('/bin/foo', '-version'): 
-                                             ExecOutput(
-                                                 return_code=0, 
-                                                 stdout=output)
-                                             }
-            )]
-            )
+            containers=[
+                Container(
+                    "foo",
+                    can_connect=True,
+                    exec_mock={("/bin/foo", "-version"): ExecOutput(return_code=0, stdout=output)},
+                )
+            ]
+        ),
     ) as mgr:
         # THEN the Worker.running_version returns what we expect
         charm: MyCharm = mgr.charm
@@ -146,29 +154,24 @@ def test_pebble_layer_on_cluster_created(leader: bool):
     # verify that on cluster-created, the Worker initializes a pebble layer
 
     # WHEN you define a charm with a standard worker charm
-    ctx = Context(
-        MyWorker,
-        meta=MyWorker.META,
-        config=MyWorker.CONFIG
-    )
+    ctx = Context(MyWorker, meta=MyWorker.META, config=MyWorker.CONFIG)
 
     # AND the charm runs a cluster-created event
     cluster = Relation("my-cluster")
     foo_container = Container("foo", can_connect=True)
-    
-    state_out =  ctx.run(
+
+    state_out = ctx.run(
         cluster.created_event,  # emit my-cluster-relation-created event
         State(
             leader=leader,
             config={"role-read": True},
             relations=[cluster],
-            containers=[foo_container]
-            )
+            containers=[foo_container],
+        ),
     )
 
     # THEN the container has the expected layer
-    assert state_out.get_container("foo").layers['foo'] == Layer("")
-    
+    assert state_out.get_container("foo").layers["foo"] == Layer("")
 
 
 @pytest.mark.parametrize("leader", (True, False))
@@ -177,81 +180,66 @@ def test_cluster_relation_data_on_cluster_created(leader: bool, roles: List[str]
     # verify that on cluster-created, the Worker leader publishes relation data
 
     # WHEN you define a charm with a standard worker charm
-    ctx = Context(
-        MyWorker,
-        meta=MyWorker.META,
-        config=MyWorker.CONFIG
-    )
+    ctx = Context(MyWorker, meta=MyWorker.META, config=MyWorker.CONFIG)
 
     # AND the charm runs a cluster-created event
     cluster = Relation("my-cluster")
     foo_container = Container("foo", can_connect=True)
-    
-    state_out =  ctx.run(
+
+    state_out = ctx.run(
         cluster.created_event,  # emit my-cluster-relation-created event
         State(
             leader=leader,
             config={f"role-{r}": True for r in roles},
             relations=[cluster],
-            containers=[foo_container]
-            )
+            containers=[foo_container],
+        ),
     )
-    
+
     cluster_out = state_out.get_relations("my-cluster")[0]
-    
+
     if leader:
         # THEN the charm has published the right data to app data
         assert ClusterRequirerAppData.load(cluster_out.local_app_data).role == ",".join(roles)
-    else: 
+    else:
         # THEN the charm didn't publish anything to app data
         assert not cluster_out.local_app_data
 
     # AND, either way, we put something in unit data
-    assert ClusterRequirerUnitData.load(cluster_out.local_unit_data).juju_topology.application == "foo-app"
+    assert (
+        ClusterRequirerUnitData.load(cluster_out.local_unit_data).juju_topology.application
+        == "foo-app"
+    )
 
 
-    
 @pytest.fixture
 def privkey_secret():
-    return Secret(
-        id="secret:123312313",
-        contents={0: {"private-key": "verysecret"}}
-    )
+    return Secret(id="secret:123312313", contents={0: {"private-key": "verysecret"}})
 
 
 @pytest.fixture
 def foo_container():
     return Container(
-        "foo", 
+        "foo",
         can_connect=True,
-        exec_mock={('/bin/foo', '-version'): 
-                    ExecOutput(
-                        return_code=0, 
-                        stdout="n/a")
-                    },
+        exec_mock={("/bin/foo", "-version"): ExecOutput(return_code=0, stdout="n/a")},
         layers={
-            "foo": Layer( 
+            "foo": Layer(
                 {
-                    'summary': "some",
-                    'description': "layer",
-                    'services': {"foo": {"command": "whoami"}},
+                    "summary": "some",
+                    "description": "layer",
+                    "services": {"foo": {"command": "whoami"}},
                 }
             )
-        }
+        },
     )
-
 
 
 def test_config_created_on_pebble_ready(foo_container: Container):
-    ctx = Context(
-        MyWorker,
-        meta=MyWorker.META,
-        config=MyWorker.CONFIG
+    ctx = Context(MyWorker, meta=MyWorker.META, config=MyWorker.CONFIG)
+    cluster = Relation(
+        "my-cluster", remote_app_data=ClusterProviderAppData(worker_config="some: yaml").dump()
     )
-    cluster = Relation("my-cluster",
-                       remote_app_data=ClusterProviderAppData(
-                           worker_config="some: yaml"
-                       ).dump())
     # WHEN we receive any of:
     # - pebble_ready
     # - worker_config_received
@@ -263,8 +251,8 @@ def test_config_created_on_pebble_ready(foo_container: Container):
             leader=True,
             config={f"role-{r}": True for r in {"read", "write"}},
             relations=[cluster],
-            containers=[foo_container]
-            )
+            containers=[foo_container],
+        ),
     ) as mgr:
         charm: MyCharm = mgr.charm
         # we verify the cluster's get_tls_data sees it
@@ -273,22 +261,20 @@ def test_config_created_on_pebble_ready(foo_container: Container):
 
     # THEN the charm pushes the workload config to the workload container
     fs = str(foo_container.get_filesystem(ctx))
-    
+
     config_file_path_relative_to_fs = Path(fs + str(CONFIG_FILE))
     assert config_file_path_relative_to_fs.exists()
     assert config_file_path_relative_to_fs.read_text().strip() == "some: yaml"
 
 
-@pytest.mark.parametrize("event_type", (
-        "cluster-changed", "cluster-created", "pebble-ready", "upgrade-charm"
-))
-def test_update_tls_certificates_workload_container(privkey_secret: Secret, foo_container: Container, root_ca_cert:Path, event_type: str):
+@pytest.mark.parametrize(
+    "event_type", ("cluster-changed", "cluster-created", "pebble-ready", "upgrade-charm")
+)
+def test_update_tls_certificates_workload_container(
+    privkey_secret: Secret, foo_container: Container, root_ca_cert: Path, event_type: str
+):
     # GIVEN the cluster has published TLS data
-    ctx = Context(
-        MyWorker,
-        meta=MyWorker.META,
-        config=MyWorker.CONFIG
-    )
+    ctx = Context(MyWorker, meta=MyWorker.META, config=MyWorker.CONFIG)
 
     cluster = Relation(
         "my-cluster",
@@ -297,9 +283,9 @@ def test_update_tls_certificates_workload_container(privkey_secret: Secret, foo_
             ca_cert="cacert",
             server_cert="servercert",
             privkey_secret_id=privkey_secret.id,
-        ).dump()
-        )
-    
+        ).dump(),
+    )
+
     # WHEN we receive any of:
     # - pebble_ready
     # - _worker_config_received
@@ -310,7 +296,7 @@ def test_update_tls_certificates_workload_container(privkey_secret: Secret, foo_
         "cluster-changed": cluster.changed_event,
         "cluster-created": cluster.created_event,
         "pebble-ready": foo_container.pebble_ready_event,
-        "upgrade-charm": "upgrade-charm"
+        "upgrade-charm": "upgrade-charm",
     }[event_type]
     with ctx.manager(
         event=event,
@@ -319,39 +305,34 @@ def test_update_tls_certificates_workload_container(privkey_secret: Secret, foo_
             config={f"role-{r}": True for r in {"read", "write"}},
             relations=[cluster],
             containers=[foo_container],
-            secrets=[privkey_secret]
-            )
+            secrets=[privkey_secret],
+        ),
     ) as mgr:
         charm: MyCharm = mgr.charm
         # we verify the cluster's get_tls_data sees it
         tls_data = charm.worker.cluster.get_tls_data()
         assert tls_data
 
-    # THEN the charm pushes TLS configs to the workload container 
+    # THEN the charm pushes TLS configs to the workload container
     fs = str(foo_container.get_filesystem(ctx))
 
     for file, expected_content in zip(
-        (CERT_FILE,
-        KEY_FILE,
-        CLIENT_CA_FILE,
-        ROOT_CA_CERT_CONTAINER), (
-            "servercert", "verysecret", "cacert", "cacert"
-        ) ):
+        (CERT_FILE, KEY_FILE, CLIENT_CA_FILE, ROOT_CA_CERT_CONTAINER),
+        ("servercert", "verysecret", "cacert", "cacert"),
+    ):
         path_relative_to_fs = Path(fs + str(file))
         assert path_relative_to_fs.exists(), file
         assert path_relative_to_fs.read_text() == expected_content
 
 
-@pytest.mark.parametrize("event_type", (
-        "cluster-changed", "cluster-created", "pebble-ready", "upgrade-charm"
-))
-def test_update_tls_certificates_local_fs(privkey_secret: Secret, foo_container: Container, root_ca_cert:Path, event_type: str):
+@pytest.mark.parametrize(
+    "event_type", ("cluster-changed", "cluster-created", "pebble-ready", "upgrade-charm")
+)
+def test_update_tls_certificates_local_fs(
+    privkey_secret: Secret, foo_container: Container, root_ca_cert: Path, event_type: str
+):
     # GIVEN the cluster has published TLS data
-    ctx = Context(
-        MyWorker,
-        meta=MyWorker.META,
-        config=MyWorker.CONFIG
-    )
+    ctx = Context(MyWorker, meta=MyWorker.META, config=MyWorker.CONFIG)
 
     cluster = Relation(
         "my-cluster",
@@ -360,7 +341,7 @@ def test_update_tls_certificates_local_fs(privkey_secret: Secret, foo_container:
             ca_cert="cacert",
             server_cert="servercert",
             privkey_secret_id=privkey_secret.id,
-        ).dump()
+        ).dump(),
     )
 
     # WHEN we receive any of:
@@ -373,17 +354,17 @@ def test_update_tls_certificates_local_fs(privkey_secret: Secret, foo_container:
         "cluster-changed": cluster.changed_event,
         "cluster-created": cluster.created_event,
         "pebble-ready": foo_container.pebble_ready_event,
-        "upgrade-charm": "upgrade-charm"
+        "upgrade-charm": "upgrade-charm",
     }[event_type]
     with ctx.manager(
-            event=event,
-            state=State(
-                leader=True,
-                config={f"role-{r}": True for r in {"read", "write"}},
-                relations=[cluster],
-                containers=[foo_container],
-                secrets=[privkey_secret]
-            )
+        event=event,
+        state=State(
+            leader=True,
+            config={f"role-{r}": True for r in {"read", "write"}},
+            relations=[cluster],
+            containers=[foo_container],
+            secrets=[privkey_secret],
+        ),
     ) as mgr:
         charm: MyCharm = mgr.charm
         # we verify the cluster's get_tls_data sees it

@@ -350,8 +350,7 @@ class ClusterProvider(Object):
                 remote_app_databag = relation.data[relation.app]
                 try:
                     worker_role: str = ClusterRequirerAppData.load(remote_app_databag).role
-                except DataValidationError as e:
-                    log.error(f"invalid databag contents: {e}")
+                except DataValidationError:
                     continue
 
                 # the number of units with each role is the number of remote units
@@ -373,8 +372,7 @@ class ClusterProvider(Object):
                 try:
                     worker_data = ClusterRequirerUnitData.load(relation.data[worker_unit])
                     unit_address = worker_data.address
-                except DataValidationError as e:
-                    log.info(f"invalid databag contents: {e}")
+                except DataValidationError:
                     continue
                 worker_topology = {
                     "address": unit_address,
