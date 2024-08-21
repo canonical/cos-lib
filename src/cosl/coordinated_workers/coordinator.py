@@ -52,6 +52,8 @@ CONSOLIDATED_ALERT_RULES_PATH = "./src/prometheus_alert_rules/consolidated_rules
 class S3NotFoundError(Exception):
     """Raised when the s3 integration is not present or not ready."""
 
+class ClusterRolesConfigError(Exception):
+    """Raised when the ClusterRolesConfig instance is not properly configured."""
 
 @dataclass
 class ClusterRolesConfig:
@@ -62,6 +64,16 @@ class ClusterRolesConfig:
     minimal_deployment: Iterable[str]
     recommended_deployment: Dict[str, int]
 
+    def __post_init__(self):
+        """Whether the roles_config makes up a coherent worker deployment."""
+        are_meta_keys_valid = set(self.meta_roles.keys()).issubset(self.roles)
+        are_meta_values_valid = all(
+            set(meta_value).issubset(self.roles) for meta_value in self.meta_roles.values()
+        )
+        is_minimal_valid = set(self.minimal_deployment).issubset(self.roles)
+        is_recommended_valid = set(self.recommended_deployment).issubset(self.roles)
+        if not all([are_meta_keys_valid, are_meta_values_valid, is_minimal_valid, is_recommended_valid]):
+            raise ClusterRolesConfigError("Invalid ClusterRolesConfig: The configuration is not coherent.")
 
 _EndpointMapping = TypedDict(
     "_EndpointMapping",
@@ -126,7 +138,6 @@ class Coordinator(ops.Object):
 
         self._endpoints = endpoints
 
-        # validate_roles_config(roles_config)
         self.roles_config = roles_config
 
         self.cluster = ClusterProvider(
@@ -260,21 +271,8 @@ class Coordinator(ops.Object):
         cluster = self.cluster
         roles = cluster.gather_roles()
 
-        are_meta_keys_valid = set(rc.meta_roles.keys()).issubset(rc.roles)
-        are_meta_values_valid = all(
-            set(meta_value).issubset(rc.roles) for meta_value in rc.meta_roles.values()
-        )
-        is_minimal_valid = set(rc.minimal_deployment).issubset(rc.roles)
-        is_recommended_valid = set(rc.recommended_deployment).issubset(rc.roles)
-
-        roles_config_valid = all(
-            [are_meta_keys_valid, are_meta_values_valid, is_minimal_valid, is_recommended_valid]
-        )
-
         # Whether the roles list makes up a coherent worker deployment.
-        is_coherent = set(roles.keys()).issuperset(minimal_deployment)
-
-        return is_coherent and roles_config_valid
+        return set(roles.keys()).issuperset(minimal_deployment)
 
     @property
     def missing_roles(self) -> Set[str]:

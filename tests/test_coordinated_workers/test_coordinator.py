@@ -1,22 +1,17 @@
-import logging
 from types import SimpleNamespace
 
 import ops
 import pytest
 from ops import Framework
 from scenario import Container, Context, Relation, State
-from scenario.runtime import UncaughtCharmError
 
 from src.cosl.coordinated_workers.coordinator import (
+    ClusterRolesConfig,
+    ClusterRolesConfigError,
     Coordinator,
     S3NotFoundError,
 )
-from src.cosl.coordinated_workers.interface import ClusterProviderAppData, ClusterRequirerAppData
-
-logger = logging.getLogger(__name__)
-
-# TODO Make a fixture that generates a valid S3 Relation
-# TODO I can also patch _s3_config to return a random dict to test parts working
+from src.cosl.coordinated_workers.interface import ClusterRequirerAppData
 
 
 @pytest.fixture
@@ -174,60 +169,63 @@ def coordinator_charm(request):
         ),
     ),
 )
-def test_incoherent_role_configs(
-    coordinator_state: State,
-    coordinator_charm: ops.CharmBase,
-    invalid_role_config: SimpleNamespace,
+def test_raise_on_invalid_role_configs(invalid_role_config):
+    # Test that the meta roles keys and values, minimal roles keys, and recommended roles keys are a subset of roles
+
+    # GIVEN an invalid_role_config
+    # WHEN ClusterRolesConfig is instantiated
+    # THEN the __post_init__ raises a ClusterRolesConfigError
+    with pytest.raises(ClusterRolesConfigError):
+        ClusterRolesConfig(
+            roles=invalid_role_config.roles,
+            meta_roles=invalid_role_config.meta_roles,
+            minimal_deployment=invalid_role_config.minimal_deployment,
+            recommended_deployment=invalid_role_config.recommended_deployment,
+        )
+
+
+def test_worker_roles_subset_of_minimal_deployment(
+    coordinator_state: State, coordinator_charm: ops.CharmBase
 ):
-    # Test that the meta roles keys and values, minimal roles keys, and recommended roles keys must be a subset of roles
+    # Test that the combination of worker roles is a subset of the minimal deployment roles
 
-    # GIVEN a coordinator charm
+    # GIVEN a coordinator_charm
     ctx = Context(coordinator_charm, meta=coordinator_charm.META)
+
+    # AND a coordinator_state defining relations to worker charms with incomplete distributed roles
+    missing_backend_worker_relation = [
+        relation
+        for relation in coordinator_state.relations
+        if relation.remote_app_name != "worker2"
+    ]
 
     # WHEN we process any event
     with ctx.manager(
         "update-status",
-        state=coordinator_state,
-    ) as mgr:
-        charm: coordinator_charm = mgr.charm
-
-        # AND an invalid role_config is applied
-        charm.coordinator.roles_config = invalid_role_config
-        # THEN the deployment is incoherent
-        assert not charm.coordinator.is_coherent
-
-
-def test_worker_roles_subset_of_minimal_deployment(coordinator_state: State, coordinator_charm: ops.CharmBase):
-    # Test that the combination of worker roles must be a subset of the minimal deployment roles
-
-    # GIVEN a coordinator charm with a valid roles_config
-    # AND related to worker charms with distributed roles
-    ctx = Context(coordinator_charm, meta=coordinator_charm.META)
-
-    # WHEN we process any event
-    with ctx.manager(
-        "update-status",
-        state=coordinator_state,
+        state=coordinator_state.replace(relations=missing_backend_worker_relation),
     ) as mgr:
         charm: coordinator_charm = mgr.charm
 
         # THEN the deployment is coherent
-        assert charm.coordinator.is_coherent
+        assert not charm.coordinator.is_coherent
 
 
-def test_without_s3_integration_raises_error(coordinator_state: State, coordinator_charm: ops.CharmBase):
+def test_without_s3_integration_raises_error(
+    coordinator_state: State, coordinator_charm: ops.CharmBase
+):
     # Test that a charm without an s3 integration raises S3NotFoundError
 
     # GIVEN a coordinator charm without an s3 integration
     ctx = Context(coordinator_charm, meta=coordinator_charm.META)
-    relations_without_s3 = [relation for relation in coordinator_state.relations if relation.endpoint != 'my-s3']
+    relations_without_s3 = [
+        relation for relation in coordinator_state.relations if relation.endpoint != "my-s3"
+    ]
 
     # WHEN we process any event
     with ctx.manager(
         "update-status",
         state=coordinator_state.replace(relations=relations_without_s3),
     ) as mgr:
-
         # THEN the _s3_config method raises and S3NotFoundError
         with pytest.raises(S3NotFoundError):
             mgr.charm.coordinator._s3_config
