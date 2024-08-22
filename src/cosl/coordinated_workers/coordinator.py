@@ -67,7 +67,7 @@ class ClusterRolesConfig:
     recommended_deployment: Dict[str, int]
 
     def __post_init__(self):
-        """Ensure the roles_config makes up a coherent worker deployment."""
+        """Ensure the various role specifications are consistent with one another."""
         are_meta_keys_valid = set(self.meta_roles.keys()).issubset(self.roles)
         are_meta_values_valid = all(
             set(meta_value).issubset(self.roles) for meta_value in self.meta_roles.values()
@@ -82,7 +82,7 @@ class ClusterRolesConfig:
             )
 
     def is_coherent_with(self, cluster_roles: Iterable[str]) -> bool:
-        """Validate the ClusterRolesConfig is coherent with the provided cluster roles."""
+        """Returns True if the provided roles satisfy the minimal deployment spec; False otherwise."""
         return set(self.minimal_deployment).issubset(set(cluster_roles))
 
 

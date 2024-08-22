@@ -4,11 +4,9 @@ from src.cosl.coordinated_workers.coordinator import ClusterRolesConfig, Cluster
 
 
 def test_meta_role_keys_not_in_roles():
-    # Test that the meta roles keys are a subset of roles
-
-    # GIVEN an invalid_role_config
-    # WHEN ClusterRolesConfig is instantiated
-    # THEN the __post_init__ method raises a ClusterRolesConfigError
+    """Meta roles keys must be a subset of roles."""
+    # WHEN `meta_roles` has a key that is not specified in `roles`
+    # THEN instantiation raises a ClusterRolesConfigError
     with pytest.raises(ClusterRolesConfigError):
         ClusterRolesConfig(
             roles={"read"},
@@ -19,11 +17,9 @@ def test_meta_role_keys_not_in_roles():
 
 
 def test_meta_role_values_not_in_roles():
-    # Test that the meta roles values are a subset of roles
-
-    # GIVEN an invalid_role_config
-    # WHEN ClusterRolesConfig is instantiated
-    # THEN the __post_init__ method raises a ClusterRolesConfigError
+    """Meta roles values must be a subset of roles."""
+    # WHEN `meta_roles` has a value that is not specified in `roles`
+    # THEN instantiation raises a ClusterRolesConfigError
     with pytest.raises(ClusterRolesConfigError):
         ClusterRolesConfig(
             roles={"read"},
@@ -34,11 +30,9 @@ def test_meta_role_values_not_in_roles():
 
 
 def test_minimal_deployment_roles_not_in_roles():
-    # Test that the minimal deployment roles are a subset of roles
-
-    # GIVEN an invalid_role_config
-    # WHEN ClusterRolesConfig is instantiated
-    # THEN the __post_init__ method raises a ClusterRolesConfigError
+    """Minimal deployment roles must be a subset of roles."""
+    # WHEN `minimal_deployment` has a value that is not specified in `roles`
+    # THEN instantiation raises a ClusterRolesConfigError
     with pytest.raises(ClusterRolesConfigError):
         ClusterRolesConfig(
             roles={"read"},
@@ -49,11 +43,9 @@ def test_minimal_deployment_roles_not_in_roles():
 
 
 def test_recommended_deployment_roles_not_in_roles():
-    # Test that the recommended deployment roles are a subset of roles
-
-    # GIVEN an invalid_role_config
-    # WHEN ClusterRolesConfig is instantiated
-    # THEN the __post_init__ method raises a ClusterRolesConfigError
+    """Recommended deployment roles must be a subset of roles."""
+    # WHEN `recommended_deployment` has a value that is not specified in `roles`
+    # THEN instantiation raises a ClusterRolesConfigError
     with pytest.raises(ClusterRolesConfigError):
         ClusterRolesConfig(
             roles={"read"},
