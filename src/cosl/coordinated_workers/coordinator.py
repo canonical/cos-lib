@@ -76,9 +76,13 @@ class ClusterRolesConfig:
     """Worker roles and deployment requirements."""
 
     roles: Iterable[str]
+    """The union of enabled roles for the application."""
     meta_roles: Mapping[str, Iterable[str]]
+    """Meta roles are composed of non-meta roles (default: all)."""
     minimal_deployment: Iterable[str]
+    """The minimal set of roles that need to be allocated for the deployment to be considered consistent."""
     recommended_deployment: Dict[str, int]
+    """The set of roles that need to be allocated for the deployment to be considered robust according to the official recommendations/guidelines.."""
 
     def __post_init__(self):
         """Ensure the various role specifications are consistent with one another."""
