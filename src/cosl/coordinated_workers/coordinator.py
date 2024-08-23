@@ -638,9 +638,7 @@ class Coordinator(ops.Object):
             # FIXME tls_available check is due to fetching secret from vault. We should be generating a new secret.
             # see https://github.com/canonical/cos-lib/issues/49 for full context
             privkey_secret_id=(
-                self.cluster.grant_privkey(VAULT_SECRET_LABEL)
-                if self.tls_available
-                else None
+                self.cluster.grant_privkey(VAULT_SECRET_LABEL) if self.tls_available else None
             ),
             tracing_receivers=(
                 self._tracing_receivers_getter()
