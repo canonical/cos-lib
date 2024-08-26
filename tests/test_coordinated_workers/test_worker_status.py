@@ -222,9 +222,9 @@ def test_access_status_no_endpoint_raises():
     "charms.observability_libs.v0.kubernetes_compute_resources_patch.ResourcePatcher.apply",
     MagicMock(return_value=None),
 )
-def test_status_check_ready_with_patch(ctx, base_state):
+def test_status_check_ready_with_patch(ctx, base_state, tls):
 
-    with endpoint_ready():
+    with endpoint_ready(tls):
         with config_on_disk():
             with patch(
                 "cosl.coordinated_workers.worker.KubernetesComputeResourcesPatch.get_status",
