@@ -46,7 +46,7 @@ def ctx(tls):
                     ),
                     {"cluster": "cluster"},
                     readiness_check_endpoint=self._readiness_check_endpoint,
-                    resources_requests={"cpu": "50m", "memory": "100Mi"},
+                    resources_requests=lambda _: {"cpu": "50m", "memory": "100Mi"},
                     container_name="charm",
                 )
 

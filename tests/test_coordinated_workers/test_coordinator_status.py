@@ -43,7 +43,7 @@ class MyCoordCharm(CharmBase):
                 },
                 nginx_config=lambda _: "nginx config",
                 workers_config=lambda _: "worker config",
-                resources_requests={"cpu": "50m", "memory": "100Mi"},
+                resources_requests=lambda _: {"cpu": "50m", "memory": "100Mi"},
                 container_name="charm",
             )
 

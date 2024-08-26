@@ -43,8 +43,30 @@ CLIENT_CA_FILE = "/etc/worker/ca.cert"
 
 logger = logging.getLogger(__name__)
 
+
+def validate_container_name(
+    container_name: Optional[str],
+    resources_requests: Optional[Callable[["Worker"], Dict[str, str]]],
+) -> Union[None, ValueError]:
+    """Raise `ValueError` if `resources_requests` is not None and `container_name` is None."""
+    if resources_requests is not None and container_name is None:
+        raise ValueError(
+            "Cannot have a None value for container_name while resources_requests is provided."
+        )
+
+
 _EndpointMapping = TypedDict("_EndpointMapping", {"cluster": str}, total=True)
 """Mapping of the relation endpoint names that the charms uses, as defined in metadata.yaml."""
+
+_ResourceLimitOptionsMapping = TypedDict(
+    "_ResourceLimitOptionsMapping",
+    {
+        "cpu_limit": str,
+        "memory_limit": str,
+    },
+)
+"""Mapping of the resources limit option names that the charms use, as defined in config.yaml."""
+
 
 ROOT_CA_CERT = Path("/usr/local/share/ca-certificates/ca.crt")
 
@@ -75,7 +97,8 @@ class Worker(ops.Object):
         pebble_layer: Callable[["Worker"], Layer],
         endpoints: _EndpointMapping,
         readiness_check_endpoint: Optional[Union[str, Callable[["Worker"], str]]] = None,
-        resources_requests: Optional[Dict[str, str]] = None,
+        resources_limit_options: Optional[_ResourceLimitOptionsMapping] = None,
+        resources_requests: Optional[Callable[["Worker"], Dict[str, str]]] = None,
         container_name: Optional[str] = None,
     ):
         """Constructor for a Worker object.
@@ -87,10 +110,18 @@ class Worker(ops.Object):
             endpoints: Endpoint names for coordinator relations, as defined in metadata.yaml.
             readiness_check_endpoint: URL to probe with a pebble check to determine
                 whether the worker node is ready. Passing None will effectively disable it.
-            resources_requests: The resources "requests" portion to apply when patching a container using
+            resources_limit_options: A dictionary containing resources limit option names. The dictionary should include
+                "cpu_limit" and "memory_limit" keys with values as option names, as defined in the config.yaml.
+                If no dictionary is provided, the default option names "cpu_limit" and "memory_limit" would be used.
+            resources_requests: A function generating the resources "requests" portion to apply when patching a container using
                 KubernetesComputeResourcesPatch. The "limits" portion of the patch gets populated by setting
-                config options `cpu_limit` and `memory_limit`.
+                their respective config options in config.yaml.
             container_name: The container for which to apply the resources requests & limits.
+                Required if `resources_requests` is provided.
+
+        Raises:
+        ValueError:
+            If `resources_requests` is not None and `container_name` is None, a ValueError is raised.
         """
         super().__init__(charm, key="worker")
         self._charm = charm
@@ -100,14 +131,19 @@ class Worker(ops.Object):
         self._container = self._charm.unit.get_container(name)
 
         self._endpoints = endpoints
+        validate_container_name(container_name, resources_requests)
+
         # turn str to Callable[[Worker], str]
         self._readiness_check_endpoint: Optional[Callable[[Worker], str]]
         if isinstance(readiness_check_endpoint, str):
             self._readiness_check_endpoint = lambda _: readiness_check_endpoint
         else:
             self._readiness_check_endpoint = readiness_check_endpoint
-        self._resources_requests = resources_requests
+        self._resources_requests_getter = (
+            partial(resources_requests, self) if resources_requests is not None else None
+        )
         self._container_name = container_name
+        self._resources_limit_options = resources_limit_options
 
         self.cluster = ClusterRequirer(
             charm=self._charm,
@@ -125,10 +161,15 @@ class Worker(ops.Object):
         )
 
         # Resources patch
-        self.resources_patch = KubernetesComputeResourcesPatch(
-            self._charm,
-            self._container_name,
-            resource_reqs_func=self._get_resources_requirements) if self._resources_requests and self._container_name else None
+        self.resources_patch = (
+            KubernetesComputeResourcesPatch(
+                self._charm,
+                self._container_name,  # type: ignore
+                resource_reqs_func=self._adjust_resource_requirements,
+            )
+            if self._resources_requests_getter
+            else None
+        )
 
         # Event listeners
         self.framework.observe(self._charm.on.config_changed, self._on_config_changed)
@@ -565,14 +606,25 @@ class Worker(ops.Object):
         else:
             return endpoint, None
 
-    def _get_resources_requirements(self) -> ResourceRequirements:
-        """A callable function that gets called by `KubernetesComputeResourcesPatch` to get the resources requests and limits to patch."""
+    def _adjust_resource_requirements(self) -> ResourceRequirements:
+        """A callable function that gets called by `KubernetesComputeResourcesPatch` to adjust the resources requests and limits to patch."""
+        cpu_limit_key = (
+            "cpu_limit"
+            if self._resources_limit_options is None
+            else self._resources_limit_options["cpu_limit"]
+        )
+        memory_limit_key = (
+            "memory_limit"
+            if self._resources_limit_options is None
+            else self._resources_limit_options["memory_limit"]
+        )
+
         limits = {
-            "cpu": self._charm.model.config.get("cpu_limit"),
-            "memory": self._charm.model.config.get("memory_limit"),
+            "cpu": self._charm.model.config.get(cpu_limit_key),
+            "memory": self._charm.model.config.get(memory_limit_key),
         }
         return adjust_resource_requirements(
-            limits, self._resources_requests, adhere_to_requests=True
+            limits, self._resources_requests_getter(), adhere_to_requests=True  # type: ignore
         )
 
 
