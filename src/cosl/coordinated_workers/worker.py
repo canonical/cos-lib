@@ -25,9 +25,14 @@ from cosl.helpers import check_libs_installed
 
 check_libs_installed(
     "charms.loki_k8s.v1.loki_push_api",
+    "charms.observability_libs.v0.kubernetes_compute_resources_patch",
 )
 
 from charms.loki_k8s.v1.loki_push_api import _PebbleLogClient  # type: ignore
+from charms.observability_libs.v0.kubernetes_compute_resources_patch import (
+    KubernetesComputeResourcesPatch,
+    adjust_resource_requirements,
+)
 
 BASE_DIR = "/worker"
 CONFIG_FILE = "/etc/worker/config.yaml"
@@ -69,6 +74,8 @@ class Worker(ops.Object):
         pebble_layer: Callable[["Worker"], Layer],
         endpoints: _EndpointMapping,
         readiness_check_endpoint: Optional[Union[str, Callable[["Worker"], str]]] = None,
+        resources_requests: Optional[Dict[str, str]] = None,
+        container_name: Optional[str] = None,
     ):
         """Constructor for a Worker object.
 
@@ -79,6 +86,8 @@ class Worker(ops.Object):
             endpoints: Endpoint names for coordinator relations, as defined in metadata.yaml.
             readiness_check_endpoint: URL to probe with a pebble check to determine
                 whether the worker node is ready. Passing None will effectively disable it.
+            resources_requests: The resources request dictionary to apply when patching a container using KubernetesComputeResourcesPatch.
+            container_name: The container for which to apply the resources requests & limits.
         """
         super().__init__(charm, key="worker")
         self._charm = charm
@@ -94,6 +103,8 @@ class Worker(ops.Object):
             self._readiness_check_endpoint = lambda _: readiness_check_endpoint
         else:
             self._readiness_check_endpoint = readiness_check_endpoint
+        self._resources_request = resources_requests
+        self._container_name = container_name
 
         self.cluster = ClusterRequirer(
             charm=self._charm,
@@ -109,6 +120,15 @@ class Worker(ops.Object):
                 self.cluster.on.removed,
             ],
         )
+
+        # Resources patch
+        if self._resources_request and self._container_name:
+            # By default, apply resource limits to the workload container
+            self.resources_patch = KubernetesComputeResourcesPatch(
+                self._charm,
+                self._container_name,
+                resource_reqs_func=self._resource_reqs_from_config,
+            )
 
         # Event listeners
         self.framework.observe(self._charm.on.config_changed, self._on_config_changed)
@@ -256,6 +276,9 @@ class Worker(ops.Object):
             )
         )
 
+        if hasattr(self, "resources_patch") and self.resources_patch:
+            e.add_status(self.resources_patch.get_status())
+
     # Utility functions
     @property
     def roles(self) -> List[str]:
@@ -330,7 +353,6 @@ class Worker(ops.Object):
             logger.debug("Adding new layer to pebble...")
             self._container.add_layer(self._name, new_layer, combine=True)
             return True
-
         return False
 
     def _add_readiness_check(self, new_layer: Layer):
@@ -542,6 +564,15 @@ class Worker(ops.Object):
             return endpoint, str(ROOT_CA_CERT)
         else:
             return endpoint, None
+
+    def _resource_reqs_from_config(self):
+        limits = {
+            "cpu": self._charm.model.config.get("cpu"),
+            "memory": self._charm.model.config.get("memory"),
+        }
+        return adjust_resource_requirements(
+            limits, self._resources_request, adhere_to_requests=True
+        )
 
 
 class ManualLogForwarder(ops.Object):

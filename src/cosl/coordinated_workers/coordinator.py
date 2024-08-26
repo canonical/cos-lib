@@ -45,11 +45,16 @@ check_libs_installed(
     "charms.prometheus_k8s.v0.prometheus_scrape",
     "charms.loki_k8s.v1.loki_push_api",
     "charms.tempo_k8s.v2.tracing",
+    "charms.observability_libs.v0.kubernetes_compute_resources_patch",
 )
 
 from charms.data_platform_libs.v0.s3 import S3Requirer
 from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
 from charms.loki_k8s.v1.loki_push_api import LokiPushApiConsumer
+from charms.observability_libs.v0.kubernetes_compute_resources_patch import (
+    KubernetesComputeResourcesPatch,
+    adjust_resource_requirements,
+)
 from charms.observability_libs.v1.cert_handler import VAULT_SECRET_LABEL, CertHandler
 from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.tempo_k8s.v2.tracing import TracingEndpointRequirer
@@ -146,6 +151,8 @@ class Coordinator(ops.Object):
         is_coherent: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
         is_recommended: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
         tracing_receivers: Optional[Callable[[], Optional[Dict[str, str]]]] = None,
+        resources_requests: Optional[Dict[str, str]] = None,
+        container_name: Optional[str] = None,
     ):
         """Constructor for a Coordinator object.
 
@@ -163,6 +170,8 @@ class Coordinator(ops.Object):
             is_coherent: Custom coherency checker for a minimal deployment.
             is_recommended: Custom coherency checker for a recommended deployment.
             tracing_receivers: Endpoints to which the workload (and the worker charm) can push traces to.
+            resources_requests: The resources request dictionary to apply when patching a container using KubernetesComputeResourcesPatch.
+            container_name: The container for which to apply the resources requests & limits.
         """
         super().__init__(charm, key="coordinator")
         self._charm = charm
@@ -184,6 +193,8 @@ class Coordinator(ops.Object):
         self._is_coherent = is_coherent
         self._is_recommended = is_recommended
         self._tracing_receivers_getter = tracing_receivers
+        self._resources_request = resources_requests
+        self._container_name = container_name
 
         self.nginx = Nginx(
             self._charm,
@@ -229,6 +240,14 @@ class Coordinator(ops.Object):
             relation_name=self._endpoints["tracing"],
             protocols=["otlp_http"],
         )
+
+        # Resources patch
+        if self._resources_request and self._container_name:
+            self.resources_patch = KubernetesComputeResourcesPatch(
+                self._charm,
+                self._container_name,
+                resource_reqs_func=self._resource_reqs_from_config,
+            )
 
         # We always listen to collect-status
         self.framework.observe(self._charm.on.collect_unit_status, self._on_collect_unit_status)
@@ -555,6 +574,9 @@ class Coordinator(ops.Object):
         else:
             e.add_status(ops.ActiveStatus())
 
+        if hasattr(self, "resources_patch") and self.resources_patch:
+            e.add_status(self.resources_patch.get_status())
+
     ###################
     # UTILITY METHODS #
     ###################
@@ -663,3 +685,12 @@ class Coordinator(ops.Object):
         os.makedirs(CONSOLIDATED_ALERT_RULES_PATH, exist_ok=True)
         self._render_workers_alert_rules()
         self._consolidate_nginx_alert_rules()
+
+    def _resource_reqs_from_config(self):
+        limits = {
+            "cpu": self._charm.model.config.get("cpu"),
+            "memory": self._charm.model.config.get("memory"),
+        }
+        return adjust_resource_requirements(
+            limits, self._resources_request, adhere_to_requests=True
+        )

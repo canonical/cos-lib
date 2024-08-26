@@ -31,13 +31,24 @@ def ctx(tls):
     class MyCharm(CharmBase):
         def __init__(self, framework: Framework):
             super().__init__(framework)
-            self.worker = Worker(
-                self,
-                "workload",
-                lambda _: Layer(""),
-                {"cluster": "cluster"},
-                readiness_check_endpoint=self._readiness_check_endpoint,
-            )
+            with patch(
+                "cosl.coordinated_workers.worker.KubernetesComputeResourcesPatch._namespace",
+                "test-namespace",
+            ):
+                self.worker = Worker(
+                    self,
+                    "workload",
+                    lambda _: Layer(
+                        {
+                            "summary": "summary",
+                            "services": {"service": {"summary": "summary", "override": "replace"}},
+                        }
+                    ),
+                    {"cluster": "cluster"},
+                    readiness_check_endpoint=self._readiness_check_endpoint,
+                    resources_requests={"cpu": "50m", "memory": "100Mi"},
+                    container_name="charm",
+                )
 
         def _readiness_check_endpoint(self, _):
             return f"{'https' if tls else 'http'}://localhost:3200/ready"
@@ -119,6 +130,11 @@ def test_status_check_no_config(ctx, base_state, caplog):
     assert "Config file not on disk. Skipping status check." in caplog.messages
 
 
+# need to patch as Blocked state of get_status will override the Waiting state
+@patch(
+    "cosl.coordinated_workers.worker.KubernetesComputeResourcesPatch.get_status",
+    MagicMock(return_value=WaitingStatus("waiting for limits")),
+)
 def test_status_check_starting(ctx, base_state, tls):
     # GIVEN getting the status returns "Starting: X"
     with endpoint_starting(tls):
@@ -132,6 +148,10 @@ def test_status_check_starting(ctx, base_state, tls):
     assert state_out.unit_status == WaitingStatus("Starting...")
 
 
+@patch(
+    "cosl.coordinated_workers.worker.KubernetesComputeResourcesPatch.get_status",
+    MagicMock(return_value=ActiveStatus("")),
+)
 def test_status_check_ready(ctx, base_state, tls):
     # GIVEN getting the status returns "ready"
     with endpoint_ready(tls):
@@ -196,3 +216,26 @@ def test_access_status_no_endpoint_raises():
     # THEN calling .status raises
     with pytest.raises(WorkerError):
         worker.status  # noqa
+
+
+@patch(
+    "charms.observability_libs.v0.kubernetes_compute_resources_patch.ResourcePatcher.apply",
+    MagicMock(return_value=None),
+)
+def test_status_check_ready_with_patch(ctx, base_state):
+
+    with endpoint_ready():
+        with config_on_disk():
+            with patch(
+                "cosl.coordinated_workers.worker.KubernetesComputeResourcesPatch.get_status",
+                MagicMock(return_value=WaitingStatus("waiting")),
+            ):
+                state = base_state.with_can_connect("workload", True)
+                state_out = ctx.run("config_changed", state)
+                assert state_out.unit_status == WaitingStatus("waiting")
+                with patch(
+                    "cosl.coordinated_workers.worker.KubernetesComputeResourcesPatch.get_status",
+                    MagicMock(return_value=ActiveStatus("")),
+                ):
+                    state_out_out = ctx.run("update_status", state_out)
+                    assert state_out_out.unit_status == ActiveStatus("read,write ready.")
