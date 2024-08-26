@@ -171,7 +171,9 @@ class Coordinator(ops.Object):
             is_coherent: Custom coherency checker for a minimal deployment.
             is_recommended: Custom coherency checker for a recommended deployment.
             tracing_receivers: Endpoints to which the workload (and the worker charm) can push traces to.
-            resources_requests: The resources request dictionary to apply when patching a container using KubernetesComputeResourcesPatch.
+            resources_requests: The resources "requests" portion to apply when patching a container using
+                KubernetesComputeResourcesPatch. The "limits" portion of the patch gets populated by setting
+                config options `cpu_limit` and `memory_limit`.
             container_name: The container for which to apply the resources requests & limits.
         """
         super().__init__(charm, key="coordinator")
@@ -194,7 +196,7 @@ class Coordinator(ops.Object):
         self._is_coherent = is_coherent
         self._is_recommended = is_recommended
         self._tracing_receivers_getter = tracing_receivers
-        self._resources_request = resources_requests
+        self._resources_requests = resources_requests
         self._container_name = container_name
 
         self.nginx = Nginx(
@@ -243,12 +245,15 @@ class Coordinator(ops.Object):
         )
 
         # Resources patch
-        if self._resources_request and self._container_name:
-            self.resources_patch = KubernetesComputeResourcesPatch(
+        self.resources_patch = (
+            KubernetesComputeResourcesPatch(
                 self._charm,
                 self._container_name,
-                resource_reqs_func=self._resource_reqs_from_config,
+                resource_reqs_func=self._get_resources_requirements,
             )
+            if self._resources_requests and self._container_name
+            else None
+        )
 
         # We always listen to collect-status
         self.framework.observe(self._charm.on.collect_unit_status, self._on_collect_unit_status)
@@ -575,7 +580,7 @@ class Coordinator(ops.Object):
         else:
             e.add_status(ops.ActiveStatus())
 
-        if hasattr(self, "resources_patch") and self.resources_patch:
+        if self.resources_patch:
             e.add_status(self.resources_patch.get_status())
 
     ###################
@@ -687,11 +692,12 @@ class Coordinator(ops.Object):
         self._render_workers_alert_rules()
         self._consolidate_nginx_alert_rules()
 
-    def _resource_reqs_from_config(self) -> ResourceRequirements:
+    def _get_resources_requirements(self) -> ResourceRequirements:
+        """A callable function that gets called by `KubernetesComputeResourcesPatch` to get the resources requests and limits to patch."""
         limits = {
-            "cpu": self._charm.model.config.get("cpu"),
-            "memory": self._charm.model.config.get("memory"),
+            "cpu": self._charm.model.config.get("cpu_limit"),
+            "memory": self._charm.model.config.get("memory_limit"),
         }
         return adjust_resource_requirements(
-            limits, self._resources_request, adhere_to_requests=True
+            limits, self._resources_requests, adhere_to_requests=True
         )

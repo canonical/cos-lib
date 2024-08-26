@@ -87,7 +87,9 @@ class Worker(ops.Object):
             endpoints: Endpoint names for coordinator relations, as defined in metadata.yaml.
             readiness_check_endpoint: URL to probe with a pebble check to determine
                 whether the worker node is ready. Passing None will effectively disable it.
-            resources_requests: The resources request dictionary to apply when patching a container using KubernetesComputeResourcesPatch.
+            resources_requests: The resources "requests" portion to apply when patching a container using
+                KubernetesComputeResourcesPatch. The "limits" portion of the patch gets populated by setting
+                config options `cpu_limit` and `memory_limit`.
             container_name: The container for which to apply the resources requests & limits.
         """
         super().__init__(charm, key="worker")
@@ -104,7 +106,7 @@ class Worker(ops.Object):
             self._readiness_check_endpoint = lambda _: readiness_check_endpoint
         else:
             self._readiness_check_endpoint = readiness_check_endpoint
-        self._resources_request = resources_requests
+        self._resources_requests = resources_requests
         self._container_name = container_name
 
         self.cluster = ClusterRequirer(
@@ -123,13 +125,10 @@ class Worker(ops.Object):
         )
 
         # Resources patch
-        if self._resources_request and self._container_name:
-            # By default, apply resource limits to the workload container
-            self.resources_patch = KubernetesComputeResourcesPatch(
-                self._charm,
-                self._container_name,
-                resource_reqs_func=self._resource_reqs_from_config,
-            )
+        self.resources_patch = KubernetesComputeResourcesPatch(
+            self._charm,
+            self._container_name,
+            resource_reqs_func=self._get_resources_requirements) if self._resources_requests and self._container_name else None
 
         # Event listeners
         self.framework.observe(self._charm.on.config_changed, self._on_config_changed)
@@ -277,7 +276,7 @@ class Worker(ops.Object):
             )
         )
 
-        if hasattr(self, "resources_patch") and self.resources_patch:
+        if self.resources_patch:
             e.add_status(self.resources_patch.get_status())
 
     # Utility functions
@@ -566,13 +565,14 @@ class Worker(ops.Object):
         else:
             return endpoint, None
 
-    def _resource_reqs_from_config(self) -> ResourceRequirements:
+    def _get_resources_requirements(self) -> ResourceRequirements:
+        """A callable function that gets called by `KubernetesComputeResourcesPatch` to get the resources requests and limits to patch."""
         limits = {
-            "cpu": self._charm.model.config.get("cpu"),
-            "memory": self._charm.model.config.get("memory"),
+            "cpu": self._charm.model.config.get("cpu_limit"),
+            "memory": self._charm.model.config.get("memory_limit"),
         }
         return adjust_resource_requirements(
-            limits, self._resources_request, adhere_to_requests=True
+            limits, self._resources_requests, adhere_to_requests=True
         )
 
 
