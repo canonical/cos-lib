@@ -58,6 +58,7 @@ from charms.observability_libs.v0.kubernetes_compute_resources_patch import (
 from charms.observability_libs.v1.cert_handler import VAULT_SECRET_LABEL, CertHandler
 from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.tempo_k8s.v2.tracing import TracingEndpointRequirer
+from lightkube.models.core_v1 import ResourceRequirements
 
 logger = logging.getLogger(__name__)
 
@@ -686,7 +687,7 @@ class Coordinator(ops.Object):
         self._render_workers_alert_rules()
         self._consolidate_nginx_alert_rules()
 
-    def _resource_reqs_from_config(self):
+    def _resource_reqs_from_config(self) -> ResourceRequirements:
         limits = {
             "cpu": self._charm.model.config.get("cpu"),
             "memory": self._charm.model.config.get("memory"),

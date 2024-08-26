@@ -33,6 +33,7 @@ from charms.observability_libs.v0.kubernetes_compute_resources_patch import (
     KubernetesComputeResourcesPatch,
     adjust_resource_requirements,
 )
+from lightkube.models.core_v1 import ResourceRequirements
 
 BASE_DIR = "/worker"
 CONFIG_FILE = "/etc/worker/config.yaml"
@@ -565,7 +566,7 @@ class Worker(ops.Object):
         else:
             return endpoint, None
 
-    def _resource_reqs_from_config(self):
+    def _resource_reqs_from_config(self) -> ResourceRequirements:
         limits = {
             "cpu": self._charm.model.config.get("cpu"),
             "memory": self._charm.model.config.get("memory"),

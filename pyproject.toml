@@ -16,7 +16,8 @@ dependencies = [
   "pydantic",
   "tenacity",
   "PyYAML",
-  "typing-extensions"
+  "typing-extensions",
+  "lightkube>=v0.15.4"
 ]
 classifiers = [
     "Programming Language :: Python :: 3.8",
