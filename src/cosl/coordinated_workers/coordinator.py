@@ -10,8 +10,19 @@ import os
 import re
 import shutil
 import socket
+from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Protocol, Set, TypedDict
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Set,
+    TypedDict,
+)
 from urllib.parse import urlparse
 
 import ops
@@ -19,7 +30,11 @@ import yaml
 
 import cosl
 from cosl.coordinated_workers.interface import ClusterProvider
-from cosl.coordinated_workers.nginx import Nginx, NginxMappingOverrides, NginxPrometheusExporter
+from cosl.coordinated_workers.nginx import (
+    Nginx,
+    NginxMappingOverrides,
+    NginxPrometheusExporter,
+)
 from cosl.helpers import check_libs_installed
 
 check_libs_installed(
@@ -52,23 +67,47 @@ class S3NotFoundError(Exception):
     """Raised when the s3 integration is not present or not ready."""
 
 
-class ClusterRolesConfig(Protocol):
+class ClusterRolesConfigError(Exception):
+    """Raised when the ClusterRolesConfig instance is not properly configured."""
+
+
+@dataclass
+class ClusterRolesConfig:
     """Worker roles and deployment requirements."""
 
     roles: Iterable[str]
+    """The union of enabled roles for the application."""
     meta_roles: Mapping[str, Iterable[str]]
+    """Meta roles are composed of non-meta roles (default: all)."""
     minimal_deployment: Iterable[str]
+    """The minimal set of roles that need to be allocated for the deployment to be considered consistent."""
     recommended_deployment: Dict[str, int]
+    """The set of roles that need to be allocated for the deployment to be considered robust according to the official recommendations/guidelines.."""
 
+    def __post_init__(self):
+        """Ensure the various role specifications are consistent with one another."""
+        are_meta_keys_valid = set(self.meta_roles.keys()).issubset(self.roles)
+        are_meta_values_valid = all(
+            set(meta_value).issubset(self.roles)
+            for meta_value in self.meta_roles.values()
+        )
+        is_minimal_valid = set(self.minimal_deployment).issubset(self.roles)
+        is_recommended_valid = set(self.recommended_deployment).issubset(self.roles)
+        if not all(
+            [
+                are_meta_keys_valid,
+                are_meta_values_valid,
+                is_minimal_valid,
+                is_recommended_valid,
+            ]
+        ):
+            raise ClusterRolesConfigError(
+                "Invalid ClusterRolesConfig: The configuration is not coherent."
+            )
 
-def validate_roles_config(roles_config: ClusterRolesConfig) -> None:
-    """Assert that all the used roles have been defined."""
-    roles = set(roles_config.roles)
-    assert set(roles_config.meta_roles.keys()).issubset(roles)
-    for role_set in roles_config.meta_roles.values():
-        assert set(role_set).issubset(roles)
-    assert set(roles_config.minimal_deployment).issubset(roles)
-    assert set(roles_config.recommended_deployment.keys()).issubset(roles)
+    def is_coherent_with(self, cluster_roles: Iterable[str]) -> bool:
+        """Returns True if the provided roles satisfy the minimal deployment spec; False otherwise."""
+        return set(self.minimal_deployment).issubset(set(cluster_roles))
 
 
 _EndpointMapping = TypedDict(
@@ -105,8 +144,12 @@ class Coordinator(ops.Object):
         nginx_config: Callable[["Coordinator"], str],
         workers_config: Callable[["Coordinator"], str],
         nginx_options: Optional[NginxMappingOverrides] = None,
-        is_coherent: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
-        is_recommended: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
+        is_coherent: Optional[
+            Callable[[ClusterProvider, ClusterRolesConfig], bool]
+        ] = None,
+        is_recommended: Optional[
+            Callable[[ClusterProvider, ClusterRolesConfig], bool]
+        ] = None,
         tracing_receivers: Optional[Callable[[], Optional[Dict[str, str]]]] = None,
     ):
         """Constructor for a Coordinator object.
@@ -134,7 +177,6 @@ class Coordinator(ops.Object):
 
         self._endpoints = endpoints
 
-        validate_roles_config(roles_config)
         self.roles_config = roles_config
 
         self.cluster = ClusterProvider(
@@ -154,7 +196,9 @@ class Coordinator(ops.Object):
             options=nginx_options,
         )
         self._workers_config_getter = partial(workers_config, self)
-        self.nginx_exporter = NginxPrometheusExporter(self._charm, options=nginx_options)
+        self.nginx_exporter = NginxPrometheusExporter(
+            self._charm, options=nginx_options
+        )
 
         self.cert_handler = CertHandler(
             self._charm,
@@ -164,13 +208,17 @@ class Coordinator(ops.Object):
             sans=[self.hostname],
         )
 
-        self.s3_requirer = S3Requirer(self._charm, self._endpoints["s3"], s3_bucket_name)
+        self.s3_requirer = S3Requirer(
+            self._charm, self._endpoints["s3"], s3_bucket_name
+        )
 
         self._grafana_dashboards = GrafanaDashboardProvider(
             self._charm, relation_name=self._endpoints["grafana-dashboards"]
         )
 
-        self._logging = LokiPushApiConsumer(self._charm, relation_name=self._endpoints["logging"])
+        self._logging = LokiPushApiConsumer(
+            self._charm, relation_name=self._endpoints["logging"]
+        )
 
         # Provide ability for this to be scraped by Prometheus using prometheus_scrape
         refresh_events = [self._charm.on.update_status, self.cluster.on.changed]
@@ -188,11 +236,15 @@ class Coordinator(ops.Object):
         )
 
         self.tracing = TracingEndpointRequirer(
-            self._charm, relation_name=self._endpoints["tracing"], protocols=["otlp_http"]
+            self._charm,
+            relation_name=self._endpoints["tracing"],
+            protocols=["otlp_http"],
         )
 
         # We always listen to collect-status
-        self.framework.observe(self._charm.on.collect_unit_status, self._on_collect_unit_status)
+        self.framework.observe(
+            self._charm.on.collect_unit_status, self._on_collect_unit_status
+        )
 
         # If the cluster isn't ready, refuse to handle any other event as we can't possibly know what to do
         if not self.cluster.has_workers:
@@ -223,7 +275,9 @@ class Coordinator(ops.Object):
         self.framework.observe(self._charm.on.config_changed, self._on_config_changed)
 
         # nginx
-        self.framework.observe(self._charm.on.nginx_pebble_ready, self._on_nginx_pebble_ready)
+        self.framework.observe(
+            self._charm.on.nginx_pebble_ready, self._on_nginx_pebble_ready
+        )
         self.framework.observe(
             self._charm.on.nginx_prometheus_exporter_pebble_ready,
             self._on_nginx_prometheus_exporter_pebble_ready,
@@ -233,7 +287,9 @@ class Coordinator(ops.Object):
         self.framework.observe(
             self.s3_requirer.on.credentials_changed, self._on_s3_credentials_changed
         )
-        self.framework.observe(self.s3_requirer.on.credentials_gone, self._on_s3_credentials_gone)
+        self.framework.observe(
+            self.s3_requirer.on.credentials_gone, self._on_s3_credentials_gone
+        )
 
         # tracing
         # self.framework.observe(self._charm.on.peers_relation_created, self._on_peers_relation_created)
@@ -241,14 +297,18 @@ class Coordinator(ops.Object):
 
         # logging
         self.framework.observe(
-            self._logging.on.loki_push_api_endpoint_joined, self._on_loki_relation_changed
+            self._logging.on.loki_push_api_endpoint_joined,
+            self._on_loki_relation_changed,
         )
         self.framework.observe(
-            self._logging.on.loki_push_api_endpoint_departed, self._on_loki_relation_changed
+            self._logging.on.loki_push_api_endpoint_departed,
+            self._on_loki_relation_changed,
         )
 
         # tls
-        self.framework.observe(self.cert_handler.on.cert_changed, self._on_cert_handler_changed)
+        self.framework.observe(
+            self.cert_handler.on.cert_changed, self._on_cert_handler_changed
+        )
 
         # cluster
         self.framework.observe(self.cluster.on.changed, self._on_cluster_changed)
@@ -263,15 +323,7 @@ class Coordinator(ops.Object):
         if manual_coherency_checker := self._is_coherent:
             return manual_coherency_checker(self.cluster, self.roles_config)
 
-        rc = self.roles_config
-        minimal_deployment = set(rc.minimal_deployment)
-        cluster = self.cluster
-        roles = cluster.gather_roles()
-
-        # Whether the roles list makes up a coherent mimir deployment.
-        is_coherent = set(roles.keys()).issuperset(minimal_deployment)
-
-        return is_coherent
+        return self.roles_config.is_coherent_with(self.cluster.gather_roles().keys())
 
     @property
     def missing_roles(self) -> Set[str]:
@@ -423,7 +475,10 @@ class Coordinator(ops.Object):
                 "relabel_configs": [
                     {"target_label": "juju_charm", "replacement": worker["charm_name"]},
                     {"target_label": "juju_unit", "replacement": worker["unit"]},
-                    {"target_label": "juju_application", "replacement": worker["application"]},
+                    {
+                        "target_label": "juju_application",
+                        "replacement": worker["application"],
+                    },
                     {"target_label": "juju_model", "replacement": self.model.name},
                     {"target_label": "juju_model_uuid", "replacement": self.model.uuid},
                 ],
@@ -508,7 +563,9 @@ class Coordinator(ops.Object):
         # todo add [nginx.workload] statuses
 
         if not self.cluster.has_workers:
-            e.add_status(ops.BlockedStatus("[consistency] Missing any worker relation."))
+            e.add_status(
+                ops.BlockedStatus("[consistency] Missing any worker relation.")
+            )
         if not self.is_coherent:
             e.add_status(ops.BlockedStatus("[consistency] Cluster inconsistent."))
         if not self.s3_ready:
@@ -543,7 +600,9 @@ class Coordinator(ops.Object):
             }
         """
         endpoints: Dict[str, str] = {}
-        relations: List[ops.Relation] = self.model.relations.get(self._endpoints["logging"], [])
+        relations: List[ops.Relation] = self.model.relations.get(
+            self._endpoints["logging"], []
+        )
 
         for relation in relations:
             for unit in relation.units:
@@ -582,7 +641,9 @@ class Coordinator(ops.Object):
                 self.cluster.grant_privkey(VAULT_SECRET_LABEL) if self.tls_available else None
             ),
             tracing_receivers=(
-                self._tracing_receivers_getter() if self._tracing_receivers_getter else None
+                self._tracing_receivers_getter()
+                if self._tracing_receivers_getter
+                else None
             ),
         )
 
