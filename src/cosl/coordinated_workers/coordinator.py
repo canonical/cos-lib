@@ -175,6 +175,7 @@ class Coordinator(ops.Object):
         resources_limit_options: Optional[_ResourceLimitOptionsMapping] = None,
         resources_requests: Optional[Callable[["Coordinator"], Dict[str, str]]] = None,
         container_name: Optional[str] = None,
+        remote_write_endpoints: Optional[Callable[[], List[Dict[str, str]]]] = None,
     ):
         """Constructor for a Coordinator object.
 
@@ -200,7 +201,9 @@ class Coordinator(ops.Object):
                 their respective config options in config.yaml.
             container_name: The container for which to apply the resources requests & limits.
                 Required if `resources_requests` is provided.
-
+            remote_write_endpoints: A function generating endpoints to which the workload
+                (and the worker charm) can push metrics to. The format of the dict is specified in the official
+                prometheus docs: https://prometheus.io/docs/prometheus/latest/configuration/configuration/#remote_write 
         Raises:
         ValueError:
             If `resources_requests` is not None and `container_name` is None, a ValueError is raised.
@@ -231,6 +234,7 @@ class Coordinator(ops.Object):
         )
         self._container_name = container_name
         self._resources_limit_options = resources_limit_options or {}
+        self.remote_write_endpoints_getter = remote_write_endpoints
 
         self.nginx = Nginx(
             self._charm,
@@ -680,6 +684,11 @@ class Coordinator(ops.Object):
             ),
             tracing_receivers=(
                 self._tracing_receivers_getter() if self._tracing_receivers_getter else None
+            ),
+            remote_write_endpoints=(
+                self.remote_write_endpoints_getter()
+                if self.remote_write_endpoints_getter
+                else None
             ),
         )
 

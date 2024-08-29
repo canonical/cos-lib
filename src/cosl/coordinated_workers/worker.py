@@ -316,6 +316,7 @@ class Worker(ops.Object):
                 else f"{','.join(self.roles)} ready."
             )
         )
+        
 
         if self.resources_patch:
             e.add_status(self.resources_patch.get_status())

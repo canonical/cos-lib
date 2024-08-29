@@ -188,6 +188,8 @@ class ClusterProviderAppData(DatabagModel):
     """Endpoints to which the workload (and the worker charm) can push logs to."""
     tracing_receivers: Optional[Dict[str, str]] = None
     """Endpoints to which the workload (and the worker charm) can push traces to."""
+    remote_write_endpoints: Optional[List[Dict[str, str]]] = None
+    """Endpoints to which the workload (and the worker charm) can push metrics to."""
 
     ### TLS stuff
     ca_cert: Optional[str] = None
@@ -275,6 +277,7 @@ class ClusterProvider(Object):
         privkey_secret_id: Optional[str] = None,
         loki_endpoints: Optional[Dict[str, str]] = None,
         tracing_receivers: Optional[Dict[str, str]] = None,
+        remote_write_endpoints: Optional[List[Dict[str, str]]] = None,
     ) -> None:
         """Publish the config to all related worker clusters."""
         for relation in self._relations:
@@ -286,6 +289,7 @@ class ClusterProvider(Object):
                     server_cert=server_cert,
                     privkey_secret_id=privkey_secret_id,
                     tracing_receivers=tracing_receivers,
+                    remote_write_endpoints=remote_write_endpoints,
                 )
                 local_app_databag.dump(relation.data[self.model.app])
 
@@ -539,4 +543,11 @@ class ClusterRequirer(Object):
         data = self._get_data_from_coordinator()
         if data:
             return data.tracing_receivers or {}
+        return {}
+
+    def get_remote_write_endpoints(self) -> Dict[str, str]:
+        """Fetch the remote write endpoints from the coordinator databag."""
+        data = self._get_data_from_coordinator()
+        if data:
+            return data.remote_write_endpoints or {}
         return {}
