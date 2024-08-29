@@ -9,6 +9,7 @@ from scenario import Container, Context, Relation, State
 
 from cosl.coordinated_workers.coordinator import ClusterRolesConfig, Coordinator
 from cosl.coordinated_workers.interface import ClusterProviderAppData, ClusterRequirerAppData
+from tests.test_coordinated_workers.test_worker_status import k8s_patch
 
 my_roles = ClusterRolesConfig(
     roles={"role"},
@@ -22,36 +23,39 @@ class MyCoordCharm(CharmBase):
 
     def __init__(self, framework: Framework):
         super().__init__(framework)
-        with patch(
-            "cosl.coordinated_workers.coordinator.KubernetesComputeResourcesPatch._namespace",
-            "test-namespace",
-        ):
-            self.coordinator = Coordinator(
-                charm=self,
-                roles_config=my_roles,
-                s3_bucket_name="coordinator",
-                external_url="localhost:3200",
-                worker_metrics_port="8080",
-                endpoints={
-                    "cluster": "cluster",
-                    "s3": "s3",
-                    "certificates": "certificates",
-                    "grafana-dashboards": "grafana-dashboard",
-                    "logging": "logging",
-                    "metrics": "metrics-endpoint",
-                    "tracing": "self-tracing",
-                },
-                nginx_config=lambda _: "nginx config",
-                workers_config=lambda _: "worker config",
-                resources_requests=lambda _: {"cpu": "50m", "memory": "100Mi"},
-                container_name="charm",
-            )
+
+        self.coordinator = Coordinator(
+            charm=self,
+            roles_config=my_roles,
+            s3_bucket_name="coordinator",
+            external_url="localhost:3200",
+            worker_metrics_port="8080",
+            endpoints={
+                "cluster": "cluster",
+                "s3": "s3",
+                "certificates": "certificates",
+                "grafana-dashboards": "grafana-dashboard",
+                "logging": "logging",
+                "metrics": "metrics-endpoint",
+                "tracing": "self-tracing",
+            },
+            nginx_config=lambda _: "nginx config",
+            workers_config=lambda _: "worker config",
+            resources_requests=lambda _: {"cpu": "50m", "memory": "100Mi"},
+            container_name="charm",
+        )
 
 
 @pytest.fixture
-def ctx():
+def coord_charm():
+    with k8s_patch():
+        yield MyCoordCharm
+
+
+@pytest.fixture
+def ctx(coord_charm):
     return Context(
-        MyCoordCharm,
+        coord_charm,
         meta={
             "name": "lilith",
             "requires": {

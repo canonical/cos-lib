@@ -22,7 +22,6 @@ from typing import (
     Optional,
     Set,
     TypedDict,
-    Union,
 )
 from urllib.parse import urlparse
 
@@ -116,10 +115,10 @@ class ClusterRolesConfig:
         return set(self.minimal_deployment).issubset(set(cluster_roles))
 
 
-def validate_container_name(
+def _validate_container_name(
     container_name: Optional[str],
     resources_requests: Optional[Callable[["Coordinator"], Dict[str, str]]],
-) -> Union[None, ValueError]:
+) -> None:
     """Raise `ValueError` if `resources_requests` is not None and `container_name` is None."""
     if resources_requests is not None and container_name is None:
         raise ValueError(
@@ -214,7 +213,7 @@ class Coordinator(ops.Object):
 
         self._endpoints = endpoints
 
-        validate_container_name(container_name, resources_requests)
+        _validate_container_name(container_name, resources_requests)
         self.roles_config = roles_config
 
         self.cluster = ClusterProvider(
@@ -231,7 +230,7 @@ class Coordinator(ops.Object):
             partial(resources_requests, self) if resources_requests is not None else None
         )
         self._container_name = container_name
-        self._resources_limit_options = resources_limit_options
+        self._resources_limit_options = resources_limit_options or {}
 
         self.nginx = Nginx(
             self._charm,
@@ -727,17 +726,9 @@ class Coordinator(ops.Object):
         self._consolidate_nginx_alert_rules()
 
     def _adjust_resource_requirements(self) -> ResourceRequirements:
-        """A callable function that gets called by `KubernetesComputeResourcesPatch` to adjust the resources requests and limits to patch."""
-        cpu_limit_key: str = (
-            "cpu_limit"
-            if self._resources_limit_options is None
-            else self._resources_limit_options["cpu_limit"]
-        )
-        memory_limit_key: str = (
-            "memory_limit"
-            if self._resources_limit_options is None
-            else self._resources_limit_options["memory_limit"]
-        )
+        """A method that gets called by `KubernetesComputeResourcesPatch` to adjust the resources requests and limits to patch."""
+        cpu_limit_key = self._resources_limit_options.get("cpu_limit", "cpu_limit")
+        memory_limit_key = self._resources_limit_options.get("memory_limit", "memory_limit")
 
         limits = {
             "cpu": self._charm.model.config.get(cpu_limit_key),

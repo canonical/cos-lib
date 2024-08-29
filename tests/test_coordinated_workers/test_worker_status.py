@@ -26,29 +26,37 @@ def _urlopen_patch(url: str, resp: str, tls: bool):
         raise RuntimeError("unknown path")
 
 
+@contextmanager
+def k8s_patch(status=ActiveStatus()):
+    with patch("lightkube.core.client.GenericSyncClient"):
+        with patch.multiple(
+            "cosl.coordinated_workers.worker.KubernetesComputeResourcesPatch",
+            _namespace="test-namespace",
+            _patch=MagicMock(return_value=None),
+            get_status=MagicMock(return_value=status),
+        ) as patcher:
+            yield patcher
+
+
 @pytest.fixture
 def ctx(tls):
     class MyCharm(CharmBase):
         def __init__(self, framework: Framework):
             super().__init__(framework)
-            with patch(
-                "cosl.coordinated_workers.worker.KubernetesComputeResourcesPatch._namespace",
-                "test-namespace",
-            ):
-                self.worker = Worker(
-                    self,
-                    "workload",
-                    lambda _: Layer(
-                        {
-                            "summary": "summary",
-                            "services": {"service": {"summary": "summary", "override": "replace"}},
-                        }
-                    ),
-                    {"cluster": "cluster"},
-                    readiness_check_endpoint=self._readiness_check_endpoint,
-                    resources_requests=lambda _: {"cpu": "50m", "memory": "100Mi"},
-                    container_name="charm",
-                )
+            self.worker = Worker(
+                self,
+                "workload",
+                lambda _: Layer(
+                    {
+                        "summary": "summary",
+                        "services": {"service": {"summary": "summary", "override": "replace"}},
+                    }
+                ),
+                {"cluster": "cluster"},
+                readiness_check_endpoint=self._readiness_check_endpoint,
+                resources_requests=lambda _: {"cpu": "50m", "memory": "100Mi"},
+                container_name="charm",
+            )
 
         def _readiness_check_endpoint(self, _):
             return f"{'https' if tls else 'http'}://localhost:3200/ready"
@@ -104,6 +112,7 @@ def config_on_disk():
         yield
 
 
+@k8s_patch()
 def test_status_check_no_pebble(ctx, base_state, caplog):
     # GIVEN the container cannot connect
     state = base_state.with_can_connect("workload", False)
@@ -117,6 +126,7 @@ def test_status_check_no_pebble(ctx, base_state, caplog):
     assert "Container cannot connect. Skipping status check." in caplog.messages
 
 
+@k8s_patch()
 def test_status_check_no_config(ctx, base_state, caplog):
     # GIVEN there is no config file on disk
     state = base_state.with_can_connect("workload", True)
@@ -130,11 +140,7 @@ def test_status_check_no_config(ctx, base_state, caplog):
     assert "Config file not on disk. Skipping status check." in caplog.messages
 
 
-# need to patch as Blocked state of get_status will override the Waiting state
-@patch(
-    "cosl.coordinated_workers.worker.KubernetesComputeResourcesPatch.get_status",
-    MagicMock(return_value=WaitingStatus("waiting for limits")),
-)
+@k8s_patch()
 def test_status_check_starting(ctx, base_state, tls):
     # GIVEN getting the status returns "Starting: X"
     with endpoint_starting(tls):
@@ -148,10 +154,7 @@ def test_status_check_starting(ctx, base_state, tls):
     assert state_out.unit_status == WaitingStatus("Starting...")
 
 
-@patch(
-    "cosl.coordinated_workers.worker.KubernetesComputeResourcesPatch.get_status",
-    MagicMock(return_value=ActiveStatus("")),
-)
+@k8s_patch()
 def test_status_check_ready(ctx, base_state, tls):
     # GIVEN getting the status returns "ready"
     with endpoint_ready(tls):
@@ -218,24 +221,13 @@ def test_access_status_no_endpoint_raises():
         worker.status  # noqa
 
 
-@patch(
-    "charms.observability_libs.v0.kubernetes_compute_resources_patch.ResourcePatcher.apply",
-    MagicMock(return_value=None),
-)
 def test_status_check_ready_with_patch(ctx, base_state, tls):
-
     with endpoint_ready(tls):
         with config_on_disk():
-            with patch(
-                "cosl.coordinated_workers.worker.KubernetesComputeResourcesPatch.get_status",
-                MagicMock(return_value=WaitingStatus("waiting")),
-            ):
+            with k8s_patch(status=WaitingStatus("waiting")):
                 state = base_state.with_can_connect("workload", True)
                 state_out = ctx.run("config_changed", state)
                 assert state_out.unit_status == WaitingStatus("waiting")
-                with patch(
-                    "cosl.coordinated_workers.worker.KubernetesComputeResourcesPatch.get_status",
-                    MagicMock(return_value=ActiveStatus("")),
-                ):
+                with k8s_patch(status=ActiveStatus("")):
                     state_out_out = ctx.run("update_status", state_out)
                     assert state_out_out.unit_status == ActiveStatus("read,write ready.")

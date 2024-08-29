@@ -44,10 +44,10 @@ CLIENT_CA_FILE = "/etc/worker/ca.cert"
 logger = logging.getLogger(__name__)
 
 
-def validate_container_name(
+def _validate_container_name(
     container_name: Optional[str],
     resources_requests: Optional[Callable[["Worker"], Dict[str, str]]],
-) -> Union[None, ValueError]:
+) -> None:
     """Raise `ValueError` if `resources_requests` is not None and `container_name` is None."""
     if resources_requests is not None and container_name is None:
         raise ValueError(
@@ -131,7 +131,7 @@ class Worker(ops.Object):
         self._container = self._charm.unit.get_container(name)
 
         self._endpoints = endpoints
-        validate_container_name(container_name, resources_requests)
+        _validate_container_name(container_name, resources_requests)
 
         # turn str to Callable[[Worker], str]
         self._readiness_check_endpoint: Optional[Callable[[Worker], str]]
@@ -143,7 +143,7 @@ class Worker(ops.Object):
             partial(resources_requests, self) if resources_requests is not None else None
         )
         self._container_name = container_name
-        self._resources_limit_options = resources_limit_options
+        self._resources_limit_options = resources_limit_options or {}
 
         self.cluster = ClusterRequirer(
             charm=self._charm,
@@ -607,17 +607,9 @@ class Worker(ops.Object):
             return endpoint, None
 
     def _adjust_resource_requirements(self) -> ResourceRequirements:
-        """A callable function that gets called by `KubernetesComputeResourcesPatch` to adjust the resources requests and limits to patch."""
-        cpu_limit_key = (
-            "cpu_limit"
-            if self._resources_limit_options is None
-            else self._resources_limit_options["cpu_limit"]
-        )
-        memory_limit_key = (
-            "memory_limit"
-            if self._resources_limit_options is None
-            else self._resources_limit_options["memory_limit"]
-        )
+        """A method that gets called by `KubernetesComputeResourcesPatch` to adjust the resources requests and limits to patch."""
+        cpu_limit_key = self._resources_limit_options.get("cpu_limit", "cpu_limit")
+        memory_limit_key = self._resources_limit_options.get("memory_limit", "memory_limit")
 
         limits = {
             "cpu": self._charm.model.config.get(cpu_limit_key),
