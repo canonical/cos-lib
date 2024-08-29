@@ -202,8 +202,7 @@ class Coordinator(ops.Object):
             container_name: The container for which to apply the resources requests & limits.
                 Required if `resources_requests` is provided.
             remote_write_endpoints: A function generating endpoints to which the workload
-                (and the worker charm) can push metrics to. The format of the dict is specified in the official
-                prometheus docs: https://prometheus.io/docs/prometheus/latest/configuration/configuration/#remote_write 
+                and the worker charm can push metrics to.
         Raises:
         ValueError:
             If `resources_requests` is not None and `container_name` is None, a ValueError is raised.
