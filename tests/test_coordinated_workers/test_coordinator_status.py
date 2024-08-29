@@ -7,15 +7,15 @@ from lightkube import ApiError
 from ops import ActiveStatus, BlockedStatus, CharmBase, Framework, WaitingStatus
 from scenario import Container, Context, Relation, State
 
-from cosl.coordinated_workers.coordinator import Coordinator
+from cosl.coordinated_workers.coordinator import ClusterRolesConfig, Coordinator
 from cosl.coordinated_workers.interface import ClusterProviderAppData, ClusterRequirerAppData
 
-
-class MyRoles:
-    roles = {"role"}
-    meta_roles = {}
-    minimal_deployment = {"role": 1}
-    recommended_deployment = {"role": 2}
+my_roles = ClusterRolesConfig(
+    roles={"role"},
+    meta_roles={},
+    minimal_deployment={"role": 1},
+    recommended_deployment={"role": 2},
+)
 
 
 class MyCoordCharm(CharmBase):
@@ -28,7 +28,7 @@ class MyCoordCharm(CharmBase):
         ):
             self.coordinator = Coordinator(
                 charm=self,
-                roles_config=MyRoles(),
+                roles_config=my_roles,
                 s3_bucket_name="coordinator",
                 external_url="localhost:3200",
                 worker_metrics_port="8080",
