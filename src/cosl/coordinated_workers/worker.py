@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 def _validate_container_name(
     container_name: Optional[str],
     resources_requests: Optional[Callable[["Worker"], Dict[str, str]]],
-) -> None:
+):
     """Raise `ValueError` if `resources_requests` is not None and `container_name` is None."""
     if resources_requests is not None and container_name is None:
         raise ValueError(
