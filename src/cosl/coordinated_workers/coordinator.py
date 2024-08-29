@@ -20,7 +20,6 @@ from typing import (
     List,
     Mapping,
     Optional,
-    Protocol,
     Set,
     TypedDict,
     Union,
