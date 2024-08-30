@@ -29,7 +29,7 @@ import ops
 import yaml
 
 import cosl
-from cosl.coordinated_workers.interface import ClusterProvider
+from cosl.coordinated_workers.interface import ClusterProvider, RemoteWriteEndpoint
 from cosl.coordinated_workers.nginx import (
     Nginx,
     NginxMappingOverrides,
@@ -175,7 +175,7 @@ class Coordinator(ops.Object):
         resources_limit_options: Optional[_ResourceLimitOptionsMapping] = None,
         resources_requests: Optional[Callable[["Coordinator"], Dict[str, str]]] = None,
         container_name: Optional[str] = None,
-        remote_write_endpoints: Optional[Callable[[], List[Dict[str, str]]]] = None,
+        remote_write_endpoints: Optional[Callable[[], List[RemoteWriteEndpoint]]] = None,
     ):
         """Constructor for a Coordinator object.
 

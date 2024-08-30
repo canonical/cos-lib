@@ -31,6 +31,7 @@ import pydantic
 import yaml
 from ops import EventSource, Object, ObjectEvents, RelationCreatedEvent
 from pydantic import ConfigDict
+from typing_extensions import TypedDict
 
 import cosl
 
@@ -122,6 +123,12 @@ class DatabagModel(pydantic.BaseModel):
 # =============
 
 
+class RemoteWriteEndpoint(TypedDict):
+    """Type of the remote write endpoints to be passed to the worker through cluster relation data."""
+
+    url: str
+
+
 class ConfigReceivedEvent(ops.EventBase):
     """Event emitted when the "-cluster" provider has shared a new  config."""
 
@@ -188,7 +195,7 @@ class ClusterProviderAppData(DatabagModel):
     """Endpoints to which the workload (and the worker charm) can push logs to."""
     tracing_receivers: Optional[Dict[str, str]] = None
     """Endpoints to which the workload (and the worker charm) can push traces to."""
-    remote_write_endpoints: Optional[List[Dict[str, str]]] = None
+    remote_write_endpoints: Optional[List[RemoteWriteEndpoint]] = None
     """Endpoints to which the workload (and the worker charm) can push metrics to."""
 
     ### TLS stuff
@@ -277,7 +284,7 @@ class ClusterProvider(Object):
         privkey_secret_id: Optional[str] = None,
         loki_endpoints: Optional[Dict[str, str]] = None,
         tracing_receivers: Optional[Dict[str, str]] = None,
-        remote_write_endpoints: Optional[List[Dict[str, str]]] = None,
+        remote_write_endpoints: Optional[List[RemoteWriteEndpoint]] = None,
     ) -> None:
         """Publish the config to all related worker clusters."""
         for relation in self._relations:
@@ -545,7 +552,7 @@ class ClusterRequirer(Object):
             return data.tracing_receivers or {}
         return {}
 
-    def get_remote_write_endpoints(self) -> List[Dict[str, str]]:
+    def get_remote_write_endpoints(self) -> List[RemoteWriteEndpoint]:
         """Fetch the remote write endpoints from the coordinator databag."""
         data = self._get_data_from_coordinator()
         if data:

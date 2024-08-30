@@ -288,6 +288,15 @@ def test_worker_raises_if_service_restart_fails_for_too_long(tmp_path):
             [{"url": "test-url.com"}],
         ),
         ({"remote_write_endpoints": json.dumps(None), "worker_config": json.dumps("test")}, []),
+        (
+            {
+                "remote_write_endpoints": json.dumps(
+                    [{"url": "test-url.com"}, {"url": "test2-url.com"}]
+                ),
+                "worker_config": json.dumps("test"),
+            },
+            [{"url": "test-url.com"}, {"url": "test2-url.com"}],
+        ),
     ),
 )
 def test_get_remote_write_endpoints(remote_databag, expected):
