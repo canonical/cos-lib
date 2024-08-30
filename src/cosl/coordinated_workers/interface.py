@@ -545,9 +545,9 @@ class ClusterRequirer(Object):
             return data.tracing_receivers or {}
         return {}
 
-    def get_remote_write_endpoints(self) -> Dict[str, str]:
+    def get_remote_write_endpoints(self) -> List[Dict[str, str]]:
         """Fetch the remote write endpoints from the coordinator databag."""
         data = self._get_data_from_coordinator()
         if data:
-            return data.remote_write_endpoints or {}
-        return {}
+            return data.remote_write_endpoints or []
+        return []
