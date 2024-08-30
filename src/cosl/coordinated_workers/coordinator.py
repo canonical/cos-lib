@@ -203,6 +203,7 @@ class Coordinator(ops.Object):
                 Required if `resources_requests` is provided.
             remote_write_endpoints: A function generating endpoints to which the workload
                 and the worker charm can push metrics to.
+
         Raises:
         ValueError:
             If `resources_requests` is not None and `container_name` is None, a ValueError is raised.
@@ -604,6 +605,9 @@ class Coordinator(ops.Object):
     def _on_collect_unit_status(self, e: ops.CollectStatusEvent):
         # todo add [nginx.workload] statuses
 
+        if self.resources_patch and self.resources_patch.get_status().name != "active":
+            e.add_status(self.resources_patch.get_status())
+
         if not self.cluster.has_workers:
             e.add_status(ops.BlockedStatus("[consistency] Missing any worker relation."))
         if not self.is_coherent:
@@ -615,9 +619,6 @@ class Coordinator(ops.Object):
             e.add_status(ops.ActiveStatus("[coordinator] Degraded."))
         else:
             e.add_status(ops.ActiveStatus())
-
-        if self.resources_patch:
-            e.add_status(self.resources_patch.get_status())
 
     ###################
     # UTILITY METHODS #
