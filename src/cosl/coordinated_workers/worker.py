@@ -100,7 +100,6 @@ class Worker(ops.Object):
         resources_limit_options: Optional[_ResourceLimitOptionsMapping] = None,
         resources_requests: Optional[Callable[["Worker"], Dict[str, str]]] = None,
         container_name: Optional[str] = None,
-        preprocess_worker_config: Optional[Callable[[Any], Any]] = None,
     ):
         """Constructor for a Worker object.
 
@@ -151,11 +150,6 @@ class Worker(ops.Object):
             charm=self._charm,
             endpoint=self._endpoints["cluster"],
         )
-
-        _preprocess_worker_config: Callable[[Any], Any] = preprocess_worker_config or (lambda x: x)
-        # fetch and compute immediately, so we don't have to do it multiple times depending
-        # on the code path. In principle this should be failsafe.
-        self._worker_config = _preprocess_worker_config(self.cluster.get_worker_config())
 
         self._log_forwarder = ManualLogForwarder(
             charm=self._charm,
@@ -229,6 +223,16 @@ class Worker(ops.Object):
         # If there is a config, start the worker
         if self._worker_config:
             self._update_worker_config()
+
+    @property
+    def _worker_config(self):
+        """The configuration that this worker should run with, as received from the coordinator.
+
+        Charms that wish to modify their config before it's written to disk by the Worker
+        should subclass the worker, override this method, and use it to manipulate the
+        config that's presented to the Worker.
+        """
+        return self.cluster.get_worker_config()
 
     @property
     def status(self) -> ServiceEndpointStatus:

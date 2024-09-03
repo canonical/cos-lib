@@ -331,22 +331,25 @@ def test_config_preprocessor():
     # GIVEN a charm with a config preprocessor
     new_config = {"modified": "config"}
 
+    class MyWorker(Worker):
+
+        @property
+        def _worker_config(self):
+            # mock config processor that entirely replaces the config with another,
+            # normally one would call super and manipulate
+            return new_config
+
     class MyCharm(ops.CharmBase):
         layer = Layer({"services": {"foo": {"command": ["bar"]}}})
 
         def __init__(self, framework: Framework):
             super().__init__(framework)
-            self.worker = Worker(
+            self.worker = MyWorker(
                 self,
                 "foo",
                 lambda _: self.layer,
                 {"cluster": "cluster"},
-                preprocess_worker_config=self.config_preprocessor,
             )
-
-        def config_preprocessor(self, cfg: dict):
-            # mock preprocessor that entirely replaces the config with another
-            return new_config
 
     ctx = Context(
         MyCharm,
