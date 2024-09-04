@@ -185,7 +185,6 @@ class Worker(ops.Object):
             self._charm.on[name].pebble_check_recovered, self._on_pebble_check_recovered
         )
 
-
     # Event handlers
     def _on_pebble_ready(self, _: ops.PebbleReadyEvent):
         self._charm.unit.set_workload_version(self.running_version() or "")
