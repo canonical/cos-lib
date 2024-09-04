@@ -118,7 +118,6 @@ class Worker(ops.Object):
                 their respective config options in config.yaml.
             container_name: The container for which to apply the resources requests & limits.
                 Required if `resources_requests` is provided.
-            preprocess_worker_config: Function to modify the worker configuration, if necessary.
 
         Raises:
         ValueError:
