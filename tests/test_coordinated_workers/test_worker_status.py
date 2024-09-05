@@ -131,7 +131,9 @@ def test_status_check_no_config(ctx, base_state, caplog):
     state = base_state.with_can_connect("workload", True)
     # GIVEN there is no config file on disk
     # WHEN we run any event
-    with patch("cosl.coordinated_workers.worker.Worker._running_worker_config", new=lambda _: None):
+    with patch(
+        "cosl.coordinated_workers.worker.Worker._running_worker_config", new=lambda _: None
+    ):
         state_out = ctx.run("update_status", state)
 
     # THEN the charm sets blocked
