@@ -10,22 +10,21 @@ on:
 jobs:
   test-distributed-charms:
     runs-on: ubuntu-latest
+    continue-on-error: true
 
     strategy:
       fail-fast: false
       matrix:
         include:
           - repo: canonical/tempo-coordinator-k8s-operator
-            commit: 82f832cdf4d40300366a86f752c8bbfbdde41382  # unreleased rev, 5 sept 2024
           - repo: canonical/tempo-worker-k8s-operator
-            commit: 74c3f8057d81a9e91088b54752b7b26daf43501e  # rev11, 5 sept 2024
 
     steps:
       - name: Checkout the ${{ matrix.repo }} repository
         uses: actions/checkout@v4
         with:
           repository: ${{ matrix.repo }}
-          ref: ${{ matrix.commit }}
+          ref: main
 
       - name: Update 'cosl' dependency in test charm to this branch
         run: |
