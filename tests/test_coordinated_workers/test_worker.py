@@ -9,7 +9,7 @@ import tenacity
 import yaml
 from ops import Framework
 from ops.pebble import Layer, ServiceStatus
-from scenario import Container, Context, Mount, Relation, State
+from scenario import Container, Context, ExecOutput, Mount, Relation, State
 from scenario.runtime import UncaughtCharmError
 
 from cosl.coordinated_workers.worker import CONFIG_FILE, Worker
@@ -142,6 +142,7 @@ def test_worker_restarts_if_some_service_not_up(tmp_path):
         "foo",
         can_connect=True,
         mounts={"local": Mount(CONFIG_FILE, cfg)},
+        exec_mock={("update-ca-certificates", "--fresh"): ExecOutput()},
         service_status={
             "foo": ServiceStatus.INACTIVE,
             "bar": ServiceStatus.ACTIVE,
@@ -207,6 +208,7 @@ def test_worker_does_not_restart_external_services(tmp_path):
     cfg.write_text("some: yaml")
     container = Container(
         "foo",
+        exec_mock={("update-ca-certificates", "--fresh"): ExecOutput()},
         can_connect=True,
         mounts={"local": Mount(CONFIG_FILE, cfg)},
         layers={"foo": MyCharm.layer, "bar": other_layer},
@@ -326,6 +328,7 @@ def test_get_remote_write_endpoints(remote_databag, expected):
     )
     container = Container(
         "foo",
+        exec_mock={("update-ca-certificates", "--fresh"): ExecOutput()},
         can_connect=True,
     )
     relation = Relation(
@@ -384,7 +387,13 @@ def test_config_preprocessor():
         "config_changed",
         State(
             config={"role-all": True},
-            containers=[Container("foo", can_connect=True)],
+            containers=[
+                Container(
+                    "foo",
+                    can_connect=True,
+                    exec_mock={("update-ca-certificates", "--fresh"): ExecOutput()},
+                )
+            ],
             relations=[
                 Relation(
                     "cluster",
