@@ -46,6 +46,7 @@ check_libs_installed(
     "charms.loki_k8s.v1.loki_push_api",
     "charms.tempo_k8s.v2.tracing",
     "charms.observability_libs.v0.kubernetes_compute_resources_patch",
+    "charms.tls_certificates_interface.v3.tls_certificates",
 )
 
 from charms.data_platform_libs.v0.s3 import S3Requirer
@@ -249,7 +250,9 @@ class Coordinator(ops.Object):
             certificates_relation_name=self._endpoints["certificates"],
             # let's assume we don't need the peer relation as all coordinator charms will assume juju secrets
             key="coordinator-server-cert",
-            sans=[self.hostname],
+            # update certificate with new SANs whenever a worker is added/removed
+            sans=[self.hostname, *self.cluster.gather_addresses()],
+            refresh_events=[self.cluster.on.changed],
         )
 
         self.s3_requirer = S3Requirer(self._charm, self._endpoints["s3"], s3_bucket_name)
