@@ -64,4 +64,4 @@ jobs:
           charmcraft-channel: "2.x/stable"
 
       - name: Run the charm's integration tests
-        run: tox -e integration
+        run: tox -vve integration
