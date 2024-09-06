@@ -23,6 +23,7 @@ jobs:
       - name: Checkout the ${{ matrix.repo }} repository
         uses: actions/checkout@v4
         with:
+          fetch-depth: 1
           repository: ${{ matrix.repo }}
           ref: main
 
@@ -35,10 +36,32 @@ jobs:
         run: pip install tox~=4.2
 
       - name: Run the charm's unit & scenario tests
-        run: tox -vve unit,scenario
+        run: tox -e unit,scenario
 
       - name: Run the charm's static analysis checks
-        run: tox -vve static-charm,static-lib
+        run: tox -e static-charm,static-lib
+
+      - name: Setup Charmcraft's pip cache
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/snap/charmcraft/common/cache/charmcraft/
+          key: charmcraft-cache-${{ github.job }}-${{ strategy.job-index }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: charmcraft-cache
+
+      - name: Get IP range
+        id: ip_range
+        run: |
+          echo "ip_range=$(ip -4 -j route get 2.2.2.2 | jq -r '.[] | .prefsrc')/32" >> $GITHUB_OUTPUT
+
+      - name: Setup operator environment (k8s)
+        uses: charmed-kubernetes/actions-operator@main
+        with:
+          juju-channel: 3.4/stable
+          provider: microk8s
+          channel: 1.26-strict/stable
+          microk8s-group: snap_microk8s
+          microk8s-addons: "hostpath-storage dns metallb:${{ steps.ip_range.outputs.ip_range }}"
+          charmcraft-channel: "2.x/stable"
 
       - name: Run the charm's integration tests
-        run: tox -vve integration
+        run: tox -e integration
