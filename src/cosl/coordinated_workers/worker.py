@@ -171,8 +171,8 @@ class Worker(ops.Object):
             if self._resources_requests_getter
             else None
         )
-        # holistic update logic
-        self._holistic_update()
+        # holistic update logic, aka common exit hook
+        self._reconcile()
 
         # Event listeners
         self.framework.observe(self._charm.on.collect_unit_status, self._on_collect_status)
@@ -397,7 +397,7 @@ class Worker(ops.Object):
             "ready", {"override": "replace", "http": {"url": self._readiness_check_endpoint(self)}}
         )
 
-    def _holistic_update(self):
+    def _reconcile(self):
         """Run all unconditional logic."""
         self._update_cluster_relation()
         self._update_config()
