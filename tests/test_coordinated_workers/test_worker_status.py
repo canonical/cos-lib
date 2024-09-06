@@ -213,7 +213,7 @@ def test_access_status_no_endpoint_raises():
     # GIVEN the caller doesn't pass an endpoint to Worker
     caller = MagicMock()
     with patch("cosl.juju_topology.JujuTopology.from_charm"):
-        with patch("cosl.coordinated_workers.worker.Worker._holistic_update"):
+        with patch("cosl.coordinated_workers.worker.Worker._reconcile"):
             worker = Worker(
                 caller,
                 "workload",
