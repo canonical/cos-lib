@@ -450,7 +450,7 @@ def test_worker_does_not_restart(restart_mock, tmp_path):
     )
     ctx.run("update_status", State(containers=[container], relations=[relation]))
 
-    assert restart_mock.call_count == 0
+    assert not restart_mock.called
 
 
 @patch.object(Worker, "_update_worker_config", MagicMock(return_value=False))
