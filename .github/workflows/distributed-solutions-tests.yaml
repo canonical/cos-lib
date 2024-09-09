@@ -33,7 +33,7 @@ jobs:
           echo -e "\ngit+$GITHUB_SERVER_URL/$GITHUB_REPOSITORY@$GITHUB_SHA#egg=cosl" >> requirements.txt
 
       - name: Install dependencies (tox & git)
-        run: pip install tox~=4.2 && sudo apt install git -y
+        run: pip install tox~=4.2 && apt install git -y
 
       - name: Run the charm's unit & scenario tests
         run: tox -e unit,scenario
@@ -64,4 +64,4 @@ jobs:
           charmcraft-channel: "2.x/stable"
 
       - name: Run the charm's integration tests
-        run: tox -vve integration
+        run: apt install git -y ; tox -vve integration
