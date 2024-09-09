@@ -32,8 +32,8 @@ jobs:
           sed -i -e "/^cosl[ ><=]/d" -e "/canonical\/cos-lib/d" -e "/#egg=cosl/d" requirements.txt
           echo -e "\ngit+$GITHUB_SERVER_URL/$GITHUB_REPOSITORY@$GITHUB_SHA#egg=cosl" >> requirements.txt
 
-      - name: Install dependencies
-        run: pip install tox~=4.2
+      - name: Install dependencies (tox & git)
+        run: pip install tox~=4.2 && sudo apt install git -y
 
       - name: Run the charm's unit & scenario tests
         run: tox -e unit,scenario
