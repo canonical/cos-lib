@@ -663,8 +663,9 @@ class Coordinator(ops.Object):
         # There could be a race between the resource patch and pebble operations
         # i.e., charm code proceeds beyond a can_connect guard, and then lightkube patches the statefulset
         # and the workload is no longer available.
+        # `resources_patch` might be `None` when no resources requests or limits are requested by the charm.
         if self.resources_patch and not self.resources_patch.is_ready():
-            logger.debug("Resource patching is not yet ready. Skipping cluster update.")
+            logger.debug("Resource patch not ready yet. Skipping cluster update step.")
             return
 
         self.nginx.configure_pebble_layer()
