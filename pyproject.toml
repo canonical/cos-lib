@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cosl"
-version = "0.0.20"
+version = "0.0.32"
 authors = [
   { name="sed-i", email="82407168+sed-i@users.noreply.github.com" },
 ]
@@ -14,8 +14,10 @@ requires-python = ">=3.8"
 dependencies = [
   "ops",
   "pydantic",
+  "tenacity",
   "PyYAML",
-  "typing-extensions"
+  "typing-extensions",
+  "lightkube>=v0.15.4"
 ]
 classifiers = [
     "Programming Language :: Python :: 3.8",

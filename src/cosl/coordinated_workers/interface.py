@@ -31,6 +31,7 @@ import pydantic
 import yaml
 from ops import EventSource, Object, ObjectEvents, RelationCreatedEvent
 from pydantic import ConfigDict
+from typing_extensions import TypedDict
 
 import cosl
 
@@ -62,19 +63,12 @@ class DatabagModel(pydantic.BaseModel):
         extra="ignore",
         # Allow instantiating this class by field name (instead of forcing alias).
         populate_by_name=True,
-        # Custom config key: whether to nest the whole datastructure (as json)
-        # under a field or spread it out at the toplevel.
-        _NEST_UNDER=None,
     )  # type: ignore
     """Pydantic config."""
 
     @classmethod
     def load(cls, databag: _RawDatabag):
         """Load this model from a Juju databag."""
-        nest_under = cls.model_config.get("_NEST_UNDER")
-        if nest_under:
-            return cls.model_validate(json.loads(databag[nest_under]))  # type: ignore
-
         try:
             data = {
                 k: json.loads(v)
@@ -94,31 +88,31 @@ class DatabagModel(pydantic.BaseModel):
             log.debug(msg, exc_info=True)
             raise DataValidationError(msg) from e
 
-    def dump(self, databag: Optional[_RawDatabag] = None, clear: bool = True) -> None:
+    def dump(self, databag: Optional[_RawDatabag] = None, clear: bool = True) -> _RawDatabag:
         """Write the contents of this model to Juju databag.
 
         :param databag: the databag to write the data to.
         :param clear: ensure the databag is cleared before writing it.
         """
-        if clear and databag:
-            databag.clear()
+        _databag: _RawDatabag = {} if databag is None else databag
 
-        if databag is None:
-            databag = {}
-        if nest_under := self.model_config.get("_NEST_UNDER"):
-            databag[nest_under] = self.model_dump_json(  # type: ignore
-                by_alias=True,
-                # skip keys whose values are default
-                exclude_defaults=True,
-            )
+        if clear:
+            _databag.clear()
 
         dct = self.model_dump(mode="json", by_alias=True, exclude_defaults=True)  # type: ignore
-        databag.update({k: json.dumps(v) for k, v in dct.items()})
+        _databag.update({k: json.dumps(v) for k, v in dct.items()})
+        return _databag
 
 
 # =============
 # | Interface |
 # =============
+
+
+class RemoteWriteEndpoint(TypedDict):
+    """Type of the remote write endpoints to be passed to the worker through cluster relation data."""
+
+    url: str
 
 
 class ConfigReceivedEvent(ops.EventBase):
@@ -187,6 +181,8 @@ class ClusterProviderAppData(DatabagModel):
     """Endpoints to which the workload (and the worker charm) can push logs to."""
     tracing_receivers: Optional[Dict[str, str]] = None
     """Endpoints to which the workload (and the worker charm) can push traces to."""
+    remote_write_endpoints: Optional[List[RemoteWriteEndpoint]] = None
+    """Endpoints to which the workload (and the worker charm) can push metrics to."""
 
     ### TLS stuff
     ca_cert: Optional[str] = None
@@ -274,6 +270,7 @@ class ClusterProvider(Object):
         privkey_secret_id: Optional[str] = None,
         loki_endpoints: Optional[Dict[str, str]] = None,
         tracing_receivers: Optional[Dict[str, str]] = None,
+        remote_write_endpoints: Optional[List[RemoteWriteEndpoint]] = None,
     ) -> None:
         """Publish the config to all related worker clusters."""
         for relation in self._relations:
@@ -285,6 +282,7 @@ class ClusterProvider(Object):
                     server_cert=server_cert,
                     privkey_secret_id=privkey_secret_id,
                     tracing_receivers=tracing_receivers,
+                    remote_write_endpoints=remote_write_endpoints,
                 )
                 local_app_databag.dump(relation.data[self.model.app])
 
@@ -539,3 +537,10 @@ class ClusterRequirer(Object):
         if data:
             return data.tracing_receivers or {}
         return {}
+
+    def get_remote_write_endpoints(self) -> List[RemoteWriteEndpoint]:
+        """Fetch the remote write endpoints from the coordinator databag."""
+        data = self._get_data_from_coordinator()
+        if data:
+            return data.remote_write_endpoints or []
+        return []

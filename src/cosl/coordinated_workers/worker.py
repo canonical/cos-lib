@@ -6,14 +6,19 @@
 import logging
 import re
 import socket
+import subprocess
+import urllib.request
+from enum import Enum
 from functools import partial
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, TypedDict
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypedDict, Union
 
 import ops
+import tenacity
 import yaml
+from ops import MaintenanceStatus
 from ops.model import ActiveStatus, BlockedStatus, WaitingStatus
-from ops.pebble import Layer, PathError, ProtocolError
+from ops.pebble import Check, Layer, PathError, Plan, ProtocolError
 
 from cosl import JujuTopology
 from cosl.coordinated_workers.interface import ClusterRequirer
@@ -21,9 +26,15 @@ from cosl.helpers import check_libs_installed
 
 check_libs_installed(
     "charms.loki_k8s.v1.loki_push_api",
+    "charms.observability_libs.v0.kubernetes_compute_resources_patch",
 )
 
 from charms.loki_k8s.v1.loki_push_api import _PebbleLogClient  # type: ignore
+from charms.observability_libs.v0.kubernetes_compute_resources_patch import (
+    KubernetesComputeResourcesPatch,
+    adjust_resource_requirements,
+)
+from lightkube.models.core_v1 import ResourceRequirements
 
 BASE_DIR = "/worker"
 CONFIG_FILE = "/etc/worker/config.yaml"
@@ -33,14 +44,44 @@ CLIENT_CA_FILE = "/etc/worker/ca.cert"
 
 logger = logging.getLogger(__name__)
 
+
+def _validate_container_name(
+    container_name: Optional[str],
+    resources_requests: Optional[Callable[["Worker"], Dict[str, str]]],
+):
+    """Raise `ValueError` if `resources_requests` is not None and `container_name` is None."""
+    if resources_requests is not None and container_name is None:
+        raise ValueError(
+            "Cannot have a None value for container_name while resources_requests is provided."
+        )
+
+
 _EndpointMapping = TypedDict("_EndpointMapping", {"cluster": str}, total=True)
 """Mapping of the relation endpoint names that the charms uses, as defined in metadata.yaml."""
+
+_ResourceLimitOptionsMapping = TypedDict(
+    "_ResourceLimitOptionsMapping",
+    {
+        "cpu_limit": str,
+        "memory_limit": str,
+    },
+)
+"""Mapping of the resources limit option names that the charms use, as defined in config.yaml."""
+
 
 ROOT_CA_CERT = Path("/usr/local/share/ca-certificates/ca.crt")
 
 
 class WorkerError(Exception):
     """Base class for exceptions raised by this module."""
+
+
+class ServiceEndpointStatus(Enum):
+    """Status of the worker service managed by pebble."""
+
+    starting = "starting"
+    up = "up"
+    down = "down"
 
 
 class Worker(ops.Object):
@@ -56,14 +97,32 @@ class Worker(ops.Object):
         name: str,
         pebble_layer: Callable[["Worker"], Layer],
         endpoints: _EndpointMapping,
+        readiness_check_endpoint: Optional[Union[str, Callable[["Worker"], str]]] = None,
+        resources_limit_options: Optional[_ResourceLimitOptionsMapping] = None,
+        resources_requests: Optional[Callable[["Worker"], Dict[str, str]]] = None,
+        container_name: Optional[str] = None,
     ):
         """Constructor for a Worker object.
 
         Args:
             charm: The worker charm object.
-            name: The name of the workload container and service.
+            name: The name of the workload container.
             pebble_layer: The pebble layer of the workload.
             endpoints: Endpoint names for coordinator relations, as defined in metadata.yaml.
+            readiness_check_endpoint: URL to probe with a pebble check to determine
+                whether the worker node is ready. Passing None will effectively disable it.
+            resources_limit_options: A dictionary containing resources limit option names. The dictionary should include
+                "cpu_limit" and "memory_limit" keys with values as option names, as defined in the config.yaml.
+                If no dictionary is provided, the default option names "cpu_limit" and "memory_limit" would be used.
+            resources_requests: A function generating the resources "requests" portion to apply when patching a container using
+                KubernetesComputeResourcesPatch. The "limits" portion of the patch gets populated by setting
+                their respective config options in config.yaml.
+            container_name: The container for which to apply the resources requests & limits.
+                Required if `resources_requests` is provided.
+
+        Raises:
+        ValueError:
+            If `resources_requests` is not None and `container_name` is None, a ValueError is raised.
         """
         super().__init__(charm, key="worker")
         self._charm = charm
@@ -73,6 +132,19 @@ class Worker(ops.Object):
         self._container = self._charm.unit.get_container(name)
 
         self._endpoints = endpoints
+        _validate_container_name(container_name, resources_requests)
+
+        # turn str to Callable[[Worker], str]
+        self._readiness_check_endpoint: Optional[Callable[[Worker], str]]
+        if isinstance(readiness_check_endpoint, str):
+            self._readiness_check_endpoint = lambda _: readiness_check_endpoint
+        else:
+            self._readiness_check_endpoint = readiness_check_endpoint
+        self._resources_requests_getter = (
+            partial(resources_requests, self) if resources_requests is not None else None
+        )
+        self._container_name = container_name
+        self._resources_limit_options = resources_limit_options or {}
 
         self.cluster = ClusterRequirer(
             charm=self._charm,
@@ -89,56 +161,144 @@ class Worker(ops.Object):
             ],
         )
 
-        # Event listeners
-        self.framework.observe(self._charm.on.config_changed, self._on_config_changed)
-        self.framework.observe(self._charm.on.upgrade_charm, self._on_upgrade_charm)
-        self.framework.observe(self._charm.on.collect_unit_status, self._on_collect_status)
+        # Resources patch
+        self.resources_patch = (
+            KubernetesComputeResourcesPatch(
+                self._charm,
+                self._container_name,  # type: ignore
+                resource_reqs_func=self._adjust_resource_requirements,
+            )
+            if self._resources_requests_getter
+            else None
+        )
+        # holistic update logic, aka common exit hook
+        self._reconcile()
 
-        self.framework.observe(self.cluster.on.config_received, self._on_worker_config_received)
-        self.framework.observe(self.cluster.on.created, self._on_cluster_created)
+        # Event listeners
+        self.framework.observe(self._charm.on.collect_unit_status, self._on_collect_status)
         self.framework.observe(self.cluster.on.removed, self._log_forwarder.disable_logging)
 
         self.framework.observe(self._charm.on[self._name].pebble_ready, self._on_pebble_ready)
+        self.framework.observe(
+            self._charm.on[name].pebble_check_failed, self._on_pebble_check_failed
+        )
+        self.framework.observe(
+            self._charm.on[name].pebble_check_recovered, self._on_pebble_check_recovered
+        )
 
     # Event handlers
-
     def _on_pebble_ready(self, _: ops.PebbleReadyEvent):
         self._charm.unit.set_workload_version(self.running_version() or "")
-        self._update_config()
 
-    def _on_worker_config_received(self, _: ops.EventBase):
-        self._update_config()
+    def _on_pebble_check_failed(self, event: ops.PebbleCheckFailedEvent):
+        if event.info.name == "ready":
+            logger.warning("Pebble `ready` check started to fail: " "worker node is down.")
+            # collect-status will detect that we're not ready and set waiting status.
 
-    def _on_upgrade_charm(self, _: ops.UpgradeCharmEvent):
-        self._update_cluster_relation()
+    def _on_pebble_check_recovered(self, event: ops.PebbleCheckFailedEvent):
+        if event.info.name == "ready":
+            logger.info("Pebble `ready` check is now passing: " "worker node is up.")
+            # collect-status will detect that we're ready and set active status.
 
-    def _on_cluster_created(self, _: ops.EventBase):
-        self._update_cluster_relation()
-        self._update_config()
+    @property
+    def _worker_config(self):
+        """The configuration that this worker should run with, as received from the coordinator.
 
-    def _on_cluster_changed(self, _: ops.EventBase):
-        self._update_config()
+        Charms that wish to modify their config before it's written to disk by the Worker
+        should subclass the worker, override this method, and use it to manipulate the
+        config that's presented to the Worker.
+        """
+        return self.cluster.get_worker_config()
 
-    def _on_config_changed(self, _: ops.ConfigChangedEvent):
-        # If the user has changed roles, publish them to relation data
-        self._update_cluster_relation()
-        # If there is a config, start the worker
-        if self.cluster.get_worker_config():
-            self._update_worker_config()
+    @property
+    def status(self) -> ServiceEndpointStatus:
+        """Determine the status of the service's endpoint."""
+        check_endpoint = self._readiness_check_endpoint
+        if not check_endpoint:
+            raise WorkerError(
+                "cannot check readiness without a readiness_check_endpoint configured. "
+                "Pass one to Worker on __init__."
+            )
+
+        if not self._container.can_connect():
+            logger.debug("Container cannot connect. Skipping status check.")
+            return ServiceEndpointStatus.down
+
+        if not self._running_worker_config():
+            logger.debug("Config file not on disk. Skipping status check.")
+            return ServiceEndpointStatus.down
+
+        # we really don't want this code to raise errors, so we blanket catch all.
+        try:
+            layer: Layer = self._pebble_layer()
+            services = self._container.get_services(*layer.services.keys())
+            running_status = {name: svc.is_running() for name, svc in services.items()}
+            if not all(running_status.values()):
+                if any(running_status.values()):
+                    starting_services = tuple(
+                        name for name, running in running_status.items() if not running
+                    )
+                    logger.info(f"Some services are not running: {starting_services}.")
+                    return ServiceEndpointStatus.starting
+
+                logger.info("All services are down.")
+                return ServiceEndpointStatus.down
+
+            with urllib.request.urlopen(check_endpoint(self)) as response:
+                html: bytes = response.read()
+
+            # ready response should simply be a string:
+            #   "ready"
+            raw_out = html.decode("utf-8").strip()
+            if raw_out == "ready":
+                return ServiceEndpointStatus.up
+
+            # depending on the workload, we get something like:
+            #   Some services are not Running:
+            #   Starting: 1
+            #   Running: 16
+            # (tempo)
+            #   Ingester not ready: waiting for 15s after being ready
+            # (mimir)
+
+            # anything that isn't 'ready' but also is a 2xx response will be interpreted as:
+            # we're not ready yet, but we're working on it.
+            logger.debug(f"GET {check_endpoint} returned: {raw_out!r}.")
+            return ServiceEndpointStatus.starting
+
+        except Exception:
+            logger.exception(
+                "Error while getting worker status. "
+                "This could mean that the worker is still starting."
+            )
+            return ServiceEndpointStatus.down
 
     def _on_collect_status(self, e: ops.CollectStatusEvent):
+        if self.resources_patch and self.resources_patch.get_status().name != "active":
+            e.add_status(self.resources_patch.get_status())
+
         if not self._container.can_connect():
             e.add_status(WaitingStatus(f"Waiting for `{self._name}` container"))
         if not self.model.get_relation(self._endpoints["cluster"]):
             e.add_status(BlockedStatus("Missing relation to a coordinator charm"))
         elif not self.cluster.relation:
             e.add_status(WaitingStatus("Cluster relation not ready"))
-        if not self.cluster.get_worker_config():
+        if not self._worker_config:
             e.add_status(WaitingStatus("Waiting for coordinator to publish a config"))
         if not self.roles:
             e.add_status(
                 BlockedStatus("Invalid or no roles assigned: please configure some valid roles")
             )
+
+        try:
+            status = self.status
+            if status == ServiceEndpointStatus.starting:
+                e.add_status(WaitingStatus("Starting..."))
+            elif status == ServiceEndpointStatus.down:
+                e.add_status(BlockedStatus("node down (see logs)"))
+        except WorkerError:
+            logger.debug("Unable to determine worker readiness: no endpoint given.")
+
         e.add_status(
             ActiveStatus(
                 "(all roles) ready."
@@ -174,15 +334,29 @@ class Worker(ops.Object):
 
     def _update_config(self) -> None:
         """Update the worker config and restart the workload if necessary."""
+        if not self._container.can_connect():
+            logger.debug("container cannot connect, skipping update_config.")
+            return
+
         restart = any(
-            [
+            (
                 self._update_tls_certificates(),
                 self._update_worker_config(),
                 self._set_pebble_layer(),
-            ]
+            )
         )
 
         if restart:
+            logger.debug("Config changed. Restarting worker services...")
+            self.restart()
+
+        # this can happen if s3 wasn't ready (server gave error) when we processed an earlier event
+        # causing the worker service to die on startup (exited quickly with code...)
+        # so we try to restart it now.
+        # TODO: would be nice if we could be notified of when s3 starts working, so we don't have to
+        #  wait for an update-status and can listen to that instead.
+        elif not all(svc.is_running() for svc in self._container.get_services().values()):
+            logger.debug("Some services are not running. Starting them now...")
             self.restart()
 
     def _set_pebble_layer(self) -> bool:
@@ -195,17 +369,52 @@ class Worker(ops.Object):
         if not self.roles:
             return False
 
-        current_layer = self._container.get_plan()
+        current_plan = self._container.get_plan()
         new_layer = self._pebble_layer()
 
-        if (
-            "services" not in current_layer.to_dict()
-            or current_layer.services != new_layer.services
-        ):
+        self._add_readiness_check(new_layer)
+
+        def diff(layer: Layer, plan: Plan):
+            layer_dct = layer.to_dict()
+            plan_dct = plan.to_dict()
+            for key in ["checks", "services"]:
+                if layer_dct.get(key) != plan_dct.get(key):
+                    return True
+            return False
+
+        if diff(new_layer, current_plan):
+            logger.debug("Adding new layer to pebble...")
             self._container.add_layer(self._name, new_layer, combine=True)
             return True
-
         return False
+
+    def _add_readiness_check(self, new_layer: Layer):
+        """Add readiness check to a pebble layer."""
+        if not self._readiness_check_endpoint:
+            # skip
+            return
+
+        new_layer.checks["ready"] = Check(
+            "ready",
+            {
+                "override": "replace",
+                # threshold gets added automatically by pebble
+                "threshold": 3,
+                "http": {"url": self._readiness_check_endpoint(self)},
+            },
+        )
+
+    def _reconcile(self):
+        """Run all logic that is independent of what event we're processing."""
+        # There could be a race between the resource patch and pebble operations
+        # i.e., charm code proceeds beyond a can_connect guard, and then lightkube patches the statefulset
+        # and the workload is no longer available
+        # `resources_patch` might be `None` when no resources requests or limits are requested by the charm.
+        if self.resources_patch and not self.resources_patch.is_ready():
+            logger.debug("Resource patch not ready yet. Skipping reconciliation step.")
+            return
+        self._update_cluster_relation()
+        self._update_config()
 
     def _update_cluster_relation(self) -> None:
         """Publish all the worker information to relation data."""
@@ -213,9 +422,6 @@ class Worker(ops.Object):
         if self._charm.unit.is_leader() and self.roles:
             logger.info(f"publishing roles: {self.roles}")
             self.cluster.publish_app_roles(self.roles)
-
-        if self.cluster.get_worker_config():
-            self._update_config()
 
     def _running_worker_config(self) -> Optional[Dict[str, Any]]:
         """Return the worker config as dict, or None if retrieval failed."""
@@ -249,7 +455,7 @@ class Worker(ops.Object):
             logger.warning("cannot update worker config: role missing or misconfigured.")
             return False
 
-        worker_config = self.cluster.get_worker_config()
+        worker_config = self._worker_config
         if not worker_config:
             logger.warning("cannot update worker config: coordinator hasn't published one yet.")
             return False
@@ -274,6 +480,27 @@ class Worker(ops.Object):
             ca_cert = tls_data["ca_cert"]
             server_cert = tls_data["server_cert"]
 
+            # Read the current content of the files (if they exist)
+            current_server_cert = (
+                self._container.pull(CERT_FILE).read() if self._container.exists(CERT_FILE) else ""
+            )
+            current_private_key = (
+                self._container.pull(KEY_FILE).read() if self._container.exists(KEY_FILE) else ""
+            )
+            current_ca_cert = (
+                self._container.pull(CLIENT_CA_FILE).read()
+                if self._container.exists(CLIENT_CA_FILE)
+                else ""
+            )
+
+            if (
+                current_server_cert == server_cert
+                and current_private_key == private_key
+                and current_ca_cert == ca_cert
+            ):
+                # No update needed
+                return False
+
             # Save the workload certificates
             self._container.push(CERT_FILE, server_cert or "", make_dirs=True)
             self._container.push(KEY_FILE, private_key or "", make_dirs=True)
@@ -283,6 +510,16 @@ class Worker(ops.Object):
             # Save the cacert in the charm container for charm traces
             ROOT_CA_CERT.write_text(ca_cert)
         else:
+
+            if not (
+                self._container.exists(CERT_FILE)
+                or self._container.exists(KEY_FILE)
+                or self._container.exists(CLIENT_CA_FILE)
+                or self._container.exists(ROOT_CA_CERT)
+            ):
+                # No update needed
+                return False
+
             self._container.remove_path(CERT_FILE, recursive=True)
             self._container.remove_path(KEY_FILE, recursive=True)
             self._container.remove_path(CLIENT_CA_FILE, recursive=True)
@@ -292,26 +529,64 @@ class Worker(ops.Object):
             ROOT_CA_CERT.unlink(missing_ok=True)
 
         # FIXME: uncomment as soon as the nginx image contains the ca-certificates package
-        # self._container.exec(["update-ca-certificates", "--fresh"]).wait()
-        # subprocess.run(["update-ca-certificates", "--fresh"])
+        self._container.exec(["update-ca-certificates", "--fresh"]).wait()
+        subprocess.run(["update-ca-certificates", "--fresh"])
 
         return True
 
+    SERVICE_START_RETRY_STOP = tenacity.stop_after_delay(60 * 15)
+    SERVICE_START_RETRY_WAIT = tenacity.wait_fixed(60)
+    SERVICE_START_RETRY_IF = tenacity.retry_if_exception_type(ops.pebble.ChangeError)
+
     def restart(self):
-        """Restart the pebble service or start if not already running."""
+        """Restart the pebble service or start it if not already running.
+
+        Default timeout is 15 minutes. Configure it by setting this class attr:
+        >>> Worker.SERVICE_START_RETRY_STOP = tenacity.stop_after_delay(60 * 30)  # 30 minutes
+        You can also configure SERVICE_START_RETRY_WAIT and SERVICE_START_RETRY_IF.
+
+        This method will raise an exception if it fails to start the service within a
+        specified timeframe. This will presumably bring the charm in error status, so
+        that juju will retry the last emitted hook until it finally succeeds.
+
+        The assumption is that the state we are in when this method is called is consistent.
+        The reason why we're failing to restart is dependent on some external factor (such as network,
+        the reachability of a remote API, or the readiness of an external service the workload depends on).
+        So letting juju retry the same hook will get us unstuck as soon as that contingency is resolved.
+
+        See https://discourse.charmhub.io/t/its-probably-ok-for-a-unit-to-go-into-error-state/13022
+        """
         if not self._container.exists(CONFIG_FILE):
             logger.error("cannot restart worker: config file doesn't exist (yet).")
             return
-
         if not self.roles:
             logger.debug("cannot restart worker: no roles have been configured.")
             return
 
         try:
-            self._container.restart(self._name)
-        except ops.pebble.ChangeError as e:
-            logger.error(f"failed to (re)start worker job: {e}", exc_info=True)
-            return
+            for attempt in tenacity.Retrying(
+                # this method may fail with ChangeError (exited quickly with code...)
+                retry=self.SERVICE_START_RETRY_IF,
+                # give this method some time to pass (by default 15 minutes)
+                stop=self.SERVICE_START_RETRY_STOP,
+                # wait 1 minute between tries
+                wait=self.SERVICE_START_RETRY_WAIT,
+                # if you don't succeed raise the last caught exception when you're done
+                reraise=True,
+            ):
+                with attempt:
+                    self._charm.unit.status = MaintenanceStatus(
+                        f"restarting... (attempt #{attempt.retry_state.attempt_number})"
+                    )
+                    # restart all services that our layer is responsible for
+                    self._container.restart(*self._pebble_layer().services.keys())
+
+        except ops.pebble.ChangeError:
+            logger.error(
+                "failed to (re)start worker jobs. This usually means that an external resource (such as s3) "
+                "that the software needs to start is not available."
+            )
+            raise
 
     def running_version(self) -> Optional[str]:
         """Get the running version from the worker process."""
@@ -368,6 +643,19 @@ class Worker(ops.Object):
             return endpoint, str(ROOT_CA_CERT)
         else:
             return endpoint, None
+
+    def _adjust_resource_requirements(self) -> ResourceRequirements:
+        """A method that gets called by `KubernetesComputeResourcesPatch` to adjust the resources requests and limits to patch."""
+        cpu_limit_key = self._resources_limit_options.get("cpu_limit", "cpu_limit")
+        memory_limit_key = self._resources_limit_options.get("memory_limit", "memory_limit")
+
+        limits = {
+            "cpu": self._charm.model.config.get(cpu_limit_key),
+            "memory": self._charm.model.config.get(memory_limit_key),
+        }
+        return adjust_resource_requirements(
+            limits, self._resources_requests_getter(), adhere_to_requests=True  # type: ignore
+        )
 
 
 class ManualLogForwarder(ops.Object):

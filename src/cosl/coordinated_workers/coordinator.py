@@ -10,16 +10,31 @@ import os
 import re
 import shutil
 import socket
+from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Protocol, Set, TypedDict
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Set,
+    TypedDict,
+)
 from urllib.parse import urlparse
 
 import ops
 import yaml
 
 import cosl
-from cosl.coordinated_workers.interface import ClusterProvider
-from cosl.coordinated_workers.nginx import Nginx, NginxMappingOverrides, NginxPrometheusExporter
+from cosl.coordinated_workers.interface import ClusterProvider, RemoteWriteEndpoint
+from cosl.coordinated_workers.nginx import (
+    Nginx,
+    NginxMappingOverrides,
+    NginxPrometheusExporter,
+)
 from cosl.helpers import check_libs_installed
 
 check_libs_installed(
@@ -30,14 +45,21 @@ check_libs_installed(
     "charms.prometheus_k8s.v0.prometheus_scrape",
     "charms.loki_k8s.v1.loki_push_api",
     "charms.tempo_k8s.v2.tracing",
+    "charms.observability_libs.v0.kubernetes_compute_resources_patch",
+    "charms.tls_certificates_interface.v3.tls_certificates",
 )
 
 from charms.data_platform_libs.v0.s3 import S3Requirer
 from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
 from charms.loki_k8s.v1.loki_push_api import LokiPushApiConsumer
+from charms.observability_libs.v0.kubernetes_compute_resources_patch import (
+    KubernetesComputeResourcesPatch,
+    adjust_resource_requirements,
+)
 from charms.observability_libs.v1.cert_handler import VAULT_SECRET_LABEL, CertHandler
 from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.tempo_k8s.v2.tracing import TracingEndpointRequirer
+from lightkube.models.core_v1 import ResourceRequirements
 
 logger = logging.getLogger(__name__)
 
@@ -52,23 +74,57 @@ class S3NotFoundError(Exception):
     """Raised when the s3 integration is not present or not ready."""
 
 
-class ClusterRolesConfig(Protocol):
+class ClusterRolesConfigError(Exception):
+    """Raised when the ClusterRolesConfig instance is not properly configured."""
+
+
+@dataclass
+class ClusterRolesConfig:
     """Worker roles and deployment requirements."""
 
     roles: Iterable[str]
+    """The union of enabled roles for the application."""
     meta_roles: Mapping[str, Iterable[str]]
+    """Meta roles are composed of non-meta roles (default: all)."""
     minimal_deployment: Iterable[str]
+    """The minimal set of roles that need to be allocated for the deployment to be considered consistent."""
     recommended_deployment: Dict[str, int]
+    """The set of roles that need to be allocated for the deployment to be considered robust according to the official recommendations/guidelines.."""
+
+    def __post_init__(self):
+        """Ensure the various role specifications are consistent with one another."""
+        are_meta_keys_valid = set(self.meta_roles.keys()).issubset(self.roles)
+        are_meta_values_valid = all(
+            set(meta_value).issubset(self.roles) for meta_value in self.meta_roles.values()
+        )
+        is_minimal_valid = set(self.minimal_deployment).issubset(self.roles)
+        is_recommended_valid = set(self.recommended_deployment).issubset(self.roles)
+        if not all(
+            [
+                are_meta_keys_valid,
+                are_meta_values_valid,
+                is_minimal_valid,
+                is_recommended_valid,
+            ]
+        ):
+            raise ClusterRolesConfigError(
+                "Invalid ClusterRolesConfig: The configuration is not coherent."
+            )
+
+    def is_coherent_with(self, cluster_roles: Iterable[str]) -> bool:
+        """Returns True if the provided roles satisfy the minimal deployment spec; False otherwise."""
+        return set(self.minimal_deployment).issubset(set(cluster_roles))
 
 
-def validate_roles_config(roles_config: ClusterRolesConfig) -> None:
-    """Assert that all the used roles have been defined."""
-    roles = set(roles_config.roles)
-    assert set(roles_config.meta_roles.keys()).issubset(roles)
-    for role_set in roles_config.meta_roles.values():
-        assert set(role_set).issubset(roles)
-    assert set(roles_config.minimal_deployment).issubset(roles)
-    assert set(roles_config.recommended_deployment.keys()).issubset(roles)
+def _validate_container_name(
+    container_name: Optional[str],
+    resources_requests: Optional[Callable[["Coordinator"], Dict[str, str]]],
+):
+    """Raise `ValueError` if `resources_requests` is not None and `container_name` is None."""
+    if resources_requests is not None and container_name is None:
+        raise ValueError(
+            "Cannot have a None value for container_name while resources_requests is provided."
+        )
 
 
 _EndpointMapping = TypedDict(
@@ -86,6 +142,15 @@ _EndpointMapping = TypedDict(
 )
 """Mapping of the relation endpoint names that the charms uses, as defined in metadata.yaml."""
 
+_ResourceLimitOptionsMapping = TypedDict(
+    "_ResourceLimitOptionsMapping",
+    {
+        "cpu_limit": str,
+        "memory_limit": str,
+    },
+)
+"""Mapping of the resources limit option names that the charms use, as defined in config.yaml."""
+
 
 class Coordinator(ops.Object):
     """Charming coordinator.
@@ -98,7 +163,6 @@ class Coordinator(ops.Object):
         self,
         charm: ops.CharmBase,
         roles_config: ClusterRolesConfig,
-        s3_bucket_name: str,
         external_url: str,  # the ingressed url if we have ingress, else fqdn
         worker_metrics_port: int,
         endpoints: _EndpointMapping,
@@ -108,13 +172,16 @@ class Coordinator(ops.Object):
         is_coherent: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
         is_recommended: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
         tracing_receivers: Optional[Callable[[], Optional[Dict[str, str]]]] = None,
+        resources_limit_options: Optional[_ResourceLimitOptionsMapping] = None,
+        resources_requests: Optional[Callable[["Coordinator"], Dict[str, str]]] = None,
+        container_name: Optional[str] = None,
+        remote_write_endpoints: Optional[Callable[[], List[RemoteWriteEndpoint]]] = None,
     ):
         """Constructor for a Coordinator object.
 
         Args:
             charm: The coordinator charm object.
             roles_config: Definition of the roles and the deployment requirements.
-            s3_bucket_name: The name of the S3 Bucket to use.
             external_url: The external (e.g., ingressed) URL of the coordinator charm.
             worker_metrics_port: The port under which workers expose their metrics.
             nginx_config: A function generating the Nginx configuration file for the workload.
@@ -125,6 +192,20 @@ class Coordinator(ops.Object):
             is_coherent: Custom coherency checker for a minimal deployment.
             is_recommended: Custom coherency checker for a recommended deployment.
             tracing_receivers: Endpoints to which the workload (and the worker charm) can push traces to.
+            resources_limit_options: A dictionary containing resources limit option names. The dictionary should include
+                "cpu_limit" and "memory_limit" keys with values as option names, as defined in the config.yaml.
+                If no dictionary is provided, the default option names "cpu_limit" and "memory_limit" would be used.
+            resources_requests: A function generating the resources "requests" portion to apply when patching a container using
+                KubernetesComputeResourcesPatch. The "limits" portion of the patch gets populated by setting
+                their respective config options in config.yaml.
+            container_name: The container for which to apply the resources requests & limits.
+                Required if `resources_requests` is provided.
+            remote_write_endpoints: A function generating endpoints to which the workload
+                and the worker charm can push metrics to.
+
+        Raises:
+        ValueError:
+            If `resources_requests` is not None and `container_name` is None, a ValueError is raised.
         """
         super().__init__(charm, key="coordinator")
         self._charm = charm
@@ -134,7 +215,7 @@ class Coordinator(ops.Object):
 
         self._endpoints = endpoints
 
-        validate_roles_config(roles_config)
+        _validate_container_name(container_name, resources_requests)
         self.roles_config = roles_config
 
         self.cluster = ClusterProvider(
@@ -147,6 +228,12 @@ class Coordinator(ops.Object):
         self._is_coherent = is_coherent
         self._is_recommended = is_recommended
         self._tracing_receivers_getter = tracing_receivers
+        self._resources_requests_getter = (
+            partial(resources_requests, self) if resources_requests is not None else None
+        )
+        self._container_name = container_name
+        self._resources_limit_options = resources_limit_options or {}
+        self.remote_write_endpoints_getter = remote_write_endpoints
 
         self.nginx = Nginx(
             self._charm,
@@ -161,10 +248,12 @@ class Coordinator(ops.Object):
             certificates_relation_name=self._endpoints["certificates"],
             # let's assume we don't need the peer relation as all coordinator charms will assume juju secrets
             key="coordinator-server-cert",
-            sans=[self.hostname],
+            # update certificate with new SANs whenever a worker is added/removed
+            sans=[self.hostname, *self.cluster.gather_addresses()],
+            refresh_events=[self.cluster.on.changed],
         )
 
-        self.s3_requirer = S3Requirer(self._charm, self._endpoints["s3"], s3_bucket_name)
+        self.s3_requirer = S3Requirer(self._charm, self._endpoints["s3"])
 
         self._grafana_dashboards = GrafanaDashboardProvider(
             self._charm, relation_name=self._endpoints["grafana-dashboards"]
@@ -188,7 +277,20 @@ class Coordinator(ops.Object):
         )
 
         self.tracing = TracingEndpointRequirer(
-            self._charm, relation_name=self._endpoints["tracing"], protocols=["otlp_http"]
+            self._charm,
+            relation_name=self._endpoints["tracing"],
+            protocols=["otlp_http"],
+        )
+
+        # Resources patch
+        self.resources_patch = (
+            KubernetesComputeResourcesPatch(
+                self._charm,
+                self._container_name,  # type: ignore
+                resource_reqs_func=self._adjust_resource_requirements,
+            )
+            if self._resources_requests_getter
+            else None
         )
 
         # We always listen to collect-status
@@ -241,10 +343,12 @@ class Coordinator(ops.Object):
 
         # logging
         self.framework.observe(
-            self._logging.on.loki_push_api_endpoint_joined, self._on_loki_relation_changed
+            self._logging.on.loki_push_api_endpoint_joined,
+            self._on_loki_relation_changed,
         )
         self.framework.observe(
-            self._logging.on.loki_push_api_endpoint_departed, self._on_loki_relation_changed
+            self._logging.on.loki_push_api_endpoint_departed,
+            self._on_loki_relation_changed,
         )
 
         # tls
@@ -263,15 +367,7 @@ class Coordinator(ops.Object):
         if manual_coherency_checker := self._is_coherent:
             return manual_coherency_checker(self.cluster, self.roles_config)
 
-        rc = self.roles_config
-        minimal_deployment = set(rc.minimal_deployment)
-        cluster = self.cluster
-        roles = cluster.gather_roles()
-
-        # Whether the roles list makes up a coherent mimir deployment.
-        is_coherent = set(roles.keys()).issuperset(minimal_deployment)
-
-        return is_coherent
+        return self.roles_config.is_coherent_with(self.cluster.gather_roles().keys())
 
     @property
     def missing_roles(self) -> Set[str]:
@@ -305,7 +401,7 @@ class Coordinator(ops.Object):
 
     @property
     def can_handle_events(self) -> bool:
-        """Check whether the coordinaator should handle events."""
+        """Check whether the coordinator should handle events."""
         return self.cluster.has_workers and self.is_coherent and self.s3_ready
 
     @property
@@ -423,7 +519,10 @@ class Coordinator(ops.Object):
                 "relabel_configs": [
                     {"target_label": "juju_charm", "replacement": worker["charm_name"]},
                     {"target_label": "juju_unit", "replacement": worker["unit"]},
-                    {"target_label": "juju_application", "replacement": worker["application"]},
+                    {
+                        "target_label": "juju_application",
+                        "replacement": worker["application"],
+                    },
                     {"target_label": "juju_model", "replacement": self.model.name},
                     {"target_label": "juju_model_uuid", "replacement": self.model.uuid},
                 ],
@@ -507,6 +606,9 @@ class Coordinator(ops.Object):
     def _on_collect_unit_status(self, e: ops.CollectStatusEvent):
         # todo add [nginx.workload] statuses
 
+        if self.resources_patch and self.resources_patch.get_status().name != "active":
+            e.add_status(self.resources_patch.get_status())
+
         if not self.cluster.has_workers:
             e.add_status(ops.BlockedStatus("[consistency] Missing any worker relation."))
         if not self.is_coherent:
@@ -558,6 +660,14 @@ class Coordinator(ops.Object):
 
     def update_cluster(self):
         """Build the workers config and distribute it to the relations."""
+        # There could be a race between the resource patch and pebble operations
+        # i.e., charm code proceeds beyond a can_connect guard, and then lightkube patches the statefulset
+        # and the workload is no longer available.
+        # `resources_patch` might be `None` when no resources requests or limits are requested by the charm.
+        if self.resources_patch and not self.resources_patch.is_ready():
+            logger.debug("Resource patch not ready yet. Skipping cluster update step.")
+            return
+
         self.nginx.configure_pebble_layer()
         self.nginx_exporter.configure_pebble_layer()
         if not self.is_coherent:
@@ -576,9 +686,18 @@ class Coordinator(ops.Object):
             # all arguments below are optional:
             ca_cert=self.cert_handler.ca_cert,
             server_cert=self.cert_handler.server_cert,
-            privkey_secret_id=self.cluster.grant_privkey(VAULT_SECRET_LABEL),
+            # FIXME tls_available check is due to fetching secret from vault. We should be generating a new secret.
+            # see https://github.com/canonical/cos-lib/issues/49 for full context
+            privkey_secret_id=(
+                self.cluster.grant_privkey(VAULT_SECRET_LABEL) if self.tls_available else None
+            ),
             tracing_receivers=(
                 self._tracing_receivers_getter() if self._tracing_receivers_getter else None
+            ),
+            remote_write_endpoints=(
+                self.remote_write_endpoints_getter()
+                if self.remote_write_endpoints_getter
+                else None
             ),
         )
 
@@ -623,3 +742,16 @@ class Coordinator(ops.Object):
         os.makedirs(CONSOLIDATED_ALERT_RULES_PATH, exist_ok=True)
         self._render_workers_alert_rules()
         self._consolidate_nginx_alert_rules()
+
+    def _adjust_resource_requirements(self) -> ResourceRequirements:
+        """A method that gets called by `KubernetesComputeResourcesPatch` to adjust the resources requests and limits to patch."""
+        cpu_limit_key = self._resources_limit_options.get("cpu_limit", "cpu_limit")
+        memory_limit_key = self._resources_limit_options.get("memory_limit", "memory_limit")
+
+        limits = {
+            "cpu": self._charm.model.config.get(cpu_limit_key),
+            "memory": self._charm.model.config.get(memory_limit_key),
+        }
+        return adjust_resource_requirements(
+            limits, self._resources_requests_getter(), adhere_to_requests=True  # type: ignore
+        )
