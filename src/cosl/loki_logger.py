@@ -121,7 +121,7 @@ class LokiEmitter:
 
         # if the user implemented a logrecord subclass with a .labels attributes, attempt to
         # respect it and add those labels on top of those registered on the LokiEmitter class.
-        extra_labels: Any = getattr(record, "labels")
+        extra_labels: Any = getattr(record, "labels", {})
         if not isinstance(extra_labels, dict):
             return labels
 

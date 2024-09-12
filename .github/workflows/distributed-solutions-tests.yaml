@@ -30,12 +30,12 @@ jobs:
       - name: Update 'cosl' dependency in test charm to this branch
         run: |
           sed -i -e "/^cosl[ ><=]/d" -e "/canonical\/cos-lib/d" -e "/#egg=cosl/d" requirements.txt
-          echo -e "\ngit+$GITHUB_SERVER_URL/$GITHUB_REPOSITORY@${{ github.event.pull_request.head.sha }}#egg=cosl" >> requirements.txt
+          echo -e "\ngit+$GITHUB_SERVER_URL/$GITHUB_REPOSITORY@${{ github.head_ref || github.ref_name }}#egg=cosl" >> requirements.txt
 
       - name: Install dependencies (tox & yq)
         run: pip install tox~=4.2 && sudo snap install yq
 
-      - name: Add charmcraft build dependencies
+      - name: Add charmcraft build dependencies (git)
         run: yq e '.parts.charm.build-packages += ["git"]' -i charmcraft.yaml
 
       - name: Run the charm's unit & scenario tests
