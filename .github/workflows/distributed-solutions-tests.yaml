@@ -39,9 +39,11 @@ jobs:
         run: yq e '.parts.charm.build-packages += ["git"]' -i charmcraft.yaml
 
       - name: Run the charm's unit & scenario tests
+        id: unit
         run: tox -e unit,scenario
 
       - name: Run the charm's static analysis checks
+        id: static
         run: tox -e static-charm,static-lib
 
       - name: Setup Charmcraft's pip cache
@@ -68,3 +70,4 @@ jobs:
 
       - name: Run the charm's integration tests
         run: tox -vve integration
+        if: steps.unit.outcome == 'success' && steps.static.outcome == 'success'
