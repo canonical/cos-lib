@@ -555,6 +555,9 @@ class Worker(ops.Object):
         So letting juju retry the same hook will get us unstuck as soon as that contingency is resolved.
 
         See https://discourse.charmhub.io/t/its-probably-ok-for-a-unit-to-go-into-error-state/13022
+
+        Raises:
+            ChangeError, after continuously failing to restart the service.
         """
         if not self._container.exists(CONFIG_FILE):
             logger.error("cannot restart worker: config file doesn't exist (yet).")
@@ -581,12 +584,12 @@ class Worker(ops.Object):
                     # restart all services that our layer is responsible for
                     self._container.restart(*self._pebble_layer().services.keys())
 
-        except ops.pebble.ChangeError:
+        except ops.pebble.ChangeError as e:
             logger.error(
                 "failed to (re)start worker jobs. This usually means that an external resource (such as s3) "
                 "that the software needs to start is not available."
             )
-            raise
+            raise e
 
     def running_version(self) -> Optional[str]:
         """Get the running version from the worker process."""
