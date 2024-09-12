@@ -46,6 +46,7 @@ check_libs_installed(
     "charms.loki_k8s.v1.loki_push_api",
     "charms.tempo_k8s.v2.tracing",
     "charms.observability_libs.v0.kubernetes_compute_resources_patch",
+    "charms.tls_certificates_interface.v3.tls_certificates",
 )
 
 from charms.data_platform_libs.v0.s3 import S3Requirer
@@ -162,7 +163,6 @@ class Coordinator(ops.Object):
         self,
         charm: ops.CharmBase,
         roles_config: ClusterRolesConfig,
-        s3_bucket_name: str,
         external_url: str,  # the ingressed url if we have ingress, else fqdn
         worker_metrics_port: int,
         endpoints: _EndpointMapping,
@@ -182,7 +182,6 @@ class Coordinator(ops.Object):
         Args:
             charm: The coordinator charm object.
             roles_config: Definition of the roles and the deployment requirements.
-            s3_bucket_name: The name of the S3 Bucket to use.
             external_url: The external (e.g., ingressed) URL of the coordinator charm.
             worker_metrics_port: The port under which workers expose their metrics.
             nginx_config: A function generating the Nginx configuration file for the workload.
@@ -249,10 +248,12 @@ class Coordinator(ops.Object):
             certificates_relation_name=self._endpoints["certificates"],
             # let's assume we don't need the peer relation as all coordinator charms will assume juju secrets
             key="coordinator-server-cert",
-            sans=[self.hostname],
+            # update certificate with new SANs whenever a worker is added/removed
+            sans=[self.hostname, *self.cluster.gather_addresses()],
+            refresh_events=[self.cluster.on.changed],
         )
 
-        self.s3_requirer = S3Requirer(self._charm, self._endpoints["s3"], s3_bucket_name)
+        self.s3_requirer = S3Requirer(self._charm, self._endpoints["s3"])
 
         self._grafana_dashboards = GrafanaDashboardProvider(
             self._charm, relation_name=self._endpoints["grafana-dashboards"]
@@ -659,6 +660,14 @@ class Coordinator(ops.Object):
 
     def update_cluster(self):
         """Build the workers config and distribute it to the relations."""
+        # There could be a race between the resource patch and pebble operations
+        # i.e., charm code proceeds beyond a can_connect guard, and then lightkube patches the statefulset
+        # and the workload is no longer available.
+        # `resources_patch` might be `None` when no resources requests or limits are requested by the charm.
+        if self.resources_patch and not self.resources_patch.is_ready():
+            logger.debug("Resource patch not ready yet. Skipping cluster update step.")
+            return
+
         self.nginx.configure_pebble_layer()
         self.nginx_exporter.configure_pebble_layer()
         if not self.is_coherent:

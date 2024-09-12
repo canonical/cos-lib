@@ -9,10 +9,17 @@ import tenacity
 import yaml
 from ops import Framework
 from ops.pebble import Layer, ServiceStatus
-from scenario import Container, Context, Mount, Relation, State
+from scenario import Container, Context, ExecOutput, Mount, Relation, Secret, State
 from scenario.runtime import UncaughtCharmError
 
-from cosl.coordinated_workers.worker import CONFIG_FILE, Worker
+from cosl.coordinated_workers.worker import (
+    CERT_FILE,
+    CLIENT_CA_FILE,
+    CONFIG_FILE,
+    KEY_FILE,
+    Worker,
+)
+from tests.test_coordinated_workers.test_worker_status import k8s_patch
 
 
 @pytest.fixture(autouse=True)
@@ -26,7 +33,13 @@ class MyCharm(ops.CharmBase):
 
     def __init__(self, framework: Framework):
         super().__init__(framework)
-        self.worker = Worker(self, "foo", lambda _: self.layer, {"cluster": "cluster"})
+        self.worker = Worker(
+            self,
+            "foo",
+            lambda _: self.layer,
+            {"cluster": "cluster"},
+            readiness_check_endpoint="http://localhost:3200/ready",
+        )
 
 
 def test_no_roles_error():
@@ -142,6 +155,7 @@ def test_worker_restarts_if_some_service_not_up(tmp_path):
         "foo",
         can_connect=True,
         mounts={"local": Mount(CONFIG_FILE, cfg)},
+        exec_mock={("update-ca-certificates", "--fresh"): ExecOutput()},
         service_status={
             "foo": ServiceStatus.INACTIVE,
             "bar": ServiceStatus.ACTIVE,
@@ -207,6 +221,7 @@ def test_worker_does_not_restart_external_services(tmp_path):
     cfg.write_text("some: yaml")
     container = Container(
         "foo",
+        exec_mock={("update-ca-certificates", "--fresh"): ExecOutput()},
         can_connect=True,
         mounts={"local": Mount(CONFIG_FILE, cfg)},
         layers={"foo": MyCharm.layer, "bar": other_layer},
@@ -326,6 +341,7 @@ def test_get_remote_write_endpoints(remote_databag, expected):
     )
     container = Container(
         "foo",
+        exec_mock={("update-ca-certificates", "--fresh"): ExecOutput()},
         can_connect=True,
     )
     relation = Relation(
@@ -384,7 +400,13 @@ def test_config_preprocessor():
         "config_changed",
         State(
             config={"role-all": True},
-            containers=[Container("foo", can_connect=True)],
+            containers=[
+                Container(
+                    "foo",
+                    can_connect=True,
+                    exec_mock={("update-ca-certificates", "--fresh"): ExecOutput()},
+                )
+            ],
             relations=[
                 Relation(
                     "cluster",
@@ -399,3 +421,126 @@ def test_config_preprocessor():
     # THEN the data gets preprocessed
     fs = Path(str(state_out.get_container("foo").get_filesystem(ctx)) + CONFIG_FILE)
     assert fs.read_text() == yaml.safe_dump(new_config)
+
+
+@patch.object(Worker, "_update_worker_config", MagicMock(return_value=False))
+@patch.object(Worker, "_set_pebble_layer", MagicMock(return_value=False))
+@patch.object(Worker, "restart")
+def test_worker_does_not_restart(restart_mock, tmp_path):
+
+    ctx = Context(
+        MyCharm,
+        meta={
+            "name": "foo",
+            "requires": {"cluster": {"interface": "cluster"}},
+            "containers": {"foo": {"type": "oci-image"}},
+        },
+        config={"options": {"role-all": {"type": "boolean", "default": True}}},
+    )
+    relation = Relation(
+        "cluster",
+        remote_app_data={
+            "worker_config": json.dumps("some: yaml"),
+        },
+    )
+    # WHEN the charm receives any event and there are no changes to the config or the layer,
+    #  but some of the services are down
+    container = Container(
+        "foo",
+        can_connect=True,
+    )
+    ctx.run("update_status", State(containers=[container], relations=[relation]))
+
+    assert not restart_mock.called
+
+
+@patch.object(Worker, "_update_worker_config", MagicMock(return_value=False))
+@patch.object(Worker, "_set_pebble_layer", MagicMock(return_value=False))
+@patch.object(Worker, "restart")
+def test_worker_does_not_restart_on_no_cert_changed(restart_mock, tmp_path):
+
+    ctx = Context(
+        MyCharm,
+        meta={
+            "name": "foo",
+            "requires": {"cluster": {"interface": "cluster"}},
+            "containers": {"foo": {"type": "oci-image"}},
+        },
+        config={"options": {"role-all": {"type": "boolean", "default": True}}},
+    )
+    relation = Relation(
+        "cluster",
+        remote_app_data={
+            "worker_config": json.dumps("some: yaml"),
+            "ca_cert": json.dumps("ca"),
+            "server_cert": json.dumps("cert"),
+            "privkey_secret_id": json.dumps("private_id"),
+        },
+    )
+
+    cert = tmp_path / "cert.cert"
+    key = tmp_path / "key.key"
+    client_ca = tmp_path / "client_ca.cert"
+
+    cert.write_text("cert")
+    key.write_text("private")
+    client_ca.write_text("ca")
+
+    container = Container(
+        "foo",
+        can_connect=True,
+        mounts={
+            "cert": Mount(CERT_FILE, cert),
+            "key": Mount(KEY_FILE, key),
+            "client_ca": Mount(CLIENT_CA_FILE, client_ca),
+        },
+    )
+
+    secret = Secret(
+        "secret:private_id",
+        label="private_id",
+        owner="app",
+        contents={0: {"private-key": "private"}},
+    )
+    ctx.run(
+        "update_status",
+        State(leader=True, containers=[container], relations=[relation], secrets=[secret]),
+    )
+
+    assert restart_mock.call_count == 0
+
+
+@k8s_patch(is_ready=False)
+@patch.object(Worker, "_update_config")
+def test_worker_no_reconcile_when_patch_not_ready(_update_config_mock):
+    class MyCharmWithResources(ops.CharmBase):
+        layer = Layer("")
+
+        def __init__(self, framework: Framework):
+            super().__init__(framework)
+            self.worker = Worker(
+                self,
+                "foo",
+                lambda _: self.layer,
+                {"cluster": "cluster"},
+                readiness_check_endpoint="http://localhost:3200/ready",
+                resources_requests=lambda _: {"cpu": "50m", "memory": "50Mi"},
+                container_name="charm",
+            )
+
+    ctx = Context(
+        MyCharmWithResources,
+        meta={
+            "name": "foo",
+            "requires": {"cluster": {"interface": "cluster"}},
+            "containers": {"foo": {"type": "oci-image"}},
+        },
+        config={"options": {"role-all": {"type": "boolean", "default": True}}},
+    )
+
+    ctx.run(
+        "update_status",
+        State(leader=True, containers=[Container("foo")]),
+    )
+
+    assert not _update_config_mock.called
