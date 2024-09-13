@@ -17,7 +17,7 @@ from urllib.error import HTTPError
 import ops
 import tenacity
 import yaml
-from ops import MaintenanceStatus
+from ops import MaintenanceStatus, StatusBase
 from ops.model import ActiveStatus, BlockedStatus, WaitingStatus
 from ops.pebble import Check, Layer, PathError, Plan, ProtocolError
 
@@ -141,7 +141,9 @@ class Worker(ops.Object):
         super().__init__(charm, key="worker")
         self._charm = charm
         self._name = name
-        self._pebble_layer = partial(pebble_layer, self)
+        self._pebble_layer = partial(
+            pebble_layer, self
+        )  #  do not call this directly. use self.pebble_layer instead
         self.topology = JujuTopology.from_charm(self._charm)
         self._container = self._charm.unit.get_container(name)
 
@@ -225,6 +227,18 @@ class Worker(ops.Object):
         return self.cluster.get_worker_config()
 
     @property
+    def pebble_layer(self) -> Optional[Layer]:
+        """Attempt to fetch a pebble layer from the charm.
+
+        If the charm raises, report the exception and return None.
+        """
+        try:
+            return self._pebble_layer()
+        except Exception:
+            logger.exception("exception while attempting to get pebble layer from charm")
+            return None
+
+    @property
     def status(self) -> ServiceEndpointStatus:
         """Determine the status of the service's endpoint."""
         if not self._container.can_connect():
@@ -235,9 +249,11 @@ class Worker(ops.Object):
             logger.debug("Config file not on disk. Skipping status check.")
             return ServiceEndpointStatus.down
 
+        if not (layer := self.pebble_layer):
+            return ServiceEndpointStatus.down
+
         # we really don't want this code to raise errors, so we blanket catch all.
         try:
-            layer: Layer = self._pebble_layer()
             services = self._container.get_services(*layer.services.keys())
             running_status = {name: svc.is_running() for name, svc in services.items()}
             if not all(running_status.values()):
@@ -303,7 +319,7 @@ class Worker(ops.Object):
     def _on_collect_status(self, e: ops.CollectStatusEvent):
         # these are the basic failure modes. if any of these conditions are not met, the worker
         # is still starting or not yet configured. The user needs to wait or take some action.
-        statuses = []
+        statuses: List[StatusBase] = []
         if self.resources_patch and self.resources_patch.get_status().name != "active":
             statuses.append(self.resources_patch.get_status())
         if not self._container.can_connect():
@@ -433,9 +449,10 @@ class Worker(ops.Object):
             return False
 
         current_plan = self._container.get_plan()
-        new_layer = self._pebble_layer()
+        if not (layer := self.pebble_layer):
+            return False
 
-        self._add_readiness_check(new_layer)
+        self._add_readiness_check(layer)
 
         def diff(layer: Layer, plan: Plan):
             layer_dct = layer.to_dict()
@@ -445,9 +462,9 @@ class Worker(ops.Object):
                     return True
             return False
 
-        if diff(new_layer, current_plan):
+        if diff(layer, current_plan):
             logger.debug("Adding new layer to pebble...")
-            self._container.add_layer(self._name, new_layer, combine=True)
+            self._container.add_layer(self._name, layer, combine=True)
             return True
         return False
 
@@ -624,6 +641,9 @@ class Worker(ops.Object):
         if not self.roles:
             logger.debug("cannot restart worker: no roles have been configured.")
             return
+        if not (layer := self.pebble_layer):
+            return
+        service_names = layer.services.keys()
 
         try:
             for attempt in tenacity.Retrying(
@@ -641,7 +661,7 @@ class Worker(ops.Object):
                         f"restarting... (attempt #{attempt.retry_state.attempt_number})"
                     )
                     # restart all services that our layer is responsible for
-                    self._container.restart(*self._pebble_layer().services.keys())
+                    self._container.restart(*service_names)
 
         except ops.pebble.ChangeError:
             logger.error(

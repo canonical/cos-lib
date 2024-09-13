@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import tenacity
-from ops import ActiveStatus, BlockedStatus, CharmBase, Framework, WaitingStatus
+from ops import ActiveStatus, CharmBase, Framework, WaitingStatus
 from ops.pebble import Layer
 from scenario import Container, Context, ExecOutput, Relation, State
 
@@ -159,7 +159,7 @@ def test_status_check_no_config(ctx, base_state, caplog):
         state_out = ctx.run("update_status", state)
 
     # THEN the charm sets blocked
-    assert state_out.unit_status == BlockedStatus("node down (see logs)")
+    assert state_out.unit_status == WaitingStatus("Waiting for coordinator to publish a config")
     # AND THEN the charm logs that the config isn't on disk
     assert "Config file not on disk. Skipping status check." in caplog.messages
 
