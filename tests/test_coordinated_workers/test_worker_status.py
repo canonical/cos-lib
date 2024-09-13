@@ -1,4 +1,4 @@
-from contextlib import contextmanager, ExitStack
+from contextlib import ExitStack, contextmanager
 from functools import partial
 from unittest.mock import MagicMock, patch
 
@@ -143,7 +143,7 @@ def test_status_check_no_pebble(ctx, base_state, caplog):
     state_out = ctx.run("update_status", state)
 
     # THEN the charm sets blocked
-    assert state_out.unit_status == WaitingStatus('Waiting for `workload` container')
+    assert state_out.unit_status == WaitingStatus("Waiting for `workload` container")
     # AND THEN the charm logs that the container isn't ready.
     assert "container cannot connect, skipping update_config." in caplog.messages
 
