@@ -13,6 +13,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, TypedDict, Union
 from urllib.error import HTTPError
+from urllib.parse import urlparse
 
 import ops
 import tenacity
@@ -288,7 +289,12 @@ class Worker(ops.Object):
             )
 
         try:
-            with urllib.request.urlopen(check_endpoint(self)) as response:
+            # Use "https" if tls is enabled
+            check_url = check_endpoint(self)
+            if self.is_tls_enabled:
+                # _replace is part of the public API, it's not a private method
+                check_url = urlparse(check_url)._replace(scheme="https").geturl()
+            with urllib.request.urlopen(check_url) as response:
                 html: bytes = response.read()
 
             # ready response should simply be a string:
@@ -315,6 +321,11 @@ class Worker(ops.Object):
         except Exception:
             logger.exception("Unexpected exception getting readiness endpoint")
         return ServiceEndpointStatus.down
+
+    @property
+    def is_tls_enabled(self) -> bool:
+        """Check if the worker has the TLS certificate on disk."""
+        return self._container.exists(CERT_FILE)
 
     def _on_collect_status(self, e: ops.CollectStatusEvent):
         # these are the basic failure modes. if any of these conditions are not met, the worker
