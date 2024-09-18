@@ -293,7 +293,9 @@ class Worker(ops.Object):
             check_url = check_endpoint(self)
             if self.is_tls_enabled:
                 # _replace is part of the public API, it's not a private method
-                check_url = urlparse(check_url)._replace(scheme="https").geturl()
+                parsed_url = urlparse(check_url)
+                if parsed_url.scheme == "http":
+                    check_url = parsed_url._replace(scheme="https").geturl()
             with urllib.request.urlopen(check_url) as response:
                 html: bytes = response.read()
 
