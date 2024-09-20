@@ -537,7 +537,11 @@ class Coordinator(ops.Object):
         scheme = "https" if self.tls_available else "http"
         job: Dict[str, Any] = {
             "static_configs": [
-                {"targets": [f"{scheme}://{self.hostname}:{self.nginx.options['nginx_exporter_port']}"]}
+                {
+                    "targets": [
+                        f"{scheme}://{self.hostname}:{self.nginx.options['nginx_exporter_port']}"
+                    ]
+                }
             ]
         }
         return [job]
