@@ -528,7 +528,7 @@ class Coordinator(ops.Object):
                 ],
             }
             if self.tls_available:
-                job["scheme"] = "https" # pyright: ignore
+                job["scheme"] = "https"  # pyright: ignore
             scrape_jobs.append(job)
         return scrape_jobs
 
@@ -537,11 +537,7 @@ class Coordinator(ops.Object):
         """The Prometheus scrape job for Nginx."""
         job: Dict[str, Any] = {
             "static_configs": [
-                {
-                    "targets": [
-                        f"{self.hostname}:{self.nginx.options['nginx_exporter_port']}"
-                    ]
-                }
+                {"targets": [f"{self.hostname}:{self.nginx.options['nginx_exporter_port']}"]}
             ]
         }
 
