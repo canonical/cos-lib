@@ -505,12 +505,13 @@ class Coordinator(ops.Object):
         """The Prometheus scrape jobs for the workers connected to the coordinator."""
         scrape_jobs: List[Dict[str, Any]] = []
         worker_topologies = self.cluster.gather_topology()
+        scheme = "https" if self.tls_available else "http"
 
         for worker in worker_topologies:
             job = {
                 "static_configs": [
                     {
-                        "targets": [f"{worker['address']}:{self._worker_metrics_port}"],
+                        "targets": [f"{scheme}://{worker['address']}:{self._worker_metrics_port}"],
                     }
                 ],
                 # setting these as "labels" in the static config gets some of them
