@@ -505,13 +505,12 @@ class Coordinator(ops.Object):
         """The Prometheus scrape jobs for the workers connected to the coordinator."""
         scrape_jobs: List[Dict[str, Any]] = []
         worker_topologies = self.cluster.gather_topology()
-        scheme = "https" if self.tls_available else "http"
 
         for worker in worker_topologies:
             job = {
                 "static_configs": [
                     {
-                        "targets": [f"{scheme}://{worker['address']}:{self._worker_metrics_port}"],
+                        "targets": [f"{worker['address']}:{self._worker_metrics_port}"],
                     }
                 ],
                 # setting these as "labels" in the static config gets some of them
@@ -528,22 +527,24 @@ class Coordinator(ops.Object):
                     {"target_label": "juju_model_uuid", "replacement": self.model.uuid},
                 ],
             }
+            if self.tls_available:
+                job["scheme"] = "https" # pyright: ignore
             scrape_jobs.append(job)
         return scrape_jobs
 
     @property
     def _nginx_scrape_jobs(self) -> List[Dict[str, Any]]:
         """The Prometheus scrape job for Nginx."""
-        scheme = "https" if self.tls_available else "http"
         job: Dict[str, Any] = {
             "static_configs": [
                 {
                     "targets": [
-                        f"{scheme}://{self.hostname}:{self.nginx.options['nginx_exporter_port']}"
+                        f"{self.hostname}:{self.nginx.options['nginx_exporter_port']}"
                     ]
                 }
             ]
         }
+
         return [job]
 
     @property
