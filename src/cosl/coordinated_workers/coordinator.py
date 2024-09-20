@@ -534,9 +534,10 @@ class Coordinator(ops.Object):
     @property
     def _nginx_scrape_jobs(self) -> List[Dict[str, Any]]:
         """The Prometheus scrape job for Nginx."""
+        scheme = "https" if self.tls_available else "http"
         job: Dict[str, Any] = {
             "static_configs": [
-                {"targets": [f"{self.hostname}:{self.nginx.options['nginx_exporter_port']}"]}
+                {"targets": [f"{scheme}://{self.hostname}:{self.nginx.options['nginx_exporter_port']}"]}
             ]
         }
         return [job]
