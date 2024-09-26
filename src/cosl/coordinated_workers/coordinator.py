@@ -12,6 +12,7 @@ import shutil
 import socket
 from dataclasses import dataclass
 from functools import partial
+from pathlib import Path
 from typing import (
     Any,
     Callable,
@@ -62,6 +63,8 @@ from charms.tempo_k8s.v2.tracing import TracingEndpointRequirer
 from lightkube.models.core_v1 import ResourceRequirements
 
 logger = logging.getLogger(__name__)
+
+S3_CA_CERT_PATH = "./s3_ca.crt"
 
 # The paths of the base rules to be rendered in CONSOLIDATED_ALERT_RULES_PATH
 NGINX_ORIGINAL_ALERT_RULES_PATH = "./src/prometheus_alert_rules/nginx"
@@ -452,6 +455,11 @@ class Coordinator(ops.Object):
         s3_config["access_key_id"] = s3_data.pop("access-key")
         s3_config["secret_access_key"] = s3_data.pop("secret-key")
         s3_config["bucket_name"] = s3_data.pop("bucket")
+        ca_chain = s3_data.get("tls-ca-chain")
+        if ca_chain:
+            # put the cacert to disk
+            Path(S3_CA_CERT_PATH).write_text(ca_chain[0])  # TODO: is any cert in the chain good?
+            s3_config["tls_ca_path"] = S3_CA_CERT_PATH
         return s3_config
 
     @property
