@@ -535,6 +535,8 @@ class Coordinator(ops.Object):
                     {"target_label": "juju_model_uuid", "replacement": self.model.uuid},
                 ],
             }
+            if self.tls_available:
+                job["scheme"] = "https"  # pyright: ignore
             scrape_jobs.append(job)
         return scrape_jobs
 
@@ -543,9 +545,10 @@ class Coordinator(ops.Object):
         """The Prometheus scrape job for Nginx."""
         job: Dict[str, Any] = {
             "static_configs": [
-                {"targets": [f"{self.hostname}:{self.nginx.options['nginx_port']}"]}
+                {"targets": [f"{self.hostname}:{self.nginx.options['nginx_exporter_port']}"]}
             ]
         }
+
         return [job]
 
     @property
