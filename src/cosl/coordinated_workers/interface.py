@@ -337,7 +337,7 @@ class ClusterProvider(Object):
         for _, address_set in addresses_by_role.items():
             data.update(address_set)
 
-        return data
+        return sorted(data)
 
     def gather_roles(self) -> Dict[str, int]:
         """Go through the worker's app databags and sum the available application roles."""
