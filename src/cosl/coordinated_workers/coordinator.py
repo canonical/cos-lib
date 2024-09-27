@@ -28,6 +28,7 @@ from urllib.parse import urlparse
 
 import ops
 import yaml
+from ops import Container
 
 import cosl
 from cosl.coordinated_workers.interface import ClusterProvider, RemoteWriteEndpoint
@@ -64,7 +65,7 @@ from lightkube.models.core_v1 import ResourceRequirements
 
 logger = logging.getLogger(__name__)
 
-S3_CA_CERT_PATH = "./s3_ca.crt"
+S3_TLS_CA_CHAIN_PATH = "/etc/worker/s3_ca.crt"
 
 # The paths of the base rules to be rendered in CONSOLIDATED_ALERT_RULES_PATH
 NGINX_ORIGINAL_ALERT_RULES_PATH = "./src/prometheus_alert_rules/nginx"
@@ -235,6 +236,7 @@ class Coordinator(ops.Object):
             partial(resources_requests, self) if resources_requests is not None else None
         )
         self._container_name = container_name
+        self._container: Container = charm.unit.get_container(container_name)
         self._resources_limit_options = resources_limit_options or {}
         self.remote_write_endpoints_getter = remote_write_endpoints
 
@@ -458,8 +460,14 @@ class Coordinator(ops.Object):
         ca_chain = s3_data.get("tls-ca-chain")
         if ca_chain:
             # put the cacert to disk
-            Path(S3_CA_CERT_PATH).write_text(ca_chain[0])  # TODO: is any cert in the chain good?
-            s3_config["tls_ca_path"] = S3_CA_CERT_PATH
+            container = self._container
+            # FIXME: s3 gives us a cert chain. tempo's s3 config takes:
+            #  tls_cert_path: Path to the client certificate file.
+            #  tls_key_path: Path to the private client key file.
+            #  tls_ca_path: Path to the CA certificate file.
+            #  tls_server_name: Path to the CA certificate file.  # not a typo: it's the same
+            container.push(S3_TLS_CA_CHAIN_PATH, "\n\n".join(ca_chain))
+            s3_config["tls_cert_path"] = S3_TLS_CA_CHAIN_PATH
         return s3_config
 
     @property
