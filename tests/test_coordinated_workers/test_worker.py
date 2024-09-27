@@ -16,6 +16,7 @@ from cosl.coordinated_workers.worker import (
     CLIENT_CA_FILE,
     CONFIG_FILE,
     KEY_FILE,
+    S3_TLS_CA_CHAIN_FILE,
     Worker,
 )
 from tests.test_coordinated_workers.test_worker_status import k8s_patch
@@ -454,24 +455,29 @@ def test_worker_does_not_restart_on_no_cert_changed(restart_mock, tmp_path):
             "ca_cert": json.dumps("ca"),
             "server_cert": json.dumps("cert"),
             "privkey_secret_id": json.dumps("private_id"),
+            "s3_tls_ca_chain": json.dumps("s3_ca"),
         },
     )
 
     cert = tmp_path / "cert.cert"
     key = tmp_path / "key.key"
     client_ca = tmp_path / "client_ca.cert"
+    s3_ca_chain = tmp_path / "s3_ca_chain.cert"
 
     cert.write_text("cert")
     key.write_text("private")
     client_ca.write_text("ca")
+    s3_ca_chain.write_text("s3_ca")
 
     container = Container(
         "foo",
         can_connect=True,
+        exec_mock={("update-ca-certificates", "--fresh"): ExecOutput()},
         mounts={
             "cert": Mount(CERT_FILE, cert),
             "key": Mount(KEY_FILE, key),
             "client_ca": Mount(CLIENT_CA_FILE, client_ca),
+            "s3_ca_chain": Mount(S3_TLS_CA_CHAIN_FILE, s3_ca_chain),
         },
     )
 
@@ -523,3 +529,67 @@ def test_worker_no_reconcile_when_patch_not_ready(_update_config_mock):
     )
 
     assert not _update_config_mock.called
+
+
+@patch.object(Worker, "_update_worker_config", MagicMock(return_value=False))
+@patch.object(Worker, "_set_pebble_layer", MagicMock(return_value=False))
+@patch.object(Worker, "restart")
+def test_worker_certs_update(restart_mock, tmp_path):
+    # GIVEN a worker with no cert files on disk, and a cluster relation giving us some cert data
+    ctx = Context(
+        MyCharm,
+        meta={
+            "name": "foo",
+            "requires": {"cluster": {"interface": "cluster"}},
+            "containers": {"foo": {"type": "oci-image"}},
+        },
+        config={"options": {"role-all": {"type": "boolean", "default": True}}},
+    )
+    relation = Relation(
+        "cluster",
+        remote_app_data={
+            "worker_config": json.dumps("some: yaml"),
+            "ca_cert": json.dumps("ca"),
+            "server_cert": json.dumps("cert"),
+            "privkey_secret_id": json.dumps("private_id"),
+            "s3_tls_ca_chain": json.dumps("s3_ca"),
+        },
+    )
+
+    cert = tmp_path / "cert.cert"
+    key = tmp_path / "key.key"
+    client_ca = tmp_path / "client_ca.cert"
+    s3_ca_chain = tmp_path / "s3_ca_chain.cert"
+
+    container = Container(
+        "foo",
+        can_connect=True,
+        exec_mock={("update-ca-certificates", "--fresh"): ExecOutput()},
+        mounts={
+            "cert": Mount(CERT_FILE, cert),
+            "key": Mount(KEY_FILE, key),
+            "client_ca": Mount(CLIENT_CA_FILE, client_ca),
+            "s3_ca_chain": Mount(S3_TLS_CA_CHAIN_FILE, s3_ca_chain),
+        },
+    )
+
+    secret = Secret(
+        "secret:private_id",
+        label="private_id",
+        owner="app",
+        contents={0: {"private-key": "private"}},
+    )
+    # WHEN the charm receives any event
+    ctx.run(
+        "update_status",
+        State(leader=True, containers=[container], relations=[relation], secrets=[secret]),
+    )
+
+    # THEN the worker writes all tls data to the right locations on the container filesystem
+    assert cert.read_text() == "cert"
+    assert key.read_text() == "private"
+    assert client_ca.read_text() == "ca"
+    assert s3_ca_chain.read_text() == "s3_ca"
+
+    # AND the worker restarts the workload
+    assert restart_mock.call_count == 1

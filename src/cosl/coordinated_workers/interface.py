@@ -12,6 +12,7 @@ it does not live in a charm lib as most other relation endpoint wrappers do.
 import collections
 import json
 import logging
+from collections import namedtuple
 from typing import (
     Any,
     Counter,
@@ -171,7 +172,7 @@ class ClusterRequirerUnitData(DatabagModel):
 
 
 class ClusterProviderAppData(DatabagModel):
-    """App data the the coordinator sends to the worker."""
+    """App data that the coordinator sends to the worker."""
 
     ### worker node configuration
     worker_config: str
@@ -189,7 +190,18 @@ class ClusterProviderAppData(DatabagModel):
     ca_cert: Optional[str] = None
     server_cert: Optional[str] = None
     privkey_secret_id: Optional[str] = None
-    """TLS Config"""
+    s3_tls_ca_chain: Optional[str] = None
+
+
+TLSData = namedtuple(
+    "TLSData",
+    [
+        "ca_cert",
+        "server_cert",
+        "privkey_secret_id",
+        "s3_tls_ca_chain",
+    ],
+)
 
 
 class ClusterChangedEvent(ops.EventBase):
@@ -268,6 +280,7 @@ class ClusterProvider(Object):
         worker_config: str,
         ca_cert: Optional[str] = None,
         server_cert: Optional[str] = None,
+        s3_tls_ca_cert: Optional[str] = None,
         privkey_secret_id: Optional[str] = None,
         loki_endpoints: Optional[Dict[str, str]] = None,
         tracing_receivers: Optional[Dict[str, str]] = None,
@@ -284,6 +297,7 @@ class ClusterProvider(Object):
                     privkey_secret_id=privkey_secret_id,
                     tracing_receivers=tracing_receivers,
                     remote_write_endpoints=remote_write_endpoints,
+                    s3_tls_ca_cert=s3_tls_ca_cert,
                 )
                 local_app_databag.dump(relation.data[self.model.app])
 
@@ -517,7 +531,7 @@ class ClusterRequirer(Object):
             return data.loki_endpoints or {}
         return {}
 
-    def get_tls_data(self) -> Optional[Dict[str, str]]:
+    def get_tls_data(self) -> Optional[TLSData]:
         """Fetch certificates and the private key secrets id for the worker config."""
         data = self._get_data_from_coordinator()
         if not data:
@@ -526,11 +540,12 @@ class ClusterRequirer(Object):
         if not data.ca_cert or not data.server_cert or not data.privkey_secret_id:
             return None
 
-        return {
-            "ca_cert": data.ca_cert,
-            "server_cert": data.server_cert,
-            "privkey_secret_id": data.privkey_secret_id,
-        }
+        return TLSData(
+            ca_cert=data.ca_cert,
+            server_cert=data.server_cert,
+            privkey_secret_id=data.privkey_secret_id,
+            s3_tls_ca_chain=data.s3_tls_ca_chain,
+        )
 
     def get_tracing_receivers(self) -> Optional[Dict[str, str]]:
         """Fetch the tracing receivers from the coordinator databag."""
