@@ -583,7 +583,7 @@ class Coordinator(ops.Object):
     ###################
     # UTILITY METHODS #
     ###################
-    def _update_nginx_tls_certificates(self) -> bool:
+    def _update_nginx_tls_certificates(self) -> None:
         """Update the TLS certificates for nginx on disk according to their availability."""
         if self.tls_available:
             self.nginx.configure_tls(
