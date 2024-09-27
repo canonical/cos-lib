@@ -727,7 +727,7 @@ class Coordinator(ops.Object):
                 if self.remote_write_endpoints_getter
                 else None
             ),
-            s3_tls_ca_cert=self._s3_config,
+            s3_tls_ca_chain=self.s3_connection_info.tls_ca_chain,
         )
 
     def _render_workers_alert_rules(self):

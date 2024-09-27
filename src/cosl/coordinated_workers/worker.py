@@ -556,7 +556,7 @@ class Worker(ops.Object):
         if tls_data := self.cluster.get_tls_data():
             private_key_secret = self.model.get_secret(id=tls_data.privkey_secret_id)
             private_key = private_key_secret.get_content().get("private-key")
-
+            new_contents: Optional[str]
             for new_contents, file in (
                 (tls_data.ca_cert, CLIENT_CA_FILE),
                 (tls_data.server_cert, CERT_FILE),
@@ -572,7 +572,8 @@ class Worker(ops.Object):
                 self._container.push(file, new_contents or "", make_dirs=True)
 
             # Save the cacert in the charm container for charm traces
-            ROOT_CA_CERT.write_text(tls_data.ca_cert)
+            if tls_data.ca_cert:
+                ROOT_CA_CERT.write_text(tls_data.ca_cert)
             if not any_changes:
                 return False
             logger.debug("found new tls data in cluster. synced with container fs")
@@ -730,7 +731,7 @@ class Worker(ops.Object):
         is_https = endpoint.startswith("https://")
 
         tls_data = self.cluster.get_tls_data()
-        server_ca_cert = tls_data.get("server_cert") if tls_data else None
+        server_ca_cert = tls_data.server_cert if tls_data else None
 
         if is_https:
             if server_ca_cert is None:
