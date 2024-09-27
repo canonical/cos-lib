@@ -330,7 +330,7 @@ class ClusterProvider(Object):
                     continue
         return data
 
-    def gather_addresses(self) -> Set[str]:
+    def gather_addresses(self) -> List[str]:
         """Go through the worker's unit databags to collect all the addresses published by the units."""
         data: Set[str] = set()
         addresses_by_role = self.gather_addresses_by_role()
