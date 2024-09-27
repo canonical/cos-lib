@@ -475,7 +475,7 @@ class Coordinator(ops.Object):
             #  tls_server_name: Path to the CA certificate file.  # not a typo: it's the same
             # we send to the worker the chain itself, but the tempo config actually wants a path to a file
             # the worker will be responsible for putting it there
-            "tls_cert_path": worker.S3_TLS_CA_CHAIN_FILE if s3_data.tls_ca_chain else None,
+            "tls_ca_path": worker.S3_TLS_CA_CHAIN_FILE if s3_data.tls_ca_chain else None,
         }
 
         return s3_config
