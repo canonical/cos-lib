@@ -149,7 +149,10 @@ def test_worker_restarts_if_some_service_not_up(tmp_path):
         "foo",
         can_connect=True,
         mounts={"local": Mount(CONFIG_FILE, cfg)},
-        exec_mock={("update-ca-certificates", "--fresh"): ExecOutput()},
+        exec_mock={
+            ("update-ca-certificates", "--fresh"): ExecOutput(),
+            ("/bin/foo", "-version"): ExecOutput(stdout="foo"),
+        },
         service_status={
             "foo": ServiceStatus.INACTIVE,
             "bar": ServiceStatus.ACTIVE,
@@ -215,7 +218,10 @@ def test_worker_does_not_restart_external_services(tmp_path):
     cfg.write_text("some: yaml")
     container = Container(
         "foo",
-        exec_mock={("update-ca-certificates", "--fresh"): ExecOutput()},
+        exec_mock={
+            ("update-ca-certificates", "--fresh"): ExecOutput(),
+            ("/bin/foo", "-version"): ExecOutput(stdout="foo"),
+        },
         can_connect=True,
         mounts={"local": Mount(CONFIG_FILE, cfg)},
         layers={"foo": MyCharm.layer, "bar": other_layer},

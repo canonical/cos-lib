@@ -1,3 +1,5 @@
+import json
+
 import ops
 import pytest
 from ops import Framework
@@ -176,7 +178,7 @@ def test_without_s3_integration_raises_error(
 
 
 @pytest.mark.parametrize("region", (None, "canada"))
-@pytest.mark.parametrize("tls_ca_chain", (None, "my ca chain"))
+@pytest.mark.parametrize("tls_ca_chain", (None, ["my ca chain"]))
 @pytest.mark.parametrize("bucket", ("bucky",))
 @pytest.mark.parametrize("secret_key", ("foo",))
 @pytest.mark.parametrize("access_key", ("foo",))
@@ -208,12 +210,15 @@ def test_s3_integration(
         relation for relation in coordinator_state.relations if relation.endpoint != "my-s3"
     ]
     s3_app_data = {
-        **({"region": region} if region else {}),
-        **({"tls-ca-chain": tls_ca_chain} if tls_ca_chain else {}),
-        "endpoint": endpoint,
-        "access-key": access_key,
-        "secret-key": secret_key,
-        "bucket": bucket,
+        k: json.dumps(v)
+        for k, v in {
+            **({"region": region} if region else {}),
+            **({"tls-ca-chain": tls_ca_chain} if tls_ca_chain else {}),
+            "endpoint": endpoint,
+            "access-key": access_key,
+            "secret-key": secret_key,
+            "bucket": bucket,
+        }.items()
     }
 
     # WHEN we process any event

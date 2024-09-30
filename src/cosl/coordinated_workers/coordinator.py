@@ -93,7 +93,7 @@ class S3ConnectionInfo(pydantic.BaseModel):
     secret_key: str = pydantic.Field(alias="secret-key")
 
     region: Optional[str] = pydantic.Field(None)
-    tls_ca_chain: Optional[str] = pydantic.Field(None, alias="tls-ca-chain")
+    tls_ca_chain: Optional[List[str]] = pydantic.Field(None, alias="tls-ca-chain")
 
 
 @dataclass
