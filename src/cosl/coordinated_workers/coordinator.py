@@ -95,6 +95,11 @@ class S3ConnectionInfo(pydantic.BaseModel):
     region: Optional[str] = pydantic.Field(None)
     tls_ca_chain: Optional[List[str]] = pydantic.Field(None, alias="tls-ca-chain")
 
+    @property
+    def ca_cert(self) -> Optional[str]:
+        """Unify the ca chain provided by the lib into a single cert."""
+        return "\n\n".join(self.tls_ca_chain) if self.tls_ca_chain else None
+
 
 @dataclass
 class ClusterRolesConfig:
@@ -727,7 +732,7 @@ class Coordinator(ops.Object):
                 if self.remote_write_endpoints_getter
                 else None
             ),
-            s3_tls_ca_chain=self.s3_connection_info.tls_ca_chain,
+            s3_tls_ca_chain=self.s3_connection_info.ca_cert,
         )
 
     def _render_workers_alert_rules(self):
