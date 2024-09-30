@@ -562,9 +562,12 @@ class Worker(ops.Object):
 
     def _write_tls_files(self, tls_data: TLSData):
         logger.debug("tls config in cluster. writing to container...")
+        if tls_data.privkey_secret_id:
+            private_key_secret = self.model.get_secret(id=tls_data.privkey_secret_id)
+            private_key = private_key_secret.get_content().get("private-key")
+        else:
+            private_key = None
 
-        private_key_secret = self.model.get_secret(id=tls_data.privkey_secret_id)
-        private_key = private_key_secret.get_content().get("private-key")
         new_contents: Optional[str]
         any_changes = False
         for new_contents, file in (
@@ -573,6 +576,9 @@ class Worker(ops.Object):
             (private_key, KEY_FILE),
             (tls_data.s3_tls_ca_chain, S3_TLS_CA_CHAIN_FILE),
         ):
+            if not new_contents:
+                continue
+
             if self._container.exists(file):
                 current_contents = self._container.pull(file).read()
                 if current_contents == new_contents:
@@ -600,7 +606,7 @@ class Worker(ops.Object):
         if not self._container.can_connect():
             return False
 
-        if tls_data := self.cluster.get_tls_data():
+        if tls_data := self.cluster.get_tls_data(allow_none=True):
             return self._write_tls_files(tls_data)
         else:
             return self._wipe_tls_files()

@@ -529,13 +529,15 @@ class ClusterRequirer(Object):
             return data.loki_endpoints or {}
         return {}
 
-    def get_tls_data(self) -> Optional[TLSData]:
+    def get_tls_data(self, allow_none: bool = False) -> Optional[TLSData]:
         """Fetch certificates and the private key secrets id for the worker config."""
         data = self._get_data_from_coordinator()
         if not data:
             return None
 
-        if not data.ca_cert or not data.server_cert or not data.privkey_secret_id:
+        if not allow_none and (
+            not data.ca_cert or not data.server_cert or not data.privkey_secret_id
+        ):
             return None
 
         return TLSData(
