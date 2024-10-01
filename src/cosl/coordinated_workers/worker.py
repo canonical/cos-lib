@@ -547,20 +547,7 @@ class Worker(ops.Object):
 
         return False
 
-    def _wipe_tls_files(self):
-        logger.debug("no tls data in cluster. wiping files...")
-
-        any_changes = False
-        for file in (CLIENT_CA_FILE, CERT_FILE, KEY_FILE, S3_TLS_CA_CHAIN_FILE):
-            if self._container.exists(file):
-                any_changes = True
-                self._container.remove_path(file, recursive=True)
-
-        # Remove from charm container
-        ROOT_CA_CERT.unlink(missing_ok=True)
-        return any_changes
-
-    def _write_tls_files(self, tls_data: TLSData):
+    def _sync_tls_files(self, tls_data: TLSData):
         logger.debug("tls config in cluster. writing to container...")
         if tls_data.privkey_secret_id:
             private_key_secret = self.model.get_secret(id=tls_data.privkey_secret_id)
@@ -577,24 +564,30 @@ class Worker(ops.Object):
             (tls_data.s3_tls_ca_chain, S3_TLS_CA_CHAIN_FILE),
         ):
             if not new_contents:
+                if self._container.exists(file):
+                    any_changes = True
+                    self._container.remove_path(file, recursive=True)
+                    logger.debug(f"{file} deleted")
+                    continue
+
+                logger.debug(f"{file} skipped")
                 continue
 
             if self._container.exists(file):
                 current_contents = self._container.pull(file).read()
                 if current_contents == new_contents:
+                    logger.debug(f"{file} unchanged")
                     continue
 
+            logger.debug(f"{file} updated")
             any_changes = True
-            self._container.push(file, new_contents or "", make_dirs=True)
+            self._container.push(file, new_contents, make_dirs=True)
 
         # Save the cacert in the charm container for charm traces
         if tls_data.ca_cert:
             ROOT_CA_CERT.write_text(tls_data.ca_cert)
-
-        if any_changes:
-            logger.debug("running update-ca-certificates")
-            self._container.exec(["update-ca-certificates", "--fresh"]).wait()
-            subprocess.run(["update-ca-certificates", "--fresh"])
+        else:
+            ROOT_CA_CERT.unlink(missing_ok=True)
 
         return any_changes
 
@@ -606,10 +599,16 @@ class Worker(ops.Object):
         if not self._container.can_connect():
             return False
 
-        if tls_data := self.cluster.get_tls_data(allow_none=True):
-            return self._write_tls_files(tls_data)
-        else:
-            return self._wipe_tls_files()
+        tls_data = self.cluster.get_tls_data(allow_none=True)
+        if not tls_data:
+            return False
+
+        any_changes = self._sync_tls_files(tls_data)
+        if any_changes:
+            logger.debug("running update-ca-certificates")
+            self._container.exec(["update-ca-certificates", "--fresh"]).wait()
+            subprocess.run(["update-ca-certificates", "--fresh"])
+        return any_changes
 
     def restart(self):
         """Restart the pebble service or start it if not already running, then wait for it to become ready.

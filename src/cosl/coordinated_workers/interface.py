@@ -535,9 +535,9 @@ class ClusterRequirer(Object):
         if not data:
             return None
 
-        if not allow_none and (
+        if (
             not data.ca_cert or not data.server_cert or not data.privkey_secret_id
-        ):
+        ) and not allow_none:
             return None
 
         return TLSData(
