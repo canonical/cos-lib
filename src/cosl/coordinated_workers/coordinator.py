@@ -638,21 +638,30 @@ class Coordinator(ops.Object):
     # keep this event handler at the bottom
     def _on_collect_unit_status(self, e: ops.CollectStatusEvent):
         # todo add [nginx.workload] statuses
+        statuses = []
 
         if self.resources_patch and self.resources_patch.get_status().name != "active":
-            e.add_status(self.resources_patch.get_status())
+            statuses.append(self.resources_patch.get_status())
 
         if not self.cluster.has_workers:
-            e.add_status(ops.BlockedStatus("[consistency] Missing any worker relation."))
-        if not self.is_coherent:
-            e.add_status(ops.BlockedStatus("[consistency] Cluster inconsistent."))
-        if not self.s3_ready:
-            e.add_status(ops.BlockedStatus("[consistency] Missing S3 integration."))
+            statuses.append(ops.BlockedStatus("[consistency] Missing any worker relation."))
+        elif not self.is_coherent:
+            statuses.append(ops.BlockedStatus("[consistency] Cluster inconsistent."))
         elif not self.is_recommended:
             # if is_recommended is None: it means we don't have a recommended deployment criterion.
-            e.add_status(ops.ActiveStatus("[coordinator] Degraded."))
-        else:
-            e.add_status(ops.ActiveStatus())
+            statuses.append(ops.ActiveStatus("Degraded."))
+
+        if not self.s3_requirer.relations:
+            statuses.append(ops.BlockedStatus("[s3] Missing S3 integration."))
+        elif not self.s3_ready:
+            statuses.append(ops.BlockedStatus("[s3] S3 not ready (probably misconfigured)."))
+
+        if not statuses:
+            statuses.append(ops.ActiveStatus())
+
+        for status in statuses:
+            e.add_status(status)
+
 
     ###################
     # UTILITY METHODS #
