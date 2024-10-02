@@ -562,6 +562,7 @@ class Worker(ops.Object):
             (tls_data.server_cert, CERT_FILE),
             (private_key, KEY_FILE),
             (tls_data.s3_tls_ca_chain, S3_TLS_CA_CHAIN_FILE),
+            (tls_data.ca_cert, ROOT_CA_CERT),
         ):
             if not new_contents:
                 if self._container.exists(file):
