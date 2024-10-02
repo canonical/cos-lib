@@ -28,6 +28,7 @@ from urllib.parse import urlparse
 import ops
 import pydantic
 import yaml
+from ops import StatusBase
 
 import cosl
 from cosl.coordinated_workers import worker
@@ -452,7 +453,8 @@ class Coordinator(ops.Object):
     def s3_connection_info(self) -> S3ConnectionInfo:
         """Cast and validate the untyped s3 databag to something we can handle."""
         try:
-            return S3ConnectionInfo(**self.s3_requirer.get_s3_connection_info())
+            # we have to type-ignore here because the s3 lib's type annotation is wrong
+            return S3ConnectionInfo(**self.s3_requirer.get_s3_connection_info())  # type: ignore
         except pydantic.ValidationError:
             raise S3NotFoundError("s3 integration inactive or interface corrupt")
 
@@ -633,7 +635,7 @@ class Coordinator(ops.Object):
     # keep this event handler at the bottom
     def _on_collect_unit_status(self, e: ops.CollectStatusEvent):
         # todo add [nginx.workload] statuses
-        statuses = []
+        statuses: List[StatusBase] = []
 
         if self.resources_patch and self.resources_patch.get_status().name != "active":
             statuses.append(self.resources_patch.get_status())
