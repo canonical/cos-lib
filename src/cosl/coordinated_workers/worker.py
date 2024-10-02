@@ -584,11 +584,11 @@ class Worker(ops.Object):
             self._container.push(file, new_contents, make_dirs=True)
 
         # Save the cacert in the charm container for charm traces
+        # we do it unconditionally to avoid the extra complexity.
         if tls_data.ca_cert:
             ROOT_CA_CERT.write_text(tls_data.ca_cert)
         else:
             ROOT_CA_CERT.unlink(missing_ok=True)
-
         return any_changes
 
     def _update_tls_certificates(self) -> bool:

@@ -473,13 +473,8 @@ class Coordinator(ops.Object):
             "secret_access_key": s3_data.secret_key,
             "bucket_name": s3_data.bucket,
             "insecure": not s3_data.tls_ca_chain,
-            # FIXME: s3 gives us a cert chain. tempo's s3 config takes:
-            #  tls_cert_path: Path to the client certificate file.
-            #  tls_key_path: Path to the private client key file.
-            #  tls_ca_path: Path to the CA certificate file.
-            #  tls_server_name: Path to the CA certificate file.  # not a typo: it's the same
-            # we send to the worker the chain itself, but the tempo config actually wants a path to a file
-            # the worker will be responsible for putting it there
+            # the tempo config wants a path to a file here. We pass the cert chain separately
+            # over the cluster relation; the worker will be responsible for writing the file to disk
             "tls_ca_path": worker.S3_TLS_CA_CHAIN_FILE if s3_data.tls_ca_chain else None,
         }
 
@@ -661,7 +656,6 @@ class Coordinator(ops.Object):
 
         for status in statuses:
             e.add_status(status)
-
 
     ###################
     # UTILITY METHODS #
