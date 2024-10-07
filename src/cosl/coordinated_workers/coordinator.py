@@ -236,7 +236,6 @@ class Coordinator(ops.Object):
         self.topology = cosl.JujuTopology.from_charm(self._charm)
         self._external_url = external_url
         self._worker_metrics_port = worker_metrics_port
-
         self._endpoints = endpoints
 
         _validate_container_name(container_name, resources_requests)
