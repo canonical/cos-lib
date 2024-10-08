@@ -40,8 +40,6 @@ from cosl.coordinated_workers.nginx import (
 )
 from cosl.helpers import check_libs_installed
 
-from lib.charms.loki_k8s.v1.loki_push_api import LogForwarder
-
 check_libs_installed(
     "charms.data_platform_libs.v0.s3",
     "charms.grafana_k8s.v0.grafana_source",
@@ -56,7 +54,7 @@ check_libs_installed(
 
 from charms.data_platform_libs.v0.s3 import S3Requirer
 from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
-from charms.loki_k8s.v1.loki_push_api import LokiPushApiConsumer
+from charms.loki_k8s.v1.loki_push_api import LokiPushApiConsumer, LogForwarder
 from charms.observability_libs.v0.kubernetes_compute_resources_patch import (
     KubernetesComputeResourcesPatch,
     adjust_resource_requirements,
