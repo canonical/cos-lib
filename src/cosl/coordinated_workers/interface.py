@@ -415,6 +415,8 @@ class ClusterProvider(Object):
         """
         if not relation.app:
             return False
+        if len(relation.units) == 0:
+            return False
         for worker_unit in relation.units:
             try:
                 ClusterRequirerUnitData.load(relation.data[worker_unit])
