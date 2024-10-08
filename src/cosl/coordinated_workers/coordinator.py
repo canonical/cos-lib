@@ -40,6 +40,8 @@ from cosl.coordinated_workers.nginx import (
 )
 from cosl.helpers import check_libs_installed
 
+from lib.charms.loki_k8s.v1.loki_push_api import LogForwarder
+
 check_libs_installed(
     "charms.data_platform_libs.v0.s3",
     "charms.grafana_k8s.v0.grafana_source",
@@ -283,6 +285,7 @@ class Coordinator(ops.Object):
         )
 
         self._logging = LokiPushApiConsumer(self._charm, relation_name=self._endpoints["logging"])
+        self._log_forwarder = LogForwarder(self._charm, relation_name=self._endpoints["logging"])
 
         # Provide ability for this to be scraped by Prometheus using prometheus_scrape
         refresh_events = [self._charm.on.update_status, self.cluster.on.changed]
