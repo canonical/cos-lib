@@ -403,6 +403,26 @@ class ClusterProvider(Object):
             return address_set.pop()
         return None
 
+    def has_all_workers_published(self):
+        """Verify that all workers have done all they need to do.
+
+        - unit address is published
+        - roles are published
+        """
+        for relation in self._relations:
+            if not relation.app:
+                continue
+            for worker_unit in relation.units:
+                try:
+                    ClusterRequirerUnitData.load(relation.data[worker_unit])
+                    if self._charm.unit.is_leader():
+                        ClusterRequirerAppData.load(relation.data[relation.app])
+                except DataValidationError as e:
+                    log.info(f"invalid databag contents: {e}")
+                    return False
+
+        return True
+
 
 class ClusterRequirer(Object):
     """``-cluster`` requirer endpoint wrapper."""

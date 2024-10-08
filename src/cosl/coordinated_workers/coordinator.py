@@ -647,6 +647,10 @@ class Coordinator(ops.Object):
         if not self._charm.unit.is_leader():
             return
 
+        if not self.cluster.has_all_workers_published():
+            logger.info("Workers have not pushed their data yet")
+            return
+
         # we share the certs in plaintext as they're not sensitive information
         # On every function call, we always publish everything to the databag; however, if there
         # are no changes, Juju will notice there's no delta and do nothing
