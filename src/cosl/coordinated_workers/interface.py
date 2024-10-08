@@ -290,7 +290,8 @@ class ClusterProvider(Object):
             if relation:
                 if not self._has_worker_published(relation):
                     log.info("Worker has not yet published its data")
-                    return
+                    continue
+                log.info("CONTINUE PUSHING FOR WORKER %s", relation)
                 local_app_databag = ClusterProviderAppData(
                     worker_config=worker_config,
                     loki_endpoints=loki_endpoints,
@@ -420,7 +421,7 @@ class ClusterProvider(Object):
                 if self._charm.unit.is_leader():
                     ClusterRequirerAppData.load(relation.data[relation.app])
             except DataValidationError as e:
-                log.info(f"invalid databag contents: {e}")
+                log.info(f"invalid databag contents inside has worker published: {e}")
                 return False
 
         return True
