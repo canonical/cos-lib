@@ -47,7 +47,7 @@ check_libs_installed(
     "charms.observability_libs.v1.cert_handler",
     "charms.prometheus_k8s.v0.prometheus_scrape",
     "charms.loki_k8s.v1.loki_push_api",
-    "charms.tempo_k8s.v2.tracing",
+    "charms.tempo_coordinator_k8s.v0.tracing",
     "charms.observability_libs.v0.kubernetes_compute_resources_patch",
     "charms.tls_certificates_interface.v3.tls_certificates",
 )
@@ -61,7 +61,7 @@ from charms.observability_libs.v0.kubernetes_compute_resources_patch import (
 )
 from charms.observability_libs.v1.cert_handler import VAULT_SECRET_LABEL, CertHandler
 from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
-from charms.tempo_k8s.v2.tracing import TracingEndpointRequirer
+from charms.tempo_coordinator_k8s.v0.tracing import TracingEndpointRequirer
 from lightkube.models.core_v1 import ResourceRequirements
 
 logger = logging.getLogger(__name__)
