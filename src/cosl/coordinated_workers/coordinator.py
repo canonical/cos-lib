@@ -273,7 +273,6 @@ class Coordinator(ops.Object):
             key="coordinator-server-cert",
             # update certificate with new SANs whenever a worker is added/removed
             sans=[self.hostname, *self.cluster.gather_addresses()],
-            refresh_events=[self.cluster.on.changed],
         )
 
         self.s3_requirer = S3Requirer(self._charm, self._endpoints["s3"])
