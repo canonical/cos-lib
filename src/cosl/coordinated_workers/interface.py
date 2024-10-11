@@ -288,6 +288,9 @@ class ClusterProvider(Object):
         """Publish the config to all related worker clusters."""
         for relation in self._relations:
             if relation:
+                if not self._has_worker_published(relation):
+                    log.debug("Worker %s hasn't yet published its data", relation.id)
+                    continue
                 local_app_databag = ClusterProviderAppData(
                     worker_config=worker_config,
                     loki_endpoints=loki_endpoints,
@@ -402,6 +405,29 @@ class ClusterProvider(Object):
         if address_set := addresses_by_role.get(role, None):
             return address_set.pop()
         return None
+
+    def _has_worker_published(self, relation: ops.Relation) -> bool:
+        """Verify that the worker has published its data.
+
+        - unit address is published
+        - roles are published
+        """
+        if not relation.app:
+            return False
+        if len(relation.units) == 0:
+            return False
+        for worker_unit in relation.units:
+            try:
+                ClusterRequirerUnitData.load(relation.data[worker_unit])
+                if self._charm.unit.is_leader():
+                    ClusterRequirerAppData.load(relation.data[relation.app])
+            except DataValidationError as e:
+                log.info(
+                    f"invalid databag contents while checking if worker has published data: {e}"
+                )
+                return False
+
+        return True
 
 
 class ClusterRequirer(Object):
