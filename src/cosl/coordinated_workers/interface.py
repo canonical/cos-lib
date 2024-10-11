@@ -289,7 +289,7 @@ class ClusterProvider(Object):
         for relation in self._relations:
             if relation:
                 if not self._has_worker_published(relation):
-                    log.debug("Worker %s hasn't yet published its data", relation.id)
+                    log.debug("Worker %s hasn't yet published its data", relation.app.name)
                     continue
                 local_app_databag = ClusterProviderAppData(
                     worker_config=worker_config,
@@ -407,24 +407,26 @@ class ClusterProvider(Object):
         return None
 
     def _has_worker_published(self, relation: ops.Relation) -> bool:
-        """Verify that the worker has published its data.
+        """Verify that each worker unit and the worker leader have published their data to the cluster relation.
 
         - unit address is published
         - roles are published
         """
-        if not relation.app:
+        if not relation.app or not relation.units or not relation.data:
             return False
-        if len(relation.units) == 0:
-            return False
+
+        # check if unit data is published
         for worker_unit in relation.units:
             try:
                 ClusterRequirerUnitData.load(relation.data[worker_unit])
-                if self._charm.unit.is_leader():
-                    ClusterRequirerAppData.load(relation.data[relation.app])
-            except DataValidationError as e:
-                log.info(
-                    f"invalid databag contents while checking if worker has published data: {e}"
-                )
+            except DataValidationError:
+                return False
+
+        # check if app data is published
+        if self._charm.unit.is_leader():
+            try:
+                ClusterRequirerAppData.load(relation.data[relation.app])
+            except DataValidationError:
                 return False
 
         return True
