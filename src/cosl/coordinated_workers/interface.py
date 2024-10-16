@@ -287,10 +287,7 @@ class ClusterProvider(Object):
     ) -> None:
         """Publish the config to all related worker clusters."""
         for relation in self._relations:
-            if relation:
-                if not self._has_worker_published(relation):
-                    log.debug("Worker %s hasn't yet published its data", relation.app.name)
-                    continue
+            if relation and self._remote_data_ready(relation):
                 local_app_databag = ClusterProviderAppData(
                     worker_config=worker_config,
                     loki_endpoints=loki_endpoints,
@@ -406,7 +403,7 @@ class ClusterProvider(Object):
             return address_set.pop()
         return None
 
-    def _has_worker_published(self, relation: ops.Relation) -> bool:
+    def _remote_data_ready(self, relation: ops.Relation) -> bool:
         """Verify that each worker unit and the worker leader have published their data to the cluster relation.
 
         - unit address is published
