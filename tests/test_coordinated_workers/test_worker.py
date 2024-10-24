@@ -243,6 +243,8 @@ def test_worker_does_not_restart_external_services(tmp_path):
         # layer bar services is unchanged
         "bar": ServiceStatus.ACTIVE,
         "baz": ServiceStatus.INACTIVE,
+        # workload-ready service will be added regardless
+        "workload-ready": ServiceStatus.ACTIVE,
     }
 
 

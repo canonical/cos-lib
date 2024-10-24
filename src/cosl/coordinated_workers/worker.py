@@ -19,7 +19,7 @@ import tenacity
 import yaml
 from ops import MaintenanceStatus, StatusBase
 from ops.model import ActiveStatus, BlockedStatus, WaitingStatus
-from ops.pebble import Check, Layer, PathError, Plan, ProtocolError
+from ops.pebble import APIError, Check, Layer, PathError, Plan, ProtocolError
 
 from cosl import JujuTopology
 from cosl.coordinated_workers.interface import ClusterRequirer, TLSData
@@ -45,6 +45,7 @@ KEY_FILE = "/etc/worker/private.key"
 CLIENT_CA_FILE = "/etc/worker/ca.cert"
 ROOT_CA_CERT = "/usr/local/share/ca-certificates/ca.crt"
 ROOT_CA_CERT_PATH = Path(ROOT_CA_CERT)
+WORKLOAD_READY_SERVICE_NAME = "workload-ready"
 
 logger = logging.getLogger(__name__)
 
@@ -88,18 +89,13 @@ class ServiceEndpointStatus(Enum):
 class Worker(ops.Object):
     """Charming worker."""
 
+    ready_notice_key = "canonical.com/workload-ready"
+
     # configuration for the service start retry logic in .restart().
     # this will determine how long we wait for pebble to try to start the worker process
-    SERVICE_START_RETRY_STOP = tenacity.stop_after_delay(60 * 15)
-    SERVICE_START_RETRY_WAIT = tenacity.wait_fixed(60)
+    SERVICE_START_RETRY_STOP = tenacity.stop_after_delay(60)
+    SERVICE_START_RETRY_WAIT = tenacity.wait_fixed(5)
     SERVICE_START_RETRY_IF = tenacity.retry_if_exception_type(ops.pebble.ChangeError)
-
-    # configuration for the service status retry logic after a restart has occurred.
-    # this will determine how long we wait for the worker process to report "ready" after it
-    # has been successfully restarted
-    SERVICE_STATUS_UP_RETRY_STOP = tenacity.stop_after_delay(60 * 15)
-    SERVICE_STATUS_UP_RETRY_WAIT = tenacity.wait_fixed(10)
-    SERVICE_STATUS_UP_RETRY_IF = tenacity.retry_if_not_result(bool)
 
     _endpoints: _EndpointMapping = {
         "cluster": "cluster",
@@ -196,6 +192,10 @@ class Worker(ops.Object):
 
         self.framework.observe(self._charm.on[self._name].pebble_ready, self._on_pebble_ready)
         self.framework.observe(
+            self._charm.on[self._name].pebble_custom_notice, self._on_pebble_custom_notice
+        )
+
+        self.framework.observe(
             self._charm.on[name].pebble_check_failed, self._on_pebble_check_failed
         )
         self.framework.observe(
@@ -203,6 +203,24 @@ class Worker(ops.Object):
         )
 
     # Event handlers
+    def _on_pebble_custom_notice(self, event: ops.PebbleNoticeEvent):
+        if event.notice.key == self.ready_notice_key:
+            # collect-unit-status should now report ready.
+            logger.debug("pebble API reports ready")
+
+            try:
+                self._container.stop(WORKLOAD_READY_SERVICE_NAME)
+                # ops will fire APIError but ops.testing._TestingPebbleClient will fire RuntimeError.
+            except (APIError, RuntimeError):
+                # see https://matrix.to/#/!xzmWHtGpPfVCXKivIh:ubuntu.com/
+                #  $d42wOu61e5mqMhnDRUB6K8eV4kUAPQ_yhIQmqq5Q_cs?via=ubuntu.com&
+                #  via=matrix.org&via=matrix.debian.social
+                # issue: on sleep/resume, we get this event but there's no tempo-ready
+                # service in pebble (somehow?)
+                logger.debug(
+                    f"`{WORKLOAD_READY_SERVICE_NAME}` service cannot be stopped at this time (probably doesn't exist)."
+                )
+
     def _on_pebble_ready(self, _: ops.PebbleReadyEvent):
         self._charm.unit.set_workload_version(self.running_version() or "")
 
@@ -237,6 +255,30 @@ class Worker(ops.Object):
         except Exception:
             logger.exception("exception while attempting to get pebble layer from charm")
             return None
+
+    @property
+    def _workload_ready_layer(self) -> Layer:
+        """Create a pebble service layer that will fire pebble notices once our workload is up and ready."""
+        return Layer(
+            {
+                "services": {
+                    "workload-ready": {
+                        "override": "replace",
+                        "summary": "Notify charm when the workload is ready",
+                        # Fire the pebble notice when pebble "ready" check reports "up".
+                        # The assumption here is that pebble "ready" check would keep reporting "up"
+                        # until it witnesses 3 consecutive failures, where 3 is set by the "threshold" field in the check layer.
+                        # So, we wait for 30 seconds before checking if its up so that we guarantee that the check is
+                        # reporting the correct status.
+                        "command": f"""bash -c 'while true; do sleep 30; /charm/bin/pebble checks ready | grep up &&
+                                   /charm/bin/pebble notify {self.ready_notice_key} ||
+                                   echo "workload not ready"; done'""",
+                        # should be started and stopped manually to avoid unnecessary notifies.
+                        "startup": "disabled",
+                    }
+                },
+            }
+        )
 
     @property
     def status(self) -> ServiceEndpointStatus:
@@ -310,8 +352,12 @@ class Worker(ops.Object):
             logger.debug(f"GET {check_endpoint} returned: {raw_out!r}.")
             return ServiceEndpointStatus.starting
 
-        except HTTPError:
-            logger.debug("Error getting readiness endpoint: server not up (yet)")
+        except HTTPError as e:
+            # While the workload is still starting, it'd return a 503 error code.
+            if e.code == 503:
+                logger.debug("Service is still starting")
+                return ServiceEndpointStatus.starting
+            logger.debug("Error getting readiness endpoint: server not up (yet) %s", e)
         except Exception:
             logger.exception("Unexpected exception getting readiness endpoint")
         return ServiceEndpointStatus.down
@@ -424,7 +470,9 @@ class Worker(ops.Object):
         #  wait for an update-status and can listen to that instead.
         else:
             services_not_up = [
-                svc.name for svc in self._container.get_services().values() if not svc.is_running()
+                svc.name
+                for svc in self._container.get_services().values()
+                if svc.name != WORKLOAD_READY_SERVICE_NAME and not svc.is_running()
             ]
             if services_not_up:
                 logger.debug(
@@ -453,6 +501,7 @@ class Worker(ops.Object):
             return False
 
         self._add_readiness_check(layer)
+        self._add_pebble_notice_service(layer)
 
         def diff(layer: Layer, plan: Plan):
             layer_dct = layer.to_dict()
@@ -465,6 +514,9 @@ class Worker(ops.Object):
         if diff(layer, current_plan):
             logger.debug("Adding new layer to pebble...")
             self._container.add_layer(self._name, layer, combine=True)
+            self._container.add_layer(
+                WORKLOAD_READY_SERVICE_NAME, self._workload_ready_layer, combine=True
+            )
             return True
         return False
 
@@ -480,9 +532,17 @@ class Worker(ops.Object):
                 "override": "replace",
                 # threshold gets added automatically by pebble
                 "threshold": 3,
+                "period": "5s",
+                "timeout": "5s",
                 "http": {"url": self._readiness_check_endpoint(self)},
             },
         )
+
+    def _add_pebble_notice_service(self, new_layer: Layer):
+        """Add the "workload-ready" pebble notify service to a pebble layer."""
+        new_layer.services[WORKLOAD_READY_SERVICE_NAME] = self._workload_ready_layer.services[
+            WORKLOAD_READY_SERVICE_NAME
+        ]
 
     def _reconcile(self):
         """Run all logic that is independent of what event we're processing."""
@@ -641,7 +701,8 @@ class Worker(ops.Object):
             return
         if not (layer := self.pebble_layer):
             return
-        service_names = layer.services.keys()
+
+        service_names = [*layer.services.keys(), WORKLOAD_READY_SERVICE_NAME]
 
         try:
             for attempt in tenacity.Retrying(
@@ -668,33 +729,7 @@ class Worker(ops.Object):
             )
             raise
 
-        try:
-            for attempt in tenacity.Retrying(
-                # status may report .down
-                retry=self.SERVICE_STATUS_UP_RETRY_IF,
-                # give this method some time to pass (by default 15 minutes)
-                stop=self.SERVICE_STATUS_UP_RETRY_STOP,
-                # wait 10 seconds between tries
-                wait=self.SERVICE_STATUS_UP_RETRY_WAIT,
-                # if you don't succeed raise the last caught exception when you're done
-                reraise=True,
-            ):
-                with attempt:
-                    self._charm.unit.status = MaintenanceStatus(
-                        f"waiting for worker process to report ready... (attempt #{attempt.retry_state.attempt_number})"
-                    )
-                # set result to status; will retry unless it's up
-                attempt.retry_state.set_result(self.status is ServiceEndpointStatus.up)
-
-        except WorkerError:
-            #  unable to check worker readiness: no readiness_check_endpoint configured.
-            # this status is already set on the unit so no need to log it
-            pass
-
-        except Exception:
-            logger.exception("unexpected error while attempting to determine worker status")
-
-        return False
+        return True
 
     def running_version(self) -> Optional[str]:
         """Get the running version from the worker process."""

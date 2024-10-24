@@ -22,18 +22,6 @@ def patch_all(tmp_path: Path):
                 new=tenacity.stop_after_delay(1),
             )
         )
-        stack.enter_context(
-            patch(
-                "cosl.coordinated_workers.worker.Worker.SERVICE_STATUS_UP_RETRY_WAIT",
-                new=tenacity.wait_none(),
-            )
-        )
-        stack.enter_context(
-            patch(
-                "cosl.coordinated_workers.worker.Worker.SERVICE_STATUS_UP_RETRY_STOP",
-                new=tenacity.stop_after_delay(1),
-            )
-        )
 
         # Prevent the worker's _update_tls_certificates method to try and write our local filesystem
         stack.enter_context(
