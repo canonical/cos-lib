@@ -20,7 +20,8 @@ def coordinator_state():
         for endpoint, interface in {
             "my-certificates": {"interface": "certificates"},
             "my-logging": {"interface": "loki_push_api"},
-            "my-tracing": {"interface": "tracing"},
+            "my-charm-tracing": {"interface": "tracing"},
+            "my-workload-tracing": {"interface": "tracing"},
         }.items()
     }
     requires_relations["my-s3"] = Relation(
@@ -75,7 +76,8 @@ def coordinator_charm(request):
                 "my-certificates": {"interface": "certificates"},
                 "my-cluster": {"interface": "cluster"},
                 "my-logging": {"interface": "loki_push_api"},
-                "my-tracing": {"interface": "tracing", "limit": 1},
+                "my-charm-tracing": {"interface": "tracing", "limit": 1},
+                "my-workload-tracing": {"interface": "tracing", "limit": 1},
                 "my-s3": {"interface": "s3"},
             },
             "provides": {
@@ -116,7 +118,8 @@ def coordinator_charm(request):
                     "grafana-dashboards": "my-dashboards",
                     "logging": "my-logging",
                     "metrics": "my-metrics",
-                    "tracing": "my-tracing",
+                    "charm-tracing": "my-charm-tracing",
+                    "workload-tracing": "my-workload-tracing",
                     "s3": "my-s3",
                 },
                 nginx_config=lambda coordinator: f"nginx configuration for {coordinator._charm.meta.name}",
