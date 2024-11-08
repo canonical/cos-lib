@@ -216,7 +216,7 @@ class Coordinator(ops.Object):
             is_coherent: Custom coherency checker for a minimal deployment.
             is_recommended: Custom coherency checker for a recommended deployment.
             tracing_receivers: A dictionary of receivers and their corresponding endpoints to which the worker's workload can push traces to.
-                If not provided, endpoints acquired from "tracing" relation would be used.
+                If not provided, endpoints acquired from "tracing" relation would be used if any.
             resources_limit_options: A dictionary containing resources limit option names. The dictionary should include
                 "cpu_limit" and "memory_limit" keys with values as option names, as defined in the config.yaml.
                 If no dictionary is provided, the default option names "cpu_limit" and "memory_limit" would be used.
@@ -257,6 +257,7 @@ class Coordinator(ops.Object):
         self._container_name = container_name
         self._resources_limit_options = resources_limit_options or {}
         self.remote_write_endpoints_getter = remote_write_endpoints
+        self._tracing_receivers = tracing_receivers 
 
         self.nginx = Nginx(
             self._charm,
@@ -304,7 +305,6 @@ class Coordinator(ops.Object):
             relation_name=self._endpoints["tracing"],
             protocols=["otlp_http", "jaeger_thrift_http"],
         )
-        self._tracing_receivers = tracing_receivers or self._tracing_receivers_urls()
 
         # Resources patch
         self.resources_patch = (
@@ -671,7 +671,7 @@ class Coordinator(ops.Object):
             privkey_secret_id=(
                 self.cluster.grant_privkey(VAULT_SECRET_LABEL) if self.tls_available else None
             ),
-            tracing_receivers=self._tracing_receivers,
+            tracing_receivers=self._tracing_receivers or self._tracing_receivers_urls(),
             remote_write_endpoints=(
                 self.remote_write_endpoints_getter()
                 if self.remote_write_endpoints_getter
