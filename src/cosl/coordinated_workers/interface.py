@@ -573,7 +573,7 @@ class ClusterRequirer(Object):
             s3_tls_ca_chain=data.s3_tls_ca_chain,
         )
 
-    def get_tracing_receivers(self) -> Optional[Dict[str, str]]:
+    def get_tracing_receivers(self) -> Dict[str, str]:
         """Fetch the tracing receivers from the coordinator databag."""
         data = self._get_data_from_coordinator()
         if data:
