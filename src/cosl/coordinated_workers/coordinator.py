@@ -257,7 +257,7 @@ class Coordinator(ops.Object):
         self._container_name = container_name
         self._resources_limit_options = resources_limit_options or {}
         self.remote_write_endpoints_getter = remote_write_endpoints
-        self._tracing_receivers = tracing_receivers 
+        self._tracing_receivers = tracing_receivers
 
         self.nginx = Nginx(
             self._charm,
