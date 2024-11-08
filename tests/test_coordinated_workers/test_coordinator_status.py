@@ -61,7 +61,7 @@ def ctx(coord_charm):
                 "s3": {"interface": "s3"},
                 "logging": {"interface": "loki_push_api"},
                 "certificates": {"interface": "tls-certificates"},
-                "self-tracing": {"interface": "tracing"},
+                "self-tracing": {"interface": "tracing", "limit": 1},
             },
             "provides": {
                 "cluster": {"interface": "cluster"},

@@ -195,7 +195,7 @@ class Coordinator(ops.Object):
         nginx_options: Optional[NginxMappingOverrides] = None,
         is_coherent: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
         is_recommended: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
-        tracing_receivers: Optional[Callable[[], Optional[Dict[str, str]]]] = None,
+        tracing_receivers: Optional[Dict[str, str]] = None,
         resources_limit_options: Optional[_ResourceLimitOptionsMapping] = None,
         resources_requests: Optional[Callable[["Coordinator"], Dict[str, str]]] = None,
         container_name: Optional[str] = None,
@@ -215,7 +215,7 @@ class Coordinator(ops.Object):
             nginx_options: Non-default config options for Nginx.
             is_coherent: Custom coherency checker for a minimal deployment.
             is_recommended: Custom coherency checker for a recommended deployment.
-            tracing_receivers: A function generating endpoints to which the workload (and the worker charm) can push traces to.
+            tracing_receivers: A dictionary of receivers and their corresponding endpoints to which the worker's workload can push traces to.
                 If not provided, endpoints acquired from "tracing" relation would be used.
             resources_limit_options: A dictionary containing resources limit option names. The dictionary should include
                 "cpu_limit" and "memory_limit" keys with values as option names, as defined in the config.yaml.
@@ -251,7 +251,6 @@ class Coordinator(ops.Object):
 
         self._is_coherent = is_coherent
         self._is_recommended = is_recommended
-        self._tracing_receivers_getter = tracing_receivers or self._tracing_receivers_urls
         self._resources_requests_getter = (
             partial(resources_requests, self) if resources_requests is not None else None
         )
@@ -305,6 +304,7 @@ class Coordinator(ops.Object):
             relation_name=self._endpoints["tracing"],
             protocols=["otlp_http", "jaeger_thrift_http"],
         )
+        self._tracing_receivers = tracing_receivers or self._tracing_receivers_urls()
 
         # Resources patch
         self.resources_patch = (
@@ -581,11 +581,11 @@ class Coordinator(ops.Object):
     ###################
     def _tracing_receivers_urls(self) -> Dict[str, str]:
         """Returns the enabled receivers protocols with their corresponding endpoints."""
-        receivers_urls = {}
-        if not self.tracing.get_all_endpoints():
-            return receivers_urls
-        for receiver in self.tracing.get_all_endpoints().receivers:
-            receivers_urls[receiver.protocol.name] = receiver.url
+        receivers_urls: Dict[str, str] = {}
+        all_endpoints = self.tracing.get_all_endpoints()
+        if all_endpoints:
+            for receiver in all_endpoints.receivers:
+                receivers_urls[receiver.protocol.name] = receiver.url
         return receivers_urls
 
     def _update_nginx_tls_certificates(self) -> None:
@@ -671,7 +671,7 @@ class Coordinator(ops.Object):
             privkey_secret_id=(
                 self.cluster.grant_privkey(VAULT_SECRET_LABEL) if self.tls_available else None
             ),
-            tracing_receivers=self._tracing_receivers_getter(),
+            tracing_receivers=self._tracing_receivers,
             remote_write_endpoints=(
                 self.remote_write_endpoints_getter()
                 if self.remote_write_endpoints_getter

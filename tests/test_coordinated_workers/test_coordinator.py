@@ -75,7 +75,7 @@ def coordinator_charm(request):
                 "my-certificates": {"interface": "certificates"},
                 "my-cluster": {"interface": "cluster"},
                 "my-logging": {"interface": "loki_push_api"},
-                "my-tracing": {"interface": "tracing"},
+                "my-tracing": {"interface": "tracing", "limit": 1},
                 "my-s3": {"interface": "s3"},
             },
             "provides": {
