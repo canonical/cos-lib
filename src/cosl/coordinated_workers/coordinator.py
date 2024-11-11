@@ -303,7 +303,7 @@ class Coordinator(ops.Object):
         self.charm_tracing = TracingEndpointRequirer(
             self._charm,
             relation_name=self._endpoints["charm-tracing"],
-            protocols=["otlp_http", "jaeger_thrift_http"],
+            protocols=["otlp_http"],
         )
         self.workload_tracing = TracingEndpointRequirer(
             self._charm,
