@@ -31,7 +31,7 @@ from urllib.parse import urlparse
 import ops
 import pydantic
 import yaml
-from ops import EventSource, ModelError, Object, ObjectEvents, RelationCreatedEvent
+from ops import EventSource, Object, ObjectEvents, RelationCreatedEvent
 from pydantic import ConfigDict
 from typing_extensions import TypedDict
 
@@ -523,16 +523,7 @@ class ClusterRequirer(Object):
         relation = self.relation
         if relation:
             databag_model = ClusterRequirerAppData(role=",".join(roles))
-            try:
-                databag_model.dump(relation.data[self.model.app])
-            except ModelError as e:
-                if "ERROR permission denied (unauthorized access)" in e.args:
-                    # if we are handling an event prior to 'start', we could be denied write access
-                    # hopefully we can ignore it and trust that it will be retried at the next occasion
-                    log.debug(
-                        "databag dump gave a permission denied error. "
-                        "This could be a transient issue."
-                    )
+            databag_model.dump(relation.data[self.model.app])
 
     def _get_data_from_coordinator(self) -> Optional[ClusterProviderAppData]:
         """Fetch the contents of the doordinator databag."""

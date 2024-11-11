@@ -18,7 +18,7 @@ import ops
 import tenacity
 import yaml
 from ops import MaintenanceStatus, StatusBase
-from ops.model import ActiveStatus, BlockedStatus, WaitingStatus
+from ops.model import ActiveStatus, BlockedStatus, ModelError, WaitingStatus
 from ops.pebble import Check, Layer, PathError, Plan, ProtocolError
 
 from cosl import JujuTopology
@@ -259,19 +259,20 @@ class Worker(ops.Object):
         # we really don't want this code to raise errors, so we blanket catch all.
         try:
             services = self._container.get_services(*layer.services.keys())
-            if services:
-                # avoid vacuous quantification
-                running_status = {name: svc.is_running() for name, svc in services.items()}
-
-                some_stopped = not all(running_status.values())
-                if some_stopped:
-                    stopped = tuple(
-                        name for name, running in running_status.items() if not running
+            if not services:
+                logger.debug("No services found in pebble plan.")
+            else:
+                services_not_running = [
+                    name for name, svc in services.items() if not svc.is_running()
+                ]
+                if services_not_running:
+                    logger.debug(
+                        f"Some services which should be running are not: {services_not_running}."
                     )
-                    logger.info(f"Some services which should be running are not: {stopped}.")
                     return ServiceEndpointStatus.down
+                else:
+                    logger.debug("All pebble services up.")
 
-            logger.info("All pebble services up.")
             # so far as pebble knows all services are up, now let's see if
             # the readiness endpoint confirm that
             return self.check_readiness()
@@ -507,7 +508,19 @@ class Worker(ops.Object):
         self.cluster.publish_unit_address(socket.getfqdn())
         if self._charm.unit.is_leader() and self.roles:
             logger.info(f"publishing roles: {self.roles}")
-            self.cluster.publish_app_roles(self.roles)
+            try:
+                self.cluster.publish_app_roles(self.roles)
+            except ModelError as e:
+                # if we are handling an event prior to 'start', we could be denied write access
+                # hopefully we can ignore it and trust that it will be retried at the next occasion
+                if "ERROR permission denied (unauthorized access)" in e.args:
+                    logger.debug(
+                        "relation-set failed with a permission denied error. "
+                        "This could be a transient issue."
+                    )
+                else:
+                    # let it burn, we clearly don't know what's going on
+                    raise
 
     def _running_worker_config(self) -> Optional[Dict[str, Any]]:
         """Return the worker config as dict, or None if retrieval failed."""
