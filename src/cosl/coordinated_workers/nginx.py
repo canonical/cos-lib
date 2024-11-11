@@ -86,7 +86,7 @@ class Nginx:
             self._container.push(CA_CERT_PATH, ca_cert, make_dirs=True)
 
             # push CA cert to charm container
-            Path(CA_CERT_PATH).mkdir(parents=True, exist_ok=True)
+            Path(CA_CERT_PATH).parent.mkdir(parents=True, exist_ok=True)
             Path(CA_CERT_PATH).write_text(ca_cert)
 
             # FIXME: uncomment as soon as the nginx image contains the ca-certificates package
