@@ -77,6 +77,10 @@ class WorkerError(Exception):
     """Base class for exceptions raised by this module."""
 
 
+class NoReadinessCheckEndpointConfiguredError(Exception):
+    """Internal error when readiness check endpoint is missing."""
+
+
 class ServiceEndpointStatus(Enum):
     """Status of the worker service managed by pebble."""
 
@@ -255,19 +259,26 @@ class Worker(ops.Object):
         # we really don't want this code to raise errors, so we blanket catch all.
         try:
             services = self._container.get_services(*layer.services.keys())
-            running_status = {name: svc.is_running() for name, svc in services.items()}
-            if not all(running_status.values()):
-                if any(running_status.values()):
-                    starting_services = tuple(
+            if services:
+                # avoid vacuous quantification
+                running_status = {name: svc.is_running() for name, svc in services.items()}
+
+                some_stopped = not all(running_status.values())
+                if some_stopped:
+                    stopped = tuple(
                         name for name, running in running_status.items() if not running
                     )
-                    logger.info(
-                        f"Some services which should be running are not: {starting_services}."
-                    )
-                    return ServiceEndpointStatus.starting
+                    logger.info(f"Some services which should be running are not: {stopped}.")
+                    return ServiceEndpointStatus.down
 
-                logger.info("All services are down.")
-                return ServiceEndpointStatus.down
+            logger.info("All pebble services up.")
+            # so far as pebble knows all services are up, now let's see if
+            # the readiness endpoint confirm that
+            return self.check_readiness()
+
+        except NoReadinessCheckEndpointConfiguredError:
+            # assume up
+            return ServiceEndpointStatus.up
 
         except Exception:
             logger.exception(
@@ -276,20 +287,11 @@ class Worker(ops.Object):
             )
             return ServiceEndpointStatus.down
 
-        if not self._readiness_check_endpoint:
-            logger.warning("no readiness check endpoint configured: assuming workload is DOWN.")
-            return ServiceEndpointStatus.down
-
-        return self.check_readiness()
-
     def check_readiness(self) -> ServiceEndpointStatus:
         """If the user has configured a readiness check endpoint, GET it and check the workload status."""
         check_endpoint = self._readiness_check_endpoint
         if not check_endpoint:
-            raise WorkerError(
-                "cannot check readiness without a readiness_check_endpoint configured. "
-                "Pass one to Worker on __init__."
-            )
+            raise NoReadinessCheckEndpointConfiguredError()
 
         try:
             with urllib.request.urlopen(check_endpoint(self)) as response:
@@ -703,10 +705,13 @@ class Worker(ops.Object):
                 # set result to status; will retry unless it's up
                 attempt.retry_state.set_result(self.status is ServiceEndpointStatus.up)
 
-        except WorkerError:
-            #  unable to check worker readiness: no readiness_check_endpoint configured.
-            # this status is already set on the unit so no need to log it
-            pass
+        except NoReadinessCheckEndpointConfiguredError:
+            # collect_unit_status will surface this to the user
+            logger.warning(
+                "could not check worker service readiness: no check endpoint configured. "
+                "Pass one to the Worker."
+            )
+            return True
 
         except Exception:
             logger.exception("unexpected error while attempting to determine worker status")
