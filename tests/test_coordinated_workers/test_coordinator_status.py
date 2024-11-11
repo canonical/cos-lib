@@ -37,7 +37,7 @@ class MyCoordCharm(CharmBase):
                 "logging": "logging",
                 "metrics": "metrics-endpoint",
                 "charm-tracing": "self-charm-tracing",
-                "workload-tracing": "self-workload-tracing"
+                "workload-tracing": "self-workload-tracing",
             },
             nginx_config=lambda _: "nginx config",
             workers_config=lambda _: "worker config",
