@@ -276,6 +276,10 @@ class Worker(ops.Object):
             )
             return ServiceEndpointStatus.down
 
+        if not self._readiness_check_endpoint:
+            logger.warning("no readiness check endpoint configured: assuming workload is DOWN.")
+            return ServiceEndpointStatus.down
+
         return self.check_readiness()
 
     def check_readiness(self) -> ServiceEndpointStatus:
