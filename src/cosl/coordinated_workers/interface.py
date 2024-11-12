@@ -24,7 +24,7 @@ from typing import (
     NamedTuple,
     Optional,
     Set,
-    Tuple,
+    Tuple, Type, TypeVar,
 )
 from urllib.parse import urlparse
 
@@ -32,7 +32,7 @@ import ops
 import pydantic
 import yaml
 from ops import EventSource, Object, ObjectEvents, RelationCreatedEvent
-from pydantic import ConfigDict
+from pydantic import ConfigDict, BaseModel
 from typing_extensions import TypedDict
 
 import cosl
@@ -193,6 +193,9 @@ class ClusterProviderAppData(DatabagModel):
     privkey_secret_id: Optional[str] = None
     s3_tls_ca_chain: Optional[str] = None
 
+    # extra fields, implementation-dependent
+    extra_data: Optional[Any] = None
+
 
 class TLSData(NamedTuple):
     """Section of the cluster data that concerns TLS information."""
@@ -234,16 +237,18 @@ class ClusterProvider(Object):
     on = ClusterProviderEvents()  # type: ignore
 
     def __init__(
-        self,
-        charm: ops.CharmBase,
-        roles: FrozenSet[str],
-        meta_roles: Optional[Mapping[str, Iterable[str]]] = None,
-        key: Optional[str] = None,
-        endpoint: str = DEFAULT_ENDPOINT_NAME,
+            self,
+            charm: ops.CharmBase,
+            roles: FrozenSet[str],
+            meta_roles: Optional[Mapping[str, Iterable[str]]] = None,
+            extra_data_model: Optional[Type[BaseModel]] = None,
+            key: Optional[str] = None,
+            endpoint: str = DEFAULT_ENDPOINT_NAME,
     ):
         super().__init__(charm, key or endpoint)
         self._charm = charm
         self._roles = roles
+        self._extra_data_model = extra_data_model
         self._meta_roles = meta_roles or {}
         self.juju_topology = cosl.JujuTopology.from_charm(self._charm)
 
@@ -275,15 +280,16 @@ class ClusterProvider(Object):
         return secret.get_info().id
 
     def publish_data(
-        self,
-        worker_config: str,
-        ca_cert: Optional[str] = None,
-        server_cert: Optional[str] = None,
-        s3_tls_ca_chain: Optional[str] = None,
-        privkey_secret_id: Optional[str] = None,
-        loki_endpoints: Optional[Dict[str, str]] = None,
-        tracing_receivers: Optional[Dict[str, str]] = None,
-        remote_write_endpoints: Optional[List[RemoteWriteEndpoint]] = None,
+            self,
+            worker_config: str,
+            ca_cert: Optional[str] = None,
+            server_cert: Optional[str] = None,
+            s3_tls_ca_chain: Optional[str] = None,
+            privkey_secret_id: Optional[str] = None,
+            loki_endpoints: Optional[Dict[str, str]] = None,
+            tracing_receivers: Optional[Dict[str, str]] = None,
+            remote_write_endpoints: Optional[List[RemoteWriteEndpoint]] = None,
+            extra_data: Optional[Any] = None
     ) -> None:
         """Publish the config to all related worker clusters."""
         for relation in self._relations:
@@ -297,6 +303,7 @@ class ClusterProvider(Object):
                     tracing_receivers=tracing_receivers,
                     remote_write_endpoints=remote_write_endpoints,
                     s3_tls_ca_chain=s3_tls_ca_chain,
+                    extra_data=self._extra_data_model(**extra_data).model_dump()
                 )
                 local_app_databag.dump(relation.data[self.model.app])
 
@@ -429,20 +436,25 @@ class ClusterProvider(Object):
         return True
 
 
+_DM = TypeVar("_DM", bound=BaseModel)
+
+
 class ClusterRequirer(Object):
     """``-cluster`` requirer endpoint wrapper."""
 
     on = ClusterRequirerEvents()  # type: ignore
 
     def __init__(
-        self,
-        charm: ops.CharmBase,
-        key: Optional[str] = None,
-        endpoint: str = DEFAULT_ENDPOINT_NAME,
+            self,
+            charm: ops.CharmBase,
+            key: Optional[str] = None,
+            extra_data_model: Optional[Type[_DM]] = None,
+            endpoint: str = DEFAULT_ENDPOINT_NAME,
     ):
         super().__init__(charm, key or endpoint)
         self._charm = charm
         self.juju_topology = cosl.JujuTopology.from_charm(self._charm)
+        self._extra_data_model = extra_data_model
 
         relation = self.model.get_relation(endpoint)
         self.relation: Optional[ops.Relation] = (
@@ -541,6 +553,15 @@ class ClusterRequirer(Object):
 
         return data
 
+    def get_extra_fields(self) -> Optional[_DM]:
+        """Retrieve the extra fields set by the provider, if any."""
+        if self.relation:
+            try:
+                return self._extra_data_model(**self._get_data_from_coordinator().extra_data)
+            except DataValidationError as e:
+                log.info(f"invalid databag contents: {e}")
+                return None  # explicit is better than implicit
+
     def get_worker_config(self) -> Dict[str, Any]:
         """Fetch the worker config from the coordinator databag."""
         data = self._get_data_from_coordinator()
@@ -562,7 +583,7 @@ class ClusterRequirer(Object):
             return None
 
         if (
-            not data.ca_cert or not data.server_cert or not data.privkey_secret_id
+                not data.ca_cert or not data.server_cert or not data.privkey_secret_id
         ) and not allow_none:
             return None
 
