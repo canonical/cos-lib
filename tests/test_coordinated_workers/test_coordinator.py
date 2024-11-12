@@ -258,8 +258,8 @@ def test_tracing_receivers_urls(coordinator_state: State, coordinator_charm: ops
         remote_app_data={
             "receivers": json.dumps(
                 [
-                    {"protocol": {"name": "otlp_http", "type": "http"}, "url": "1.2.3.4:4318"},
-                    {"protocol": {"name": "otlp_grpc", "type": "grpc"}, "url": "1.2.3.4:4317"},
+                    {"protocol": {"name": "otlp_http", "type": "http"}, "url": "5.6.7.8:4318"},
+                    {"protocol": {"name": "otlp_grpc", "type": "grpc"}, "url": "5.6.7.8:4317"},
                 ]
             )
         },
@@ -272,8 +272,10 @@ def test_tracing_receivers_urls(coordinator_state: State, coordinator_charm: ops
         ),
     ) as mgr:
         coordinator: Coordinator = mgr.charm.coordinator
-        expected_result = {
+        assert coordinator._charm_tracing_receivers_urls == {
             "otlp_http": "1.2.3.4:4318",
-            "otlp_grpc": "1.2.3.4:4317",
         }
-        assert coordinator._tracing_receivers_urls == expected_result
+        assert coordinator._workload_tracing_receivers_urls == {
+            "otlp_http": "5.6.7.8:4318",
+            "otlp_grpc": "5.6.7.8:4317",
+        }

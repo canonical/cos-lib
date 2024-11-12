@@ -357,16 +357,18 @@ class Coordinator(ops.Object):
     ######################
 
     @property
-    def _tracing_receivers_urls(self) -> Dict[str, str]:
-        """Returns the union of charm and workload enabled receivers' protocols with their corresponding endpoints."""
-        receivers_urls: Dict[str, str] = {}
-        for tracing_type in ["charm_tracing", "workload_tracing"]:
-            tracing = getattr(self, tracing_type)
-            all_endpoints = tracing.get_all_endpoints()
-            if all_endpoints:
-                for receiver in all_endpoints.receivers:
-                    receivers_urls[receiver.protocol.name] = receiver.url
-        return receivers_urls
+    def _charm_tracing_receivers_urls(self) -> Dict[str, str]:
+        """Returns the charm tracing enabled receivers with their corresponding endpoints."""
+        endpoints = self.charm_tracing.get_all_endpoints()
+        receivers = endpoints.receivers if endpoints else ()
+        return {receiver.protocol.name: receiver.url for receiver in receivers}
+
+    @property
+    def _workload_tracing_receivers_urls(self) -> Dict[str, str]:
+        """Returns the workload tracing enabled receivers with their corresponding endpoints."""
+        endpoints = self.workload_tracing.get_all_endpoints()
+        receivers = endpoints.receivers if endpoints else ()
+        return {receiver.protocol.name: receiver.url for receiver in receivers}
 
     @property
     def is_coherent(self) -> bool:
@@ -679,7 +681,8 @@ class Coordinator(ops.Object):
             privkey_secret_id=(
                 self.cluster.grant_privkey(VAULT_SECRET_LABEL) if self.tls_available else None
             ),
-            tracing_receivers=self._tracing_receivers_urls,
+            charm_tracing_receivers=self._charm_tracing_receivers_urls,
+            workload_tracing_receivers=self._workload_tracing_receivers_urls,
             remote_write_endpoints=(
                 self.remote_write_endpoints_getter()
                 if self.remote_write_endpoints_getter
