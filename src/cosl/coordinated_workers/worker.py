@@ -310,8 +310,10 @@ class Worker(ops.Object):
             logger.debug(f"GET {check_endpoint} returned: {raw_out!r}.")
             return ServiceEndpointStatus.starting
 
-        except (HTTPError, ConnectionResetError) as e:
-            logger.debug(f"Error getting readiness endpoint: server not up (yet): {e}")
+        except HTTPError as e:
+            logger.debug(f"Error getting readiness endpoint, server not up (yet): {e}")
+        except ConnectionResetError as e:
+            logger.debug(f"Error getting readiness endpoint, does the specified bucket exist?: {e}")
         except Exception as e:
             logger.exception(f"Unexpected exception getting readiness endpoint: {e}")
 
