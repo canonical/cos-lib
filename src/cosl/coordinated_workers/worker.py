@@ -313,7 +313,9 @@ class Worker(ops.Object):
         except HTTPError as e:
             logger.debug(f"Error getting readiness endpoint, server not up (yet): {e}")
         except ConnectionResetError as e:
-            logger.warning(f"Error getting readiness endpoint (check the workload container logs for details): {e}")
+            logger.warning(
+                f"Error getting readiness endpoint (check the workload container logs for details): {e}"
+            )
         except Exception as e:
             logger.exception(f"Unexpected exception getting readiness endpoint: {e}")
 
