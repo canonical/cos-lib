@@ -511,8 +511,9 @@ class Worker(ops.Object):
             try:
                 self.cluster.publish_app_roles(self.roles)
             except ModelError as e:
-                # if we are handling an event prior to 'start', we could be denied write access
-                # hopefully we can ignore it and trust that it will be retried at the next occasion
+                # if we are handling an event prior to 'install', we could be denied write access
+                # Swallowing the exception here relies on the reconciler pattern - this will be
+                # retried at the next occasion and eventually that'll be after 'install'.
                 if "ERROR permission denied (unauthorized access)" in e.args:
                     logger.debug(
                         "relation-set failed with a permission denied error. "
