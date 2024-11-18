@@ -10,7 +10,10 @@ from src.cosl.coordinated_workers.coordinator import (
     Coordinator,
     S3NotFoundError,
 )
-from src.cosl.coordinated_workers.interface import ClusterRequirerAppData
+from src.cosl.coordinated_workers.interface import (
+    ClusterProvider,
+    ClusterRequirerAppData,
+)
 
 
 @pytest.fixture
@@ -281,3 +284,103 @@ def test_tracing_receivers_urls(
             "otlp_http": "5.6.7.8:4318",
             "otlp_grpc": "5.6.7.8:4317",
         }
+
+
+@pytest.fixture
+def cluster_state():
+    requires_relations = {
+        endpoint: testing.Relation(endpoint=endpoint, interface=interface["interface"])
+        for endpoint, interface in {
+            "my-certificates": {"interface": "certificates"},
+            "my-logging": {"interface": "loki_push_api"},
+            "my-charm-tracing": {"interface": "tracing"},
+            "my-workload-tracing": {"interface": "tracing"},
+        }.items()
+    }
+    requires_relations["my-s3"] = testing.Relation(
+        "my-s3",
+        interface="s3",
+        remote_app_data={
+            "endpoint": "s3",
+            "bucket": "foo-bucket",
+            "access-key": "my-access-key",
+            "secret-key": "my-secret-key",
+        },
+    )
+    requires_relations["cluster_worker0"] = testing.Relation(
+        "my-cluster",
+        remote_app_name="worker0",
+        remote_app_data=ClusterRequirerAppData(role="read").dump(),
+    )
+    requires_relations["cluster_worker1"] = testing.Relation(
+        "my-cluster",
+        remote_app_name="worker1",
+        remote_app_data=ClusterRequirerAppData(role="write").dump(),
+    )
+    requires_relations["cluster_worker2"] = testing.Relation(
+        "my-cluster",
+        remote_app_name="worker2",
+        # remote_app_data=ClusterRequirerAppData(role="backend").dump(),
+    )
+
+    provides_relations = {
+        endpoint: testing.Relation(endpoint=endpoint, interface=interface["interface"])
+        for endpoint, interface in {
+            "my-dashboards": {"interface": "grafana_dashboard"},
+            "my-metrics": {"interface": "prometheus_scrape"},
+        }.items()
+    }
+
+    return testing.State(
+        containers={
+            testing.Container("nginx", can_connect=True),
+            testing.Container("nginx-prometheus-exporter", can_connect=True),
+        },
+        relations=list(requires_relations.values()) + list(provides_relations.values()),
+    )
+
+
+@pytest.fixture()
+def cluster_charm(request):
+    class MyCluster(ops.CharmBase):
+        META = {
+            "name": "foo-app",
+            "requires": {
+                "my-certificates": {"interface": "certificates"},
+                "my-cluster": {"interface": "cluster"},
+                "my-logging": {"interface": "loki_push_api"},
+                "my-charm-tracing": {"interface": "tracing", "limit": 1},
+                "my-workload-tracing": {"interface": "tracing", "limit": 1},
+                "my-s3": {"interface": "s3"},
+            },
+            "provides": {
+                "my-dashboards": {"interface": "grafana_dashboard"},
+                "my-metrics": {"interface": "prometheus_scrape"},
+            },
+            "containers": {
+                "nginx": {"type": "oci-image"},
+                "nginx-prometheus-exporter": {"type": "oci-image"},
+            },
+        }
+
+        def __init__(self, framework: ops.Framework):
+            super().__init__(framework)
+            # Note: Here it is a good idea not to use context mgr because it is "ops aware"
+            self.cluster = ClusterProvider(
+                charm=self,
+                # Roles were take from loki-coordinator-k8s-operator
+                roles=frozenset({"all", "read", "write", "backend"}),
+                endpoint="my-logging",
+            )
+
+    return MyCluster
+
+
+def test_invalid_databag_content(
+    cluster_state: testing.State, cluster_charm: ops.CharmBase, caplog
+):
+    ctx = testing.Context(cluster_charm, meta=cluster_charm.META)
+    with ctx(ctx.on.start(), cluster_state) as manager:
+        cluster = ClusterProvider(manager.charm, roles=frozenset(["all"]), endpoint="my-cluster")
+        cluster.gather_addresses_by_role()
+        assert "invalid databag contents: failed to validate databag:" in caplog.text
