@@ -553,11 +553,16 @@ class Worker(ops.Object):
                         "description": "dead service",
                         "startup": "disabled",  # << this is the critical bit
                         "command": "exit 1",
+                        "override": "replace",  # this is also required
                     }
                     for service_name in services
                 }
             }
         )
+
+        import json
+
+        logger.error(json.dumps(new_layer.to_dict()))
         self._container.add_layer(self._name, new_layer, combine=True)
         self._container.stop(*services)
 
