@@ -532,7 +532,10 @@ class Worker(ops.Object):
         logger.debug("wiped all configs")
 
     def stop(self):
-        """Stop the workload and tell pebble to not restart it."""
+        """Stop the workload and tell pebble to not restart it.
+
+        Assumes that pebble can connect.
+        """
         layer = self.pebble_layer or self._container.get_plan()
         services = layer.services
 
@@ -542,10 +545,20 @@ class Worker(ops.Object):
 
         # modify the layer and set everything to disable autostart
         # as soon as we call _set_pebble_layer again, this will be undone
-        for service in services.values():
-            service.startup = "disabled"
-
-        self._container.add_layer(self._name, layer, combine=True)
+        new_layer = ops.pebble.Layer(
+            {
+                "services": {
+                    service_name: {
+                        "summary": "dead service",
+                        "description": "dead service",
+                        "startup": "disabled",  # << this is the critical bit
+                        "command": "exit 1",
+                    }
+                    for service_name in services
+                }
+            }
+        )
+        self._container.add_layer(self._name, new_layer, combine=True)
         self._container.stop(*services)
 
     def _update_cluster_relation(self) -> None:
