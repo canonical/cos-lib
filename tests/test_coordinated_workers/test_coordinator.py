@@ -10,10 +10,7 @@ from src.cosl.coordinated_workers.coordinator import (
     Coordinator,
     S3NotFoundError,
 )
-from src.cosl.coordinated_workers.interface import (
-    ClusterProvider,
-    ClusterRequirerAppData,
-)
+from src.cosl.coordinated_workers.interface import ClusterRequirerAppData
 
 
 @pytest.fixture
@@ -286,7 +283,19 @@ def test_tracing_receivers_urls(
         }
 
 
-def test_invalid_databag_content(coordinator_charm: ops.CharmBase):
+@pytest.mark.parametrize(
+    "event",
+    (
+        testing.CharmEvents.update_status(),
+        testing.CharmEvents.start(),
+        testing.CharmEvents.install(),
+        testing.CharmEvents.config_changed(),
+    ),
+)
+def test_invalid_databag_content(coordinator_charm: ops.CharmBase, event):
+    # Test Invalid relations databag for ClusterProvider.gather_addresses_by_role
+
+    # GIVEN a coordinator charm with a cluster relation and invalid remote databag contents
     requires_relations = {
         endpoint: testing.Relation(endpoint=endpoint, interface=interface["interface"])
         for endpoint, interface in {
@@ -297,12 +306,17 @@ def test_invalid_databag_content(coordinator_charm: ops.CharmBase):
         }.items()
     }
     requires_relations["cluster_worker0"] = testing.Relation(
-        "my-logging",
+        "my-cluster",
         remote_app_name="worker0",
         remote_app_data=ClusterRequirerAppData(role="read").dump(),
     )
+    requires_relations["cluster_worker1"] = testing.Relation(
+        "my-cluster",
+        remote_app_name="worker1",
+        remote_app_data=ClusterRequirerAppData(role="read").dump(),
+    )
     requires_relations["cluster_worker2"] = testing.Relation(
-        "my-logging",
+        "my-cluster",
         remote_app_name="worker2",
     )
 
@@ -322,8 +336,11 @@ def test_invalid_databag_content(coordinator_charm: ops.CharmBase):
         relations=list(requires_relations.values()) + list(provides_relations.values()),
     )
 
+    # WHEN: the coordinator processes any event
     ctx = testing.Context(coordinator_charm, meta=coordinator_charm.META)
-    with ctx(ctx.on.start(), invalid_databag_state) as manager:
-        cluster = ClusterProvider(manager.charm, roles=frozenset(["all"]), endpoint="my-logging")
+    with ctx(event, invalid_databag_state) as manager:
+        cluster = manager.charm.coordinator.cluster
+        # THEN the coordinator sets unit to blocked since the cluster is inconsistent with the missing relation.
         cluster.gather_addresses_by_role()
-        assert cluster.model.unit.status == ops.UnknownStatus()
+        manager.run()
+    assert cluster.model.unit.status == ops.BlockedStatus("[consistency] Cluster inconsistent.")
