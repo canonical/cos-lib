@@ -753,6 +753,7 @@ def test_worker_stop_all_services_if_not_ready(tmp_path):
     cfg.write_text("some: yaml")
     container = testing.Container(
         "foo",
+        layers={"base": MyCharm.layer},
         can_connect=True,
         mounts={"local": testing.Mount(location=CONFIG_FILE, source=cfg)},
         execs={

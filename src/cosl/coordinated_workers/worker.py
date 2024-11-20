@@ -536,34 +536,18 @@ class Worker(ops.Object):
 
         Assumes that pebble can connect.
         """
-        layer = self.pebble_layer or self._container.get_plan()
-        services = layer.services
-
-        if not services:
-            logger.warning("nothing to stop: layer has no services")
-            return
-
-        # modify the layer and set everything to disable autostart
-        # as soon as we call _set_pebble_layer again, this will be undone
-        new_layer = ops.pebble.Layer(
-            {
-                "services": {
-                    service_name: {
-                        "summary": "dead service",
-                        "description": "dead service",
-                        "startup": "disabled",  # << this is the critical bit
-                        "command": "exit 1",
-                        "override": "replace",  # this is also required
-                    }
-                    for service_name in services
-                }
-            }
+        # we might be unable to retrieve self.pebble_layer if something goes wrong generating it
+        # for example because we're being torn down and the environment is being weird
+        services = tuple(
+            self.pebble_layer.services
+            if self.pebble_layer
+            else self._container.get_plan().services
         )
 
-        import json
+        if not services:
+            logger.warning("nothing to stop: no services found in layer or plan")
+            return
 
-        logger.error(json.dumps(new_layer.to_dict()))
-        self._container.add_layer(self._name, new_layer, combine=True)
         self._container.stop(*services)
 
     def _update_cluster_relation(self) -> None:
