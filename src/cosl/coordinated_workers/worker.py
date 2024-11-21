@@ -89,6 +89,10 @@ class ServiceEndpointStatus(Enum):
     down = "down"
 
 
+class CharmTracingTLSConfigurationError(Exception):
+    """Raised when we cannot configure charm tracing properly because we don't have a cert."""
+
+
 class Worker(ops.Object):
     """Charming worker."""
 
@@ -193,6 +197,11 @@ class Worker(ops.Object):
         )
         # holistic update logic, aka common exit hook
         self._reconcile()
+
+        try:
+            self._charm_tracing_endpoint, self._charm_tracing_cert = self.charm_tracing_config()
+        except CharmTracingTLSConfigurationError:
+            self._charm_tracing_endpoint, self._charm_tracing_cert = None, None
 
         # Event listeners
         self.framework.observe(self._charm.on.collect_unit_status, self._on_collect_status)
@@ -340,6 +349,18 @@ class Worker(ops.Object):
             statuses.append(BlockedStatus("Missing relation to a coordinator charm"))
         elif not self.cluster.relation:
             statuses.append(WaitingStatus("Cluster relation not ready"))
+
+        try:
+            self._charm_tracing_endpoint, self._charm_tracing_cert = self.charm_tracing_config()
+        except CharmTracingTLSConfigurationError:
+            # this issue may arise if the charm has processed tracing-changed
+            # (and received a new https endpoint for tracing) BEFORE it has processed the
+            # tls-joined events and received a cert.
+            # this could be a waiting status, but if the user actually
+            # forgot to integrate over certificates, then we'll never stop waiting.
+            statuses.append(BlockedStatus("Charm tracing offline: waiting for TLS certs."
+                                          "This issue might resolve itself."))
+
         if not self._worker_config or not self._running_worker_config():
             statuses.append(WaitingStatus("Waiting for coordinator to publish a config"))
         if not self.roles:
@@ -779,7 +800,7 @@ class Worker(ops.Object):
 
         if is_https:
             if server_ca_cert is None:
-                raise RuntimeError(
+                raise CharmTracingTLSConfigurationError(
                     "Cannot send traces to an https endpoint without a certificate."
                 )
             elif not ROOT_CA_CERT_PATH.exists():
