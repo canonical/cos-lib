@@ -1,9 +1,11 @@
 import dataclasses
 import json
+from unittest.mock import patch
 
 import ops
 import pytest
-from ops import testing
+from cosl.coordinated_workers.interface import ClusterRemovedEvent, DataValidationError
+from ops import testing, RelationChangedEvent
 
 from src.cosl.coordinated_workers.coordinator import (
     ClusterRolesConfig,
@@ -11,6 +13,7 @@ from src.cosl.coordinated_workers.coordinator import (
     S3NotFoundError,
 )
 from src.cosl.interfaces.cluster import ClusterRequirerAppData
+from tests.test_coordinated_workers.test_worker import MyCharm
 
 
 @pytest.fixture
@@ -344,3 +347,72 @@ def test_invalid_databag_content(coordinator_charm: ops.CharmBase, event):
         cluster.gather_addresses_by_role()
         manager.run()
     assert cluster.model.unit.status == ops.BlockedStatus("[consistency] Cluster inconsistent.")
+
+
+@patch('cosl.coordinated_workers.interface.ClusterProviderAppData.load',
+       side_effect=DataValidationError("Mock error"))
+def test_invalid_coordinator_databag(mock_databag_load, coordinator_charm: ops.CharmBase, coordinator_state):
+    # Test that when a relation changes and the relation app data is invalid
+    #   the worker emits a ClusterRemovedEvent
+
+    # WHEN you define a properly configured charm
+    ctx = testing.Context(
+        MyCharm,
+        meta={
+            "name": "foo",
+            "requires": {"cluster": {"interface": "cluster"}},
+            "containers": {"foo": {"type": "oci-image"}},
+        },
+        config={"options": {"role-all": {"type": "boolean", "default": True}}},
+    )
+
+    # AND the relation changes
+    # IF the relation data is invalid (forced by the patched Exception)
+    relation = testing.Relation(
+        "cluster",
+        remote_app_data={"worker_config": json.dumps("some: yaml")},
+    )
+
+    # THEN the charm emits a ClusterRemovedEvent
+    with ctx(ctx.on.relation_changed(relation),
+             testing.State(containers={testing.Container("foo", can_connect=True)},
+                           relations={relation})) as manager:
+        manager.run()
+
+    assert len(ctx.emitted_events) == 2
+    assert isinstance(ctx.emitted_events[0], RelationChangedEvent)
+    assert isinstance(ctx.emitted_events[1], ClusterRemovedEvent)
+
+
+@patch('cosl.coordinated_workers.interface.ClusterRequirerUnitData.load',
+       side_effect=DataValidationError("Mock error"))
+def test_invalid_unit_databag(mock_databag_load, coordinator_charm: ops.CharmBase, coordinator_state):
+    # Test that when a relation_changed event is received and the unit configuration is invalid
+    #   then the charm does not emit a ClusterRemoved event
+
+    # WHEN you define a properly configured charm
+    ctx = testing.Context(
+        MyCharm,
+        meta={
+            "name": "foo",
+            "requires": {"cluster": {"interface": "cluster"}},
+            "containers": {"foo": {"type": "oci-image"}},
+        },
+        config={"options": {"role-all": {"type": "boolean", "default": True}}},
+    )
+
+    # AND the relation changes
+    # IF the relation data is invalid (forced by the patched Exception)
+    relation = testing.Relation(
+        "cluster",
+        local_unit_data={"new": "config"},
+    )
+
+    # THEN the charm only emits a RelationChangedEvent
+    with ctx(ctx.on.relation_changed(relation),
+             testing.State(containers={testing.Container("foo", can_connect=True)},
+                           relations={relation})) as manager:
+        manager.run()
+
+    assert len(ctx.emitted_events) == 1
+    assert isinstance(ctx.emitted_events[0], RelationChangedEvent)
