@@ -7,6 +7,7 @@ import ops
 import pytest
 import yaml
 from ops import testing
+from scenario.errors import UncaughtCharmError
 
 from cosl.coordinated_workers.worker import (
     CERT_FILE,
@@ -16,7 +17,6 @@ from cosl.coordinated_workers.worker import (
     S3_TLS_CA_CHAIN_FILE,
     Worker,
 )
-from scenario.errors import UncaughtCharmError
 from tests.test_coordinated_workers.test_worker_status import k8s_patch
 
 
@@ -777,7 +777,7 @@ def test_worker_stop_all_services_if_not_ready(tmp_path):
     ]
 
 
-@patch('socket.getfqdn')
+@patch("socket.getfqdn")
 def test_invalid_url(mock_socket):
     # Test that when socket returns an invalid url as a Fully Qualified Domain Name,
     #   ClusterRequirer.publish_unit_address raises a ValueError exception
@@ -795,7 +795,7 @@ def test_invalid_url(mock_socket):
 
     # AND ClusterRequirer is passed an invalid url
     mock_socket = mock_socket.return_value
-    mock_socket = '?invalid-url[]'
+    mock_socket = "?invalid-url[]"
 
     # IF the charm executes any event
     # THEN the charm raises an error with the appropriate cause
@@ -815,10 +815,7 @@ def test_invalid_url(mock_socket):
             {"url": "test-url.com"},
         ),
         (
-            {
-                "charm_tracing_receivers": json.dumps(None),
-                "worker_config": json.dumps("test")
-            },
+            {"charm_tracing_receivers": json.dumps(None), "worker_config": json.dumps("test")},
             {},
         ),
     ),
@@ -843,8 +840,8 @@ def test_get_charm_tracing_receivers(remote_databag, expected):
         remote_app_data=remote_databag,
     )
     with ctx(
-            ctx.on.relation_changed(relation),
-            testing.State(containers={container}, relations={relation}),
+        ctx.on.relation_changed(relation),
+        testing.State(containers={container}, relations={relation}),
     ) as mgr:
         charm = mgr.charm
         mgr.run()
@@ -855,20 +852,17 @@ def test_get_charm_tracing_receivers(remote_databag, expected):
 @pytest.mark.parametrize(
     "remote_databag, expected",
     (
-            (
-                    {
-                        "workload_tracing_receivers": json.dumps({"url": "test-url.com"}),
-                        "worker_config": json.dumps("test"),
-                    },
-                    {"url": "test-url.com"},
-            ),
-            (
-                    {
-                        "workload_tracing_receivers": json.dumps(None),
-                        "worker_config": json.dumps("test")
-                    },
-                    {},
-            ),
+        (
+            {
+                "workload_tracing_receivers": json.dumps({"url": "test-url.com"}),
+                "worker_config": json.dumps("test"),
+            },
+            {"url": "test-url.com"},
+        ),
+        (
+            {"workload_tracing_receivers": json.dumps(None), "worker_config": json.dumps("test")},
+            {},
+        ),
     ),
 )
 def test_get_workload_tracing_receivers(remote_databag, expected):
@@ -891,8 +885,8 @@ def test_get_workload_tracing_receivers(remote_databag, expected):
         remote_app_data=remote_databag,
     )
     with ctx(
-            ctx.on.relation_changed(relation),
-            testing.State(containers={container}, relations={relation}),
+        ctx.on.relation_changed(relation),
+        testing.State(containers={container}, relations={relation}),
     ) as mgr:
         charm = mgr.charm
         mgr.run()
