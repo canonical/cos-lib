@@ -358,8 +358,12 @@ class Worker(ops.Object):
             # tls-joined events and received a cert.
             # this could be a waiting status, but if the user actually
             # forgot to integrate over certificates, then we'll never stop waiting.
-            statuses.append(BlockedStatus("Charm tracing offline: waiting for TLS certs."
-                                          "This issue might resolve itself."))
+            statuses.append(
+                BlockedStatus(
+                    "Charm tracing offline: waiting for TLS certs."
+                    "This issue might resolve itself."
+                )
+            )
 
         if not self._worker_config or not self._running_worker_config():
             statuses.append(WaitingStatus("Waiting for coordinator to publish a config"))
