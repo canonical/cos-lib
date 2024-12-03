@@ -8,7 +8,18 @@ See https://github.com/canonical/charm-relation-interfaces/pull/207 for the inte
 # TODO update when pr merged
 """
 
-import collections
+
+# FIXME: the interfaces import (because it's a git dep perhaps?)
+#  can't be type-checked, which breaks everything
+# pyright: reportMissingImports=false
+# pyright: reportUntypedBaseClass=false
+# pyright: reportUnknownLambdaType=false
+# pyright: reportUnknownMemberType=false
+# pyright: reportUnknownVariableType=false
+# pyright: reportUnknownArgumentType=false
+# pyright: reportUnknownParameterType=false
+
+
 import json
 import logging
 from itertools import chain
@@ -19,7 +30,10 @@ from typing import (
 )
 
 import ops
-from interfaces.grafana_datasource_exchange.v0.schema import GrafanaSourceAppData, GrafanaDatasource
+from interfaces.grafana_datasource_exchange.v0.schema import (
+    GrafanaDatasource,
+    GrafanaSourceAppData,
+)
 from ops import CharmBase
 from typing_extensions import TypedDict
 
@@ -33,12 +47,13 @@ DEFAULT_REQUIRE_ENDPOINT_NAME = "require-ds-exchange"
 DS_EXCHANGE_INTERFACE_NAME = "grafana_datasource_exchange"
 
 
-class DSExchangeAppData(cosl.interfaces.utils._DatabagModelV2, GrafanaSourceAppData):
+class DSExchangeAppData(cosl.interfaces.utils.DatabagModelV2, GrafanaSourceAppData):
     """App databag schema for both sides of this interface."""
 
 
 class DatasourceDict(TypedDict):
     """Raw datasource information."""
+
     type: str
     uid: str
 
@@ -49,8 +64,10 @@ class EndpointValidationError(ValueError):
 
 def _validate_endpoints(charm: CharmBase, provider_endpoint: str, requirer_endpoint: str):
     meta = charm.meta
-    for endpoint, source in ((provider_endpoint, meta.provides),
-                             (requirer_endpoint, meta.requires)):
+    for endpoint, source in (
+        (provider_endpoint, meta.provides),
+        (requirer_endpoint, meta.requires),
+    ):
         if endpoint not in source:
             raise EndpointValidationError(f"endpoint {endpoint!r} not declared in charm metadata")
         interface_name = source[endpoint].interface_name
@@ -65,19 +82,18 @@ class DatasourceExchange:
     """``grafana_datasource_exchange`` interface endpoint wrapper (provider AND requirer)."""
 
     def __init__(
-            self,
-            charm: ops.CharmBase,
-            *,
-            provider_endpoint: str = DEFAULT_PROVIDE_ENDPOINT_NAME,
-            requirer_endpoint: str = DEFAULT_REQUIRE_ENDPOINT_NAME,
+        self,
+        charm: ops.CharmBase,
+        *,
+        provider_endpoint: str = DEFAULT_PROVIDE_ENDPOINT_NAME,
+        requirer_endpoint: str = DEFAULT_REQUIRE_ENDPOINT_NAME,
     ):
         self._charm = charm
         _validate_endpoints(charm, provider_endpoint, requirer_endpoint)
 
         # gather all relations, provider or requirer
         all_relations = chain(
-            charm.model.relations[provider_endpoint],
-            charm.model.relations[requirer_endpoint]
+            charm.model.relations[provider_endpoint], charm.model.relations[requirer_endpoint]
         )
 
         # filter out some common unhappy relation states
@@ -91,7 +107,10 @@ class DatasourceExchange:
         This operation is leader-only.
         """
         # sort by UID to prevent endless relation-changed cascades if this keeps flapping
-        app_data = DSExchangeAppData(datasources=json.dumps(sorted(raw_datasources, key=lambda raw_ds: raw_ds['uid'])))
+        encoded_datasources = json.dumps(sorted(raw_datasources, key=lambda raw_ds: raw_ds["uid"]))
+        app_data = DSExchangeAppData(
+            datasources=encoded_datasources  # type: ignore[reportCallIssue]
+        )
 
         for relation in self._relations:
             app_data.dump(relation.data[self._charm.app])
@@ -102,7 +121,6 @@ class DatasourceExchange:
 
         This operation is leader-only.
         """
-
         datasources: List[GrafanaDatasource] = []
 
         for relation in self._relations:

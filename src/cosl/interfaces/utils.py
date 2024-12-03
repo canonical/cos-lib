@@ -87,7 +87,7 @@ class DatabagModel(pydantic.BaseModel):
 #  It becomes much easier to work with Json fields and the databagmodel class becomes much simpler.
 #  We should rewrite the cluster implementation to use this class,
 #  and replace the original DatabagModel with it
-class _DatabagModelV2(pydantic.BaseModel):
+class DatabagModelV2(pydantic.BaseModel):
     """Base databag model."""
 
     model_config = ConfigDict(

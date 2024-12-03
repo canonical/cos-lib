@@ -90,6 +90,7 @@ classmethod-decorators = ["classmethod", "pydantic.validator"]
 
 [tool.pyright]
 include = ["src"]
+
 extraPaths = ["lib", "src/cosl"]
 pythonVersion = "3.8"
 pythonPlatform = "All"
