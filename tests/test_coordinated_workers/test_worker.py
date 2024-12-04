@@ -794,8 +794,7 @@ def test_invalid_url(mock_socket):
     )
 
     # AND ClusterRequirer is passed an invalid url
-    mock_socket = mock_socket.return_value
-    mock_socket = "?invalid-url[]"
+    mock_socket.return_value = "http://www.invalid-]url.com"
 
     # IF the charm executes any event
     # THEN the charm raises an error with the appropriate cause
