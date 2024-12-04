@@ -55,7 +55,7 @@ def test_ds_submit():
             self.ds_exchange = DatasourceExchange(
                 self, provider_endpoint="foo", requirer_endpoint="bar"
             )
-            self.ds_exchange.submit([{"type": "tempo", "uid": "123"}])
+            self.ds_exchange.publish([{"type": "tempo", "uid": "123"}])
 
     ctx = Context(MyCharm, meta=MyCharm.META)
 

@@ -40,7 +40,7 @@ from typing_extensions import TypedDict
 import cosl.interfaces.utils
 from cosl.interfaces.utils import DataValidationError
 
-log = logging.getLogger("_cluster")
+log = logging.getLogger("datasource_exchange")
 
 DEFAULT_PROVIDE_ENDPOINT_NAME = "provide-ds-exchange"
 DEFAULT_REQUIRE_ENDPOINT_NAME = "require-ds-exchange"
@@ -104,13 +104,13 @@ class DatasourceExchange:
             rel for rel in all_relations if (rel.app and rel.data)
         ]
 
-    def submit(self, raw_datasources: Iterable[DatasourceDict]):
+    def publish(self, datasources: Iterable[DatasourceDict]):
         """Submit these datasources to all remotes.
 
         This operation is leader-only.
         """
         # sort by UID to prevent endless relation-changed cascades if this keeps flapping
-        encoded_datasources = json.dumps(sorted(raw_datasources, key=lambda raw_ds: raw_ds["uid"]))
+        encoded_datasources = json.dumps(sorted(datasources, key=lambda raw_ds: raw_ds["uid"]))
         app_data = DSExchangeAppData(
             datasources=encoded_datasources  # type: ignore[reportCallIssue]
         )
