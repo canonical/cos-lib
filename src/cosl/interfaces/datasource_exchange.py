@@ -26,7 +26,7 @@ from itertools import chain
 from typing import (
     Iterable,
     List,
-    Tuple,
+    Tuple, Optional,
 )
 
 import ops
@@ -85,10 +85,13 @@ class DatasourceExchange:
         self,
         charm: ops.CharmBase,
         *,
-        provider_endpoint: str = DEFAULT_PROVIDE_ENDPOINT_NAME,
-        requirer_endpoint: str = DEFAULT_REQUIRE_ENDPOINT_NAME,
+        provider_endpoint: Optional[str] = None,
+        requirer_endpoint: Optional[str] = None,
     ):
         self._charm = charm
+        provider_endpoint = provider_endpoint or DEFAULT_PROVIDE_ENDPOINT_NAME
+        requirer_endpoint = requirer_endpoint or DEFAULT_REQUIRE_ENDPOINT_NAME
+
         _validate_endpoints(charm, provider_endpoint, requirer_endpoint)
 
         # gather all relations, provider or requirer
