@@ -26,7 +26,8 @@ from itertools import chain
 from typing import (
     Iterable,
     List,
-    Tuple, Optional,
+    Optional,
+    Tuple,
 )
 
 import ops
