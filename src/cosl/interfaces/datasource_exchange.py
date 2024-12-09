@@ -43,8 +43,6 @@ from cosl.interfaces.utils import DataValidationError
 
 log = logging.getLogger("datasource_exchange")
 
-DEFAULT_PROVIDE_ENDPOINT_NAME = "provide-ds-exchange"
-DEFAULT_REQUIRE_ENDPOINT_NAME = "require-ds-exchange"
 DS_EXCHANGE_INTERFACE_NAME = "grafana_datasource_exchange"
 
 
@@ -57,18 +55,23 @@ class DatasourceDict(TypedDict):
 
     type: str
     uid: str
+    grafana_uid: str
 
 
 class EndpointValidationError(ValueError):
     """Raised if an endpoint name is invalid."""
 
 
-def _validate_endpoints(charm: CharmBase, provider_endpoint: str, requirer_endpoint: str):
+def _validate_endpoints(
+    charm: CharmBase, provider_endpoint: Optional[str], requirer_endpoint: Optional[str]
+):
     meta = charm.meta
     for endpoint, source in (
         (provider_endpoint, meta.provides),
         (requirer_endpoint, meta.requires),
     ):
+        if endpoint is None:
+            continue
         if endpoint not in source:
             raise EndpointValidationError(f"endpoint {endpoint!r} not declared in charm metadata")
         interface_name = source[endpoint].interface_name
@@ -77,6 +80,11 @@ def _validate_endpoints(charm: CharmBase, provider_endpoint: str, requirer_endpo
                 f"endpoint {endpoint} has unexpected interface {interface_name!r} "
                 f"(should be {DS_EXCHANGE_INTERFACE_NAME})."
             )
+    if not provider_endpoint and not requirer_endpoint:
+        raise EndpointValidationError(
+            "This charm should implement either a requirer or a provider (or both)"
+            "endpoint for `grafana-datasource-exchange`."
+        )
 
 
 class DatasourceExchange:
@@ -86,18 +94,16 @@ class DatasourceExchange:
         self,
         charm: ops.CharmBase,
         *,
-        provider_endpoint: Optional[str] = None,
-        requirer_endpoint: Optional[str] = None,
+        provider_endpoint: Optional[str],
+        requirer_endpoint: Optional[str],
     ):
         self._charm = charm
-        provider_endpoint = provider_endpoint or DEFAULT_PROVIDE_ENDPOINT_NAME
-        requirer_endpoint = requirer_endpoint or DEFAULT_REQUIRE_ENDPOINT_NAME
-
         _validate_endpoints(charm, provider_endpoint, requirer_endpoint)
 
         # gather all relations, provider or requirer
         all_relations = chain(
-            charm.model.relations[provider_endpoint], charm.model.relations[requirer_endpoint]
+            charm.model.relations.get(provider_endpoint, ()),
+            charm.model.relations.get(requirer_endpoint, ()),
         )
 
         # filter out some common unhappy relation states

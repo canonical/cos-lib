@@ -6,39 +6,94 @@ from ops import CharmBase, Framework
 from scenario import Context, Relation, State
 from scenario.errors import UncaughtCharmError
 
-from cosl.interfaces.datasource_exchange import DatasourceExchange, DSExchangeAppData
+from cosl.interfaces.datasource_exchange import (
+    DatasourceExchange,
+    DSExchangeAppData,
+    EndpointValidationError,
+)
 
 
 @pytest.mark.parametrize(
-    "meta, invalid_reason",
+    "meta, declared",
     (
+        (
+            {},
+            (None, None),
+        ),
         (
             {
                 "requires": {"boo": {"interface": "gibberish"}},
                 "provides": {"far": {"interface": "grafana_datasource_exchange"}},
             },
-            "unexpected interface 'gibberish'",
+            ("far", "boo"),
         ),
         (
             {
                 "requires": {"boo": {"interface": "grafana_datasource_exchange"}},
                 "provides": {"goo": {"interface": "grafana_datasource_exchange"}},
             },
-            "endpoint 'far' not declared",
+            ("far", "boo"),
         ),
     ),
 )
-def test_endpoint_validation(meta, invalid_reason):
+def test_endpoint_validation_failure(meta, declared):
+    # GIVEN a charm with this metadata and declared provider/requirer endpoints
+
     class BadCharm(CharmBase):
         def __init__(self, framework: Framework):
             super().__init__(framework)
+            prov, req = declared
             self.ds_exchange = DatasourceExchange(
-                self, provider_endpoint="far", requirer_endpoint="boo"
+                self, provider_endpoint=prov, requirer_endpoint=req
             )
 
-    with pytest.raises(UncaughtCharmError, match=invalid_reason):
+    # WHEN any event is processed
+    with pytest.raises(UncaughtCharmError) as e:
         ctx = Context(BadCharm, meta={"name": "bob", **meta})
         ctx.run(ctx.on.update_status(), State())
+
+    # THEN we raise an EndpointValidationError
+    assert isinstance(e.value.__cause__, EndpointValidationError)
+
+
+@pytest.mark.parametrize(
+    "meta, declared",
+    (
+        (
+            {
+                "requires": {"boo": {"interface": "grafana_datasource_exchange"}},
+                "provides": {"far": {"interface": "grafana_datasource_exchange"}},
+            },
+            ("far", "boo"),
+        ),
+        (
+            {
+                "provides": {"far": {"interface": "grafana_datasource_exchange"}},
+            },
+            ("far", None),
+        ),
+        (
+            {
+                "requires": {"boo": {"interface": "grafana_datasource_exchange"}},
+            },
+            (None, "boo"),
+        ),
+    ),
+)
+def test_endpoint_validation_ok(meta, declared):
+    # GIVEN a charm with this metadata and declared provider/requirer endpoints
+    class BadCharm(CharmBase):
+        def __init__(self, framework: Framework):
+            super().__init__(framework)
+            prov, req = declared
+            self.ds_exchange = DatasourceExchange(
+                self, provider_endpoint=prov, requirer_endpoint=req
+            )
+
+    # WHEN any event is processed
+    ctx = Context(BadCharm, meta={"name": "bob", **meta})
+    ctx.run(ctx.on.update_status(), State())
+    # THEN no exception is raised
 
 
 def test_ds_submit():
@@ -47,15 +102,14 @@ def test_ds_submit():
         META = {
             "name": "robbie",
             "provides": {"foo": {"interface": "grafana_datasource_exchange"}},
-            "requires": {"bar": {"interface": "grafana_datasource_exchange"}},
         }
 
         def __init__(self, framework: Framework):
             super().__init__(framework)
             self.ds_exchange = DatasourceExchange(
-                self, provider_endpoint="foo", requirer_endpoint="bar"
+                self, provider_endpoint="foo", requirer_endpoint=None
             )
-            self.ds_exchange.publish([{"type": "tempo", "uid": "123"}])
+            self.ds_exchange.publish([{"type": "tempo", "uid": "123", "grafana_uid": "123123"}])
 
     ctx = Context(MyCharm, meta=MyCharm.META)
 
@@ -91,11 +145,11 @@ def test_ds_receive():
     ctx = Context(MyCharm, meta=MyCharm.META)
 
     ds_requirer_in = [
-        {"type": "c", "uid": "3"},
-        {"type": "a", "uid": "1"},
-        {"type": "b", "uid": "2"},
+        {"type": "c", "uid": "3", "grafana_uid": "4"},
+        {"type": "a", "uid": "1", "grafana_uid": "5"},
+        {"type": "b", "uid": "2", "grafana_uid": "6"},
     ]
-    ds_provider_in = [{"type": "d", "uid": "4"}]
+    ds_provider_in = [{"type": "d", "uid": "4", "grafana_uid": "7"}]
 
     dse_requirer_in = Relation(
         "foo",

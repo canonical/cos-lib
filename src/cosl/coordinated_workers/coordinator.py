@@ -162,8 +162,8 @@ _EndpointMapping = TypedDict(
         "metrics": str,
         "charm-tracing": str,
         "workload-tracing": str,
-        "provide-datasource-exchange": str,
-        "require-datasource-exchange": str,
+        "send-datasource": Optional[str],
+        "receive-datasource": Optional[str],
         "s3": str,
     },
     total=True,
@@ -282,8 +282,8 @@ class Coordinator(ops.Object):
         self.s3_requirer = S3Requirer(self._charm, self._endpoints["s3"])
         self.datasource_exchange = DatasourceExchange(
             self._charm,
-            provider_endpoint=self._endpoints["provide-datasource-exchange"],
-            requirer_endpoint=self._endpoints["require-datasource-exchange"],
+            provider_endpoint=self._endpoints.get("send-datasource", None),
+            requirer_endpoint=self._endpoints.get("receive-datasource", None),
         )
 
         self._grafana_dashboards = GrafanaDashboardProvider(
