@@ -1,11 +1,11 @@
 import json
 
 import pytest
-from interfaces.grafana_datasource_exchange.v0.schema import GrafanaDatasource
 from ops import CharmBase, Framework
 from scenario import Context, Relation, State
 from scenario.errors import UncaughtCharmError
 
+from cosl.interfaces.cri_schemas.grafana_datasource_exchange.v0.schema import GrafanaDatasource
 from cosl.interfaces.datasource_exchange import (
     DatasourceExchange,
     DSExchangeAppData,

@@ -17,6 +17,7 @@ dependencies = [
     "pydantic",
     "tenacity",
     "jsonschema",
+    "cryptography",
     "PyYAML",
     "typing-extensions",
     "lightkube>=v0.15.4",
