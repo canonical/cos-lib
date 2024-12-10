@@ -7,11 +7,11 @@
 This to work around the fact that charm-relation-interfaces is not on pypi.
 """
 
-from pathlib import Path
 import shlex
+import tempfile
+from pathlib import Path
 from shutil import rmtree
 from subprocess import Popen
-import tempfile
 
 REQUIRED_INTERFACES = (
     "grafana_datasource_exchange/v0",
@@ -28,10 +28,14 @@ def cleanup_root():
             rmtree(folder)
 
 
-def download_schemas(branch:str):
+def download_schemas(branch: str):
     print("cloning CRI...")
     tempdir = tempfile.mkdtemp()
-    proc = Popen(shlex.split(f"git clone https://github.com/canonical/charm-relation-interfaces.git --branch {branch} --quiet --depth 1 {tempdir}"))
+    proc = Popen(
+        shlex.split(
+            f"git clone https://github.com/canonical/charm-relation-interfaces.git --branch {branch} --quiet --depth 1 {tempdir}"
+        )
+    )
     proc.wait()
 
     print("copying schemas...")
@@ -45,10 +49,10 @@ def download_schemas(branch:str):
     print("all done! don't forget to `git add CRI_SCHEMAS_PATH`.")
 
 
-def main(*, branch:str):
+def main(*, branch: str):
     cleanup_root()
     download_schemas(branch=branch)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main(branch="main")
