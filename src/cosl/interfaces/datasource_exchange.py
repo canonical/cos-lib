@@ -30,14 +30,11 @@ from typing import (
 )
 
 import ops
-from interfaces.grafana_datasource_exchange.v0.schema import (
-    GrafanaDatasource,
-    GrafanaSourceAppData,
-)
 from ops import CharmBase
 from typing_extensions import TypedDict
 
 import cosl.interfaces.utils
+from cosl.interfaces.cri_schemas.grafana_datasource_exchange.v0.schema import GrafanaSourceAppData, GrafanaDatasource
 from cosl.interfaces.utils import DataValidationError
 
 log = logging.getLogger("datasource_exchange")
