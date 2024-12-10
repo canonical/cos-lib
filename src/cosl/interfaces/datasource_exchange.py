@@ -4,8 +4,8 @@
 
 """Shared utilities for the inter-coordinator "grafana_datasource_exchange" interface.
 
-See https://github.com/canonical/charm-relation-interfaces/pull/207 for the interface specification.
-# TODO update when pr merged
+See https://github.com/canonical/charm-relation-interfaces/tree/main/interfaces/grafana_datasource_exchange/v0
+for the interface specification.
 """
 
 
@@ -22,7 +22,6 @@ See https://github.com/canonical/charm-relation-interfaces/pull/207 for the inte
 
 import json
 import logging
-from itertools import chain
 from typing import (
     Iterable,
     List,
@@ -101,10 +100,11 @@ class DatasourceExchange:
         _validate_endpoints(charm, provider_endpoint, requirer_endpoint)
 
         # gather all relations, provider or requirer
-        all_relations = chain(
-            charm.model.relations.get(provider_endpoint, ()),
-            charm.model.relations.get(requirer_endpoint, ()),
-        )
+        all_relations = []
+        if provider_endpoint:
+            all_relations.extend(charm.model.relations.get(provider_endpoint, ()))
+        if requirer_endpoint:
+            all_relations.extend(charm.model.relations.get(requirer_endpoint, ()))
 
         # filter out some common unhappy relation states
         self._relations: List[ops.Relation] = [

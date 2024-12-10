@@ -96,7 +96,7 @@ def test_endpoint_validation_ok(meta, declared):
     # THEN no exception is raised
 
 
-def test_ds_submit():
+def test_ds_publish():
     # GIVEN a charm with a single datasource_exchange relation
     class MyCharm(CharmBase):
         META = {
