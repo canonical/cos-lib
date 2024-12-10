@@ -57,7 +57,7 @@ target-version = ["py38"]
 # Linting tools configuration
 [tool.ruff]
 line-length = 99
-extend-exclude = ["__pycache__", "*.egg_info", "src/cosl/interfaces/cri_schemas/*"]
+extend-exclude = ["__pycache__", "*.egg_info"]
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "C", "N", "D", "I001"]
