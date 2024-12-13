@@ -3,6 +3,7 @@
 
 import json
 import re
+import textwrap
 import unittest
 import uuid
 from pathlib import Path
@@ -63,6 +64,48 @@ class TestEndpointProvider(unittest.TestCase):
             ),
         )
         ri.add_path(Path(__file__).resolve().parent / "promql_rules" / "prometheus_alert_rules")
+
+        alerts = ri.as_dict()
+        self.assertIn("groups", alerts)
+        self.assertEqual(len(alerts["groups"]), 5)
+        group = alerts["groups"][0]
+        for rule in group["rules"]:
+            self.assertIn("expr", rule)
+            for labels in expression_labels(rule["expr"]):
+                self.assertIn("juju_model", labels)
+                self.assertIn("juju_model_uuid", labels)
+                self.assertIn("juju_application", labels)
+
+    def test_injecting_generic_alerts(self):
+        ri = AlertRules(
+            query_type="promql",
+            topology=JujuTopology(
+                model="unittest",
+                model_uuid=str(uuid.uuid4()),
+                unit="tester/0",
+                application="tester",
+            ),
+        )
+        ri.add_path(Path(__file__).resolve().parent / "promql_rules" / "prometheus_alert_rules")
+
+        # TODO SingleRuleFormat only require alert, expr, labels. Test others though
+        generic_alert_rules = """
+                groups:
+                - name: GenericRules
+                  rules:
+                  - alert: HostDown
+                    expr: up < 1
+                    for: 5m
+                    labels:
+                      severity: critical
+                  - alert: HostUnavailable
+                    expr: absent(up)
+                    for: 5m
+                    labels:
+                      severity: critical
+                """
+
+        ri.add(generic_alert_rules)
 
         alerts = ri.as_dict()
         self.assertIn("groups", alerts)
