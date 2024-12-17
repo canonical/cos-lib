@@ -22,15 +22,11 @@ class GrafanaDashboard(str):
 
     @staticmethod
     def _serialize(raw_json: Union[str, bytes]) -> "GrafanaDashboard":
-        if not isinstance(raw_json, bytes):
-            raw_json = raw_json.encode("utf-8")
-        encoded = base64.b64encode(lzma.compress(raw_json)).decode("utf-8")
-        return GrafanaDashboard(encoded)
+        return GrafanaDashboard(LZMABase64.compress(raw_json))
 
     def _deserialize(self) -> Dict[str, Any]:
         try:
-            raw = lzma.decompress(base64.b64decode(self.encode("utf-8"))).decode()
-            return json.loads(raw)
+            return json.loads(LZMABase64.decompress(self))
         except json.decoder.JSONDecodeError as e:
             logger.error("Invalid Dashboard format: %s", e)
             return {}
@@ -38,6 +34,25 @@ class GrafanaDashboard(str):
     def __repr__(self):
         """Return string representation of self."""
         return "<GrafanaDashboard>"
+
+
+class LZMABase64:
+    """A helper class for LZMA-compressed-base64-encoded strings.
+
+    This is useful for transferring over juju relation data, which can only have keys of type string.
+    """
+
+    @classmethod
+    def compress(cls, raw_json: Union[str, bytes]) -> str:
+        """LZMA-compress and base64-encode into a string."""
+        if not isinstance(raw_json, bytes):
+            raw_json = raw_json.encode("utf-8")
+        return base64.b64encode(lzma.compress(raw_json)).decode("utf-8")
+
+    @classmethod
+    def decompress(cls, compressed: str) -> str:
+        """Decompress dashboard from base64-encoded-lzma-compressed string."""
+        return lzma.decompress(base64.b64decode(compressed.encode("utf-8"))).decode()
 
 
 def _hash(components: tuple, length: int) -> str:
