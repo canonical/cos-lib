@@ -40,17 +40,27 @@ class GrafanaDashboard(str):
         return "<GrafanaDashboard>"
 
 
-def generate_dashboard_uid(*args: str) -> str:
-    """Generate a dashboard uid from a collection of strings.
+def _hash(components: tuple, length: int) -> str:
+    return hashlib.shake_256("-".join(components).encode("utf-8")).hexdigest(length)
+
+
+def generate_dashboard_uid(charm_name: str, dashboard_path: str) -> str:
+    """Generate a dashboard uid from charm name and dashboard path.
+
+    The combination of charm name and dashboard path (relative to the charm root) is guaranteed to be unique across the
+    ecosystem. By design, this intentionally does not take into account instances of the same charm with different charm
+    revisions, which could have different dashboard versions.
+    Ref: https://github.com/canonical/observability/pull/206
 
     The max length grafana allows for a dashboard uid is 40.
     Ref: https://grafana.com/docs/grafana/latest/developers/http_api/dashboard/#identifier-id-vs-unique-identifier-uid
 
     Args:
-        args: A collection of strings used to calculate the uid.
+        charm_name: The name of the charm (not app!) that owns the dashboard.
+        dashboard_path: Path (relative to charm root) to the dashboard file.
 
     Returns: A uid based on the input args.
     """
     # Since the digest is bytes, we need to convert it to a charset that grafana accepts.
     # Let's use hexdigest, which means 2 chars per byte, reducing our effective digest size to 20.
-    return hashlib.shake_256("-".join(args).encode("utf-8")).hexdigest(20)
+    return _hash((charm_name, dashboard_path), 20)
