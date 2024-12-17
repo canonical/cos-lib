@@ -87,11 +87,9 @@ import yaml
 
 from . import CosTool, JujuTopology
 from .types import (
-    OfficialRuleFileFormat,
     OfficialRuleFileItem,
     QueryType,
     RuleType,
-    SingleRuleFormat,
 )
 
 logger = logging.getLogger(__name__)
@@ -150,7 +148,7 @@ class Rules(ABC):
         self.query_type = query_type
         self.topology = topology
         self.tool = CosTool(default_query_type=query_type)
-        self.groups = []  # type: List[Dict[str, Any]]
+        self.groups: List[OfficialRuleFileItem] = []
 
     @property
     @abstractmethod
@@ -161,7 +159,7 @@ class Rules(ABC):
     # --- HELPER METHODS FOR READING FILES, SHOULD BE STATIC --- #
 
     @staticmethod
-    def _is_official_rule_format(rules_dict: OfficialRuleFileFormat) -> bool:
+    def _is_official_rule_format(rules_dict: Dict[str, Any]) -> bool:
         """Are rules in the upstream format as supported by Prometheus or Loki.
 
         Rules in dictionary format are in "official" form if they
@@ -177,7 +175,7 @@ class Rules(ABC):
         return "groups" in rules_dict
 
     @staticmethod
-    def _is_single_rule_format(rules_dict: SingleRuleFormat, rule_type: RuleType) -> bool:
+    def _is_single_rule_format(rules_dict: Dict[str, Any], rule_type: RuleType) -> bool:
         """Are alert rules in single rule format.
 
         This library supports reading of rules in a custom format that
@@ -213,7 +211,7 @@ class Rules(ABC):
         all_files_in_dir = dir_path.glob("**/*" if recursive else "*")
         return list(filter(lambda f: f.is_file() and f.suffix in suffixes, all_files_in_dir))
 
-    def _from_dir(self, dir_path: Path, recursive: bool) -> List[Dict[str, Any]]:
+    def _from_dir(self, dir_path: Path, recursive: bool) -> List[OfficialRuleFileItem]:
         """Read all rule files in a directory.
 
         All rules from files for the same directory are loaded into a single
@@ -228,7 +226,7 @@ class Rules(ABC):
             a list of dictionaries representing prometheus rule groups, each dictionary
             representing a group (structure determined by `yaml.safe_load`).
         """
-        groups = []  # type: List[Dict[str, Any]]
+        groups: List[OfficialRuleFileItem] = []
 
         # Gather all records into a list of groups
         for file_path in Rules._multi_suffix_glob(
@@ -284,7 +282,7 @@ class Rules(ABC):
 
     def _from_str(
         self,
-        yaml_str: str,
+        yaml_str: Dict[str, Any],
         *,
         group_name: Optional[str] = None,
         group_name_prefix: Optional[str] = None,
@@ -292,7 +290,7 @@ class Rules(ABC):
         """Process rules from string, injecting juju topology. If a single-rule format is provided, a hash of the yaml file is injected into the group name to ensure uniqueness.
 
         Args:
-            yaml_str: rules content in single-rule or official-rule format as a string
+            yaml_str: rules content in single-rule or official-rule format as a YAML dict
             group_name: a custom identifier for the rule name to include in the group name
             group_name_prefix: a custom group identifier to prefix the resulting group name, likely Juju topology and relative path context
 
@@ -301,14 +299,13 @@ class Rules(ABC):
         """
         if not yaml_str:
             raise ValueError("Empty")
-        if not isinstance(yaml_str, dict):
-            raise ValueError("Invalid rules (must be a dict)")
 
-        if self._is_official_rule_format(cast(OfficialRuleFileFormat, yaml_str)):
-            yaml_str = cast(OfficialRuleFileFormat, yaml_str)
+        if self._is_official_rule_format(yaml_str):
+            # TODO DO not cast since pyright knows its a str, we still need to
+            yaml_str = yaml_str
             groups = yaml_str["groups"]
-        elif self._is_single_rule_format(cast(SingleRuleFormat, yaml_str), self.rule_type):
-            yaml_str = cast(SingleRuleFormat, yaml_str)
+        elif self._is_single_rule_format(yaml_str, self.rule_type):
+            yaml_str = yaml_str
             if not group_name:
                 # Note: the caller of this function should ensure this never happens:
                 # Either we use the standard format, or we'd pass a group_name.
@@ -367,24 +364,25 @@ class Rules(ABC):
 
     def _sanitize_metric_name(self, metric_name: str) -> str:
         """Sanitize a metric name according to https://prometheus.io/docs/concepts/data_model/#metric-names-and-labels."""
+        # TODO re.sub() instead of match. Check other examples in code base
         return "".join(char if re.match(r"[a-zA-Z0-9_:]", char) else "_" for char in metric_name)
 
     # ---- END STATIC HELPER METHODS --- #
 
     def add(
         self,
-        yaml_str: str,
+        yaml_str: Dict[str, Any],
         group_name: Optional[str] = None,
         group_name_prefix: Optional[str] = None,
     ) -> None:
         """Add rules from a string to the existing ruleset.
 
         Args:
-            yaml_str: a single-rule or official-rule YAML string
+            yaml_str: a single-rule or official-rule YAML dict
             group_name: a custom group name, used only if the new rule is of single-rule format
             group_name_prefix: a custom group name prefix, used only if the new rule is of single-rule format
         """
-        kwargs = {}
+        kwargs: Dict[str, str] = {}
         if group_name is not None:
             kwargs["group_name"] = group_name
         if group_name_prefix is not None:

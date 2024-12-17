@@ -242,12 +242,6 @@ class TestFromStrGroupName(unittest.TestCase):
             rules._from_str("")
         self.assertEqual(str(ctx.exception), "Empty")
 
-    def test_raises_value_error_not_dict(self):
-        rules = AlertRules(query_type="promql")
-        with self.assertRaises(ValueError) as ctx:
-            rules._from_str("[]")
-        self.assertEqual(str(ctx.exception), "Invalid rules (must be a dict)")
-
     def test_raises_value_error_invalid_rule_format(self):
         invalid_rule = """
             expr: up < 1
