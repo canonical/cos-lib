@@ -4,6 +4,7 @@
 """Grafana Dashboard."""
 
 import base64
+import hashlib
 import json
 import logging
 import lzma
@@ -37,3 +38,19 @@ class GrafanaDashboard(str):
     def __repr__(self):
         """Return string representation of self."""
         return "<GrafanaDashboard>"
+
+
+def generate_dashboard_uid(*args: str) -> str:
+    """Generate a dashboard uid from a collection of strings.
+
+    The max length grafana allows for a dashboard uid is 40.
+    Ref: https://grafana.com/docs/grafana/latest/developers/http_api/dashboard/#identifier-id-vs-unique-identifier-uid
+
+    Args:
+        args: A collection of strings used to calculate the uid.
+
+    Returns: A uid based on the input args.
+    """
+    # Since the digest is bytes, we need to convert it to a charset that grafana accepts.
+    # Let's use hexdigest, which means 2 chars per byte, reducing our effective digest size to 20.
+    return hashlib.shake_256("-".join(args).encode("utf-8")).hexdigest(20)
