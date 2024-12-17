@@ -642,7 +642,7 @@ class Coordinator(ops.Object):
         self._update_nginx_tls_certificates()
         self.update_cluster()
         if self.catalogue:
-            self.catalogue.update_item(item=self._catalogue_item)
+            self.catalogue.update_item(item=self._catalogue_item)  # type: ignore
 
     @property
     def _peers(self) -> Optional[Set[ops.model.Unit]]:
