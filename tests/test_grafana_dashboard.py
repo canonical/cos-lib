@@ -31,7 +31,7 @@ class TestGenerateUID(unittest.TestCase):
     """Spec for the UID generation logic."""
 
     def test_uid_length_is_40(self):
-        self.assertEqual(40, len(generate_dashboard_uid("whatever")))
+        self.assertEqual(40, len(generate_dashboard_uid("my-charm", "my-dash.json")))
 
     def test_collisions(self):
         """A very naive and primitive collision check that is meant to catch trivial errors."""
@@ -41,6 +41,6 @@ class TestGenerateUID(unittest.TestCase):
         )
 
         self.assertNotEqual(
-            generate_dashboard_uid("some-charm"),
             generate_dashboard_uid("some-charm", "dashboard.json"),
+            generate_dashboard_uid("diff-charm", "dashboard.json"),
         )

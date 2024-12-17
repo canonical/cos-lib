@@ -8,8 +8,8 @@ import hashlib
 import json
 import logging
 import lzma
-from typing import Any, Dict, Union
 import warnings
+from typing import Any, Dict, Tuple, Union
 
 logger = logging.getLogger(__name__)
 
@@ -23,11 +23,17 @@ class GrafanaDashboard(str):
 
     @staticmethod
     def _serialize(raw_json: Union[str, bytes]) -> "GrafanaDashboard":
-        warnings.warn("GrafanaDashboard._serialize is deprecated; use LZMABase64.compress(json.dumps(...)) instead.", category=DeprecationWarning)
+        warnings.warn(
+            "GrafanaDashboard._serialize is deprecated; use LZMABase64.compress(json.dumps(...)) instead.",
+            category=DeprecationWarning,
+        )
         return GrafanaDashboard(LZMABase64.compress(raw_json))
 
     def _deserialize(self) -> Dict[str, Any]:
-        warnings.warn("GrafanaDashboard._deserialize is deprecated; use json.loads(LZMABase64.decompress(...)) instead.", category=DeprecationWarning)
+        warnings.warn(
+            "GrafanaDashboard._deserialize is deprecated; use json.loads(LZMABase64.decompress(...)) instead.",
+            category=DeprecationWarning,
+        )
         try:
             return json.loads(LZMABase64.decompress(self))
         except json.decoder.JSONDecodeError as e:
@@ -58,7 +64,7 @@ class LZMABase64:
         return lzma.decompress(base64.b64decode(compressed.encode("utf-8"))).decode()
 
 
-def _hash(components: tuple, length: int) -> str:
+def _hash(components: Tuple[str, ...], length: int) -> str:
     return hashlib.shake_256("-".join(components).encode("utf-8")).hexdigest(length)
 
 
