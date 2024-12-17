@@ -9,6 +9,7 @@ import json
 import logging
 import lzma
 from typing import Any, Dict, Union
+import warnings
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +23,11 @@ class GrafanaDashboard(str):
 
     @staticmethod
     def _serialize(raw_json: Union[str, bytes]) -> "GrafanaDashboard":
+        warnings.warn("GrafanaDashboard._serialize is deprecated; use LZMABase64.compress(json.dumps(...)) instead.", category=DeprecationWarning)
         return GrafanaDashboard(LZMABase64.compress(raw_json))
 
     def _deserialize(self) -> Dict[str, Any]:
+        warnings.warn("GrafanaDashboard._deserialize is deprecated; use json.loads(LZMABase64.decompress(...)) instead.", category=DeprecationWarning)
         try:
             return json.loads(LZMABase64.decompress(self))
         except json.decoder.JSONDecodeError as e:
