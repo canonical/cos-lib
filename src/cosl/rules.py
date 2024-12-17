@@ -74,12 +74,11 @@ The following labels are automatically included with each rule:
 - `juju_model_uuid`
 - `juju_application`
 """  # noqa: W505
+
 import hashlib
 import logging
 import os
 import re
-import textwrap
-from pprint import pprint
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, cast
@@ -242,71 +241,10 @@ class Rules(ABC):
 
         return groups
 
-    def _from_str(self, yaml_str: str, *, group_name: Optional[str]=None, group_name_prefix: str) -> List[dict]:
-        """Process rules file (TODO: improve desc).
-
-        Raises:
-            ValueError, when invalid rule format given.
-        """
-        if not yaml_str:
-            raise ValueError("Empty")
-        if not isinstance(yaml_str, dict):
-            raise ValueError("Invalid rules (must be a dict)")
-
-        if self._is_official_rule_format(cast(OfficialRuleFileFormat, yaml_str)):
-            yaml_str = cast(OfficialRuleFileFormat, yaml_str)
-            groups = yaml_str["groups"]
-        elif self._is_single_rule_format(cast(SingleRuleFormat, yaml_str), self.rule_type):
-            # convert to list of groups
-            # group name is made up from the file name
-            yaml_str = cast(SingleRuleFormat, yaml_str)
-            if not group_name:
-                # Note: the caller of this function should make sure this never happens:
-                # Either we use the standard format, or we'd pass a group_name.
-                # If/when we drop support for the single-rule-per-file format, this won't
-                # be needed anymore.
-                group_name = hashlib.shake_256(str(yaml_str).encode("utf-8")).hexdigest(20)
-            groups = [{"name": group_name, "rules": [yaml_str]}]
-        else:
-            # invalid/unsupported
-            raise ValueError("Invalid rule format")
-
-        # update rules with additional metadata
-        groups = cast(List[OfficialRuleFileItem], groups)
-        for group in groups:
-            if not self._is_already_modified(group["name"]):
-                # update group name with topology and sub-path
-                group["name"] = "_".join(filter(None, [group_name_prefix, group_name, f"{self.rule_type}s"]))
-
-            # add "juju_" topology labels
-            for rule in group["rules"]:
-                if "labels" not in rule:
-                    rule["labels"] = {}
-
-                if self.topology:
-                    # only insert labels that do not already exist
-                    for label, val in self.topology.label_matcher_dict.items():
-                        if label not in rule["labels"]:
-                            rule["labels"][label] = val
-
-                    # insert juju topology filters into a prometheus rule
-                    repl = r'job=~".+"' if self.query_type == "logql" else ""
-                    rule["expr"] = self.tool.inject_label_matchers(  # type: ignore
-                        expression=re.sub(r"%%juju_topology%%,?", repl, rule["expr"]),
-                        topology={
-                            k: rule["labels"][k]
-                            for k in ("juju_model", "juju_model_uuid", "juju_application")
-                            if rule["labels"].get(k) is not None
-                        },
-                        query_type=self.query_type,
-                    )
-
-        return groups
-
     def _from_file(  # noqa: C901
         self, root_path: Path, file_path: Path
     ) -> List[OfficialRuleFileItem]:
-        """Read a rules file from path, injecting juju topology.
+        """Read a rules file from path.
 
         Args:
             root_path: full path to the root rules folder (used only for generating group name)
@@ -335,12 +273,90 @@ class Rules(ABC):
             group_name_prefix = "_".join(filter(None, group_name_parts))
 
             try:
-                groups = self._from_str(rule_file, group_name_prefix=group_name_prefix)
+                groups = self._from_str(
+                    rule_file, group_name=file_path.stem, group_name_prefix=group_name_prefix
+                )
             except ValueError as e:
                 logger.error("Invalid rules file: %s (%s)", file_path.name, e)
                 return []
 
             return groups
+
+    def _from_str(
+        self,
+        yaml_str: str,
+        *,
+        group_name: Optional[str] = None,
+        group_name_prefix: Optional[str] = None,
+    ) -> List[OfficialRuleFileItem]:
+        """Process rules from string, injecting juju topology. If a single-rule format is provided, a hash of the yaml file is injected into the group name to ensure uniqueness.
+
+        Args:
+            yaml_str: rules content in single-rule or official-rule format as a string
+            group_name: a custom identifier for the rule name to include in the group name
+            group_name_prefix: a custom group identifier to prefix the resulting group name, likely Juju topology and relative path context
+
+        Raises:
+            ValueError, when invalid rule format given.
+        """
+        if not yaml_str:
+            raise ValueError("Empty")
+        if not isinstance(yaml_str, dict):
+            raise ValueError("Invalid rules (must be a dict)")
+
+        if self._is_official_rule_format(cast(OfficialRuleFileFormat, yaml_str)):
+            yaml_str = cast(OfficialRuleFileFormat, yaml_str)
+            groups = yaml_str["groups"]
+        elif self._is_single_rule_format(cast(SingleRuleFormat, yaml_str), self.rule_type):
+            yaml_str = cast(SingleRuleFormat, yaml_str)
+            if not group_name:
+                # Note: the caller of this function should ensure this never happens:
+                # Either we use the standard format, or we'd pass a group_name.
+                # If/when we drop support for the single-rule-per-file format, this won't
+                # be needed anymore.
+                group_name = hashlib.shake_256(str(yaml_str).encode("utf-8")).hexdigest(10)
+            else:
+                group_name = self._sanitize_metric_name(group_name)
+
+            # convert to list of groups to match official rule format
+            groups = [{"name": group_name, "rules": [yaml_str]}]
+        else:
+            # invalid/unsupported
+            raise ValueError("Invalid rule format")
+
+        # update rules with additional metadata
+        groups = cast(List[OfficialRuleFileItem], groups)
+        for group in groups:
+            if not self._is_already_modified(group["name"]):
+                # update group name with topology and sub-path
+                group["name"] = "_".join(
+                    filter(None, [group_name_prefix, group["name"], f"{self.rule_type}s"])
+                )
+
+            # add "juju_" topology labels
+            for rule in group["rules"]:
+                if "labels" not in rule:
+                    rule["labels"] = {}
+
+                if self.topology:
+                    # only insert labels that do not already exist
+                    for label, val in self.topology.label_matcher_dict.items():
+                        if label not in rule["labels"]:
+                            rule["labels"][label] = val
+
+                    # insert juju topology filters into a prometheus rule
+                    repl = r'job=~".+"' if self.query_type == "logql" else ""
+                    rule["expr"] = self.tool.inject_label_matchers(  # type: ignore
+                        expression=re.sub(r"%%juju_topology%%,?", repl, rule["expr"]),
+                        topology={
+                            k: rule["labels"][k]
+                            for k in ("juju_model", "juju_model_uuid", "juju_application")
+                            if rule["labels"].get(k) is not None
+                        },
+                        query_type=self.query_type,
+                    )
+
+        return groups
 
     def _is_already_modified(self, name: str) -> bool:
         """Detect whether a group name has already been modified with juju topology."""
@@ -349,12 +365,31 @@ class Rules(ABC):
             return False
         return True
 
+    def _sanitize_metric_name(self, metric_name: str) -> str:
+        """Sanitize a metric name according to https://prometheus.io/docs/concepts/data_model/#metric-names-and-labels."""
+        return "".join(char if re.match(r"[a-zA-Z0-9_:]", char) else "_" for char in metric_name)
+
     # ---- END STATIC HELPER METHODS --- #
 
-    def add(self, yaml_str: str):
-        temp = self._from_str(yaml_str)
-        pprint(temp)
-        self.groups.extend(temp)
+    def add(
+        self,
+        yaml_str: str,
+        group_name: Optional[str] = None,
+        group_name_prefix: Optional[str] = None,
+    ) -> None:
+        """Add rules from a string to the existing ruleset.
+
+        Args:
+            yaml_str: a single-rule or official-rule YAML string
+            group_name: a custom group name, used only if the new rule is of single-rule format
+            group_name_prefix: a custom group name prefix, used only if the new rule is of single-rule format
+        """
+        kwargs = {}
+        if group_name is not None:
+            kwargs["group_name"] = group_name
+        if group_name_prefix is not None:
+            kwargs["group_name_prefix"] = group_name_prefix
+        self.groups.extend(self._from_str(yaml_str, **kwargs))
 
     def add_path(self, dir_path: Union[str, Path], *, recursive: bool = False) -> None:
         """Add rules from a dir path.
@@ -365,9 +400,6 @@ class Rules(ABC):
         Args:
             dir_path: either a rules file or a dir of rules files.
             recursive: whether to read files recursively or not (no impact if `path` is a file).
-
-        Returns:
-            True if path was added else False.
         """
         path = Path(dir_path) if isinstance(dir_path, str) else dir_path
         if path.is_dir():
