@@ -235,7 +235,7 @@ class Coordinator(ops.Object):
                 and the worker charm can push metrics to.
             workload_tracing_protocols: A list of protocols that the worker intends to send
                 workload traces with.
-            catalogue_item: An application entry sent to catalogue.
+            catalogue_item: A catalogue application entry to be sent to catalogue.
 
         Raises:
         ValueError:
