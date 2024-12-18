@@ -77,7 +77,6 @@ The following labels are automatically included with each rule:
 
 import hashlib
 import logging
-import os
 import re
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -264,8 +263,8 @@ class Rules(ABC):
             # Generate group name prefix
             #  - name, from juju topology
             #  - suffix, from the relative path of the rule file;
-            rel_path = os.path.relpath(os.path.dirname(file_path), root_path)
-            rel_path = "" if rel_path == "." else rel_path.replace(os.path.sep, "_")
+            rel_path = file_path.parent.relative_to(root_path)
+            rel_path = "" if rel_path == Path(".") else rel_path.as_posix().replace("/", "_")
             group_name_parts = [self.topology.identifier] if self.topology else []
             group_name_parts.append(rel_path)
             group_name_prefix = "_".join(filter(None, group_name_parts))
