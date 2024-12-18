@@ -301,7 +301,6 @@ class Rules(ABC):
             raise ValueError("Empty")
 
         if self._is_official_rule_format(yaml_str):
-            # TODO DO not cast since pyright knows its a str, we still need to
             yaml_str = yaml_str
             groups = yaml_str["groups"]
         elif self._is_single_rule_format(yaml_str, self.rule_type):
@@ -364,7 +363,6 @@ class Rules(ABC):
 
     def _sanitize_metric_name(self, metric_name: str) -> str:
         """Sanitize a metric name according to https://prometheus.io/docs/concepts/data_model/#metric-names-and-labels."""
-        # TODO re.sub() instead of match. Check other examples in code base
         return "".join(char if re.match(r"[a-zA-Z0-9_:]", char) else "_" for char in metric_name)
 
     # ---- END STATIC HELPER METHODS --- #
