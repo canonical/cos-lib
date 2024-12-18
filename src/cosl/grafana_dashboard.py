@@ -60,7 +60,7 @@ class LZMABase64:
 
     @classmethod
     def decompress(cls, compressed: str) -> str:
-        """Decompress dashboard from base64-encoded-lzma-compressed string."""
+        """Decompress from base64-encoded-lzma-compressed string."""
         return lzma.decompress(base64.b64decode(compressed.encode("utf-8"))).decode()
 
 
