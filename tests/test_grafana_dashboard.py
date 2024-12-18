@@ -4,15 +4,43 @@
 import json
 import unittest
 
-from cosl import GrafanaDashboard
+from cosl import GrafanaDashboard, LZMABase64, generate_dashboard_uid
 
 
-class TestDashboard(unittest.TestCase):
-    """Tests the GrafanaDashboard class."""
+class TestRoundTripEncDec(unittest.TestCase):
+    """Tests the round-trip encoding/decoding of the GrafanaDashboard class."""
 
-    def test_serializes_and_deserializes(self):
-        expected_output = {"msg": "this is the expected output after passing through the class."}
+    def test_round_trip(self):
+        d = {
+            "some": "dict",
+            "with": "keys",
+            "even": [{"nested": "types", "and_integers": [42, 42]}],
+        }
+        self.assertDictEqual(d, GrafanaDashboard._serialize(json.dumps(d))._deserialize())
 
-        dash = GrafanaDashboard._serialize(json.dumps(expected_output))
 
-        assert dash._deserialize() == expected_output
+class TestLZMABase64(unittest.TestCase):
+    """Tests the round-trip encoding/decoding of the GrafanaDashboard class."""
+
+    def test_round_trip(self):
+        s = "starting point"
+        self.assertEqual(s, LZMABase64.decompress(LZMABase64.compress(s)))
+
+
+class TestGenerateUID(unittest.TestCase):
+    """Spec for the UID generation logic."""
+
+    def test_uid_length_is_40(self):
+        self.assertEqual(40, len(generate_dashboard_uid("my-charm", "my-dash.json")))
+
+    def test_collisions(self):
+        """A very naive and primitive collision check that is meant to catch trivial errors."""
+        self.assertNotEqual(
+            generate_dashboard_uid("some-charm", "dashboard1.json"),
+            generate_dashboard_uid("some-charm", "dashboard2.json"),
+        )
+
+        self.assertNotEqual(
+            generate_dashboard_uid("some-charm", "dashboard.json"),
+            generate_dashboard_uid("diff-charm", "dashboard.json"),
+        )
