@@ -264,7 +264,7 @@ class Rules(ABC):
             #  - name, from juju topology
             #  - suffix, from the relative path of the rule file;
             rel_path = file_path.parent.relative_to(root_path)
-            rel_path = "" if rel_path == Path(".") else rel_path.as_posix().replace("/", "_")
+            rel_path = "" if rel_path == Path(".") else str(rel_path)
             group_name_parts = [self.topology.identifier] if self.topology else []
             group_name_parts.append(rel_path)
             group_name_prefix = "_".join(filter(None, group_name_parts))
@@ -300,18 +300,14 @@ class Rules(ABC):
             raise ValueError("Empty")
 
         if self._is_official_rule_format(yaml_str):
-            yaml_str = yaml_str
             groups = yaml_str["groups"]
         elif self._is_single_rule_format(yaml_str, self.rule_type):
-            yaml_str = yaml_str
             if not group_name:
                 # Note: the caller of this function should ensure this never happens:
                 # Either we use the standard format, or we'd pass a group_name.
                 # If/when we drop support for the single-rule-per-file format, this won't
                 # be needed anymore.
                 group_name = hashlib.shake_256(str(yaml_str).encode("utf-8")).hexdigest(10)
-            else:
-                group_name = self._sanitize_metric_name(group_name)
 
             # convert to list of groups to match official rule format
             groups = [{"name": group_name, "rules": [yaml_str]}]
@@ -327,6 +323,8 @@ class Rules(ABC):
                 group["name"] = "_".join(
                     filter(None, [group_name_prefix, group["name"], f"{self.rule_type}s"])
                 )
+            # after sanitizing we should not modify group["name"] anymore
+            group["name"] = self._sanitize_metric_name(group["name"])
 
             # add "juju_" topology labels
             for rule in group["rules"]:
@@ -379,12 +377,9 @@ class Rules(ABC):
             group_name: a custom group name, used only if the new rule is of single-rule format
             group_name_prefix: a custom group name prefix, used only if the new rule is of single-rule format
         """
-        kwargs: Dict[str, str] = {}
-        if group_name is not None:
-            kwargs["group_name"] = group_name
-        if group_name_prefix is not None:
-            kwargs["group_name_prefix"] = group_name_prefix
-        self.groups.extend(self._from_str(yaml_str, **kwargs))
+        self.groups.extend(
+            self._from_str(yaml_str, group_name=group_name, group_name_prefix=group_name_prefix)
+        )
 
     def add_path(self, dir_path: Union[str, Path], *, recursive: bool = False) -> None:
         """Add rules from a dir path.

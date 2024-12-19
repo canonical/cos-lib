@@ -147,8 +147,8 @@ class TestAddRuleFromStr(unittest.TestCase):
             group_name="new",
             group_name_prefix="some",
         )
-        rules_dict = rules.as_dict()
         # THEN the new rule is a combination of all
+        rules_dict = rules.as_dict()
         # AND the added rule group name has the custom group name and prefix
         self.assertEqual({}, DeepDiff(expected_rules, rules_dict))
 
@@ -179,11 +179,15 @@ class TestFromStrGroupName(unittest.TestCase):
         # GIVEN an alert rule in single-rule format
         rules = AlertRules(query_type="promql")
         # WHEN processed as string and provided an illegal custom group name
-        groups = rules._from_str(self.single_rule, group_name="Foo$123/Hello:World(go_od)bye")
+        groups = rules._from_str(
+            self.single_rule, group_name="Foo$123/Hello:World(go_od)bye!@#^&*()[]{}|;:,.<>?`~_"
+        )
         for group in groups:
             # THEN the group name only contains characters in [a-zA-Z0-9_:]
-            # AND specials characters are replaced with "_"
-            self.assertEqual(group["name"], "Foo_123_Hello:World_go_od_bye_alerts")
+            # AND special characters are replaced with "_"
+            self.assertEqual(
+                group["name"], "Foo_123_Hello:World_go_od_bye______________:_________alerts"
+            )
 
     def test_single_rule_from_string(self):
         # GIVEN an alert rule in single-rule format
