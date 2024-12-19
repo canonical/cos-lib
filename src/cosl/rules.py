@@ -270,7 +270,7 @@ class Rules(ABC):
             group_name_prefix = "_".join(filter(None, group_name_parts))
 
             try:
-                groups = self._from_str(
+                groups = self._from_dict(
                     rule_file, group_name=file_path.stem, group_name_prefix=group_name_prefix
                 )
             except ValueError as e:
@@ -279,38 +279,40 @@ class Rules(ABC):
 
             return groups
 
-    def _from_str(
+    def _from_dict(
         self,
-        yaml_str: Dict[str, Any],
+        yaml_dict: Dict[str, Any],
         *,
         group_name: Optional[str] = None,
         group_name_prefix: Optional[str] = None,
     ) -> List[OfficialRuleFileItem]:
-        """Process rules from string, injecting juju topology. If a single-rule format is provided, a hash of the yaml file is injected into the group name to ensure uniqueness.
+        """Process rules from dict, injecting juju topology. If a single-rule format is provided, a hash of the yaml file is injected into the group name to ensure uniqueness.
 
         Args:
-            yaml_str: rules content in single-rule or official-rule format as a YAML dict
+            yaml_dict: rules content in single-rule or official-rule format as a YAML dict
             group_name: a custom identifier for the rule name to include in the group name
             group_name_prefix: a custom group identifier to prefix the resulting group name, likely Juju topology and relative path context
 
         Raises:
             ValueError, when invalid rule format given.
         """
-        if not yaml_str:
+        # TODO _alerts_alerts is leftover code from elsewhere
+        # TODO rename this to be yaml_dict
+        if not yaml_dict:
             raise ValueError("Empty")
 
-        if self._is_official_rule_format(yaml_str):
-            groups = yaml_str["groups"]
-        elif self._is_single_rule_format(yaml_str, self.rule_type):
+        if self._is_official_rule_format(yaml_dict):
+            groups = yaml_dict["groups"]
+        elif self._is_single_rule_format(yaml_dict, self.rule_type):
             if not group_name:
                 # Note: the caller of this function should ensure this never happens:
                 # Either we use the standard format, or we'd pass a group_name.
                 # If/when we drop support for the single-rule-per-file format, this won't
                 # be needed anymore.
-                group_name = hashlib.shake_256(str(yaml_str).encode("utf-8")).hexdigest(10)
+                group_name = hashlib.shake_256(str(yaml_dict).encode("utf-8")).hexdigest(10)
 
             # convert to list of groups to match official rule format
-            groups = [{"name": group_name, "rules": [yaml_str]}]
+            groups = [{"name": group_name, "rules": [yaml_dict]}]
         else:
             # invalid/unsupported
             raise ValueError("Invalid rule format")
@@ -366,19 +368,19 @@ class Rules(ABC):
 
     def add(
         self,
-        yaml_str: Dict[str, Any],
+        yaml_dict: Dict[str, Any],
         group_name: Optional[str] = None,
         group_name_prefix: Optional[str] = None,
     ) -> None:
-        """Add rules from a string to the existing ruleset.
+        """Add rules from dict to the existing ruleset.
 
         Args:
-            yaml_str: a single-rule or official-rule YAML dict
+            yaml_dict: a single-rule or official-rule YAML dict
             group_name: a custom group name, used only if the new rule is of single-rule format
             group_name_prefix: a custom group name prefix, used only if the new rule is of single-rule format
         """
         self.groups.extend(
-            self._from_str(yaml_str, group_name=group_name, group_name_prefix=group_name_prefix)
+            self._from_dict(yaml_dict, group_name=group_name, group_name_prefix=group_name_prefix)
         )
 
     def add_path(self, dir_path: Union[str, Path], *, recursive: bool = False) -> None:

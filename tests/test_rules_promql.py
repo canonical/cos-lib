@@ -88,7 +88,7 @@ class TestAddRuleFromStr(unittest.TestCase):
         """
         self.rule = yaml.safe_load(textwrap.dedent(rule))
 
-    def test_official_rule_add_alerts_from_string(self):
+    def test_official_rule_add_alerts_from_dict(self):
         official_rule = """
             groups:
               - name: SomeGroupName
@@ -114,14 +114,14 @@ class TestAddRuleFromStr(unittest.TestCase):
         }
         # GIVEN an alert rule
         rules = AlertRules(query_type="promql")
-        rules.groups = rules._from_str(self.rule, group_name="initial")
+        rules.groups = rules._from_dict(self.rule, group_name="initial")
         # WHEN a rule is added from string in official-rule format
         rules.add(yaml.safe_load(textwrap.dedent(official_rule)))
         rules_dict = rules.as_dict()
         # THEN the new rule is a combination of all
         self.assertEqual({}, DeepDiff(expected_rules, rules_dict))
 
-    def test_single_rule_add_alerts_from_string(self):
+    def test_single_rule_add_alerts_from_dict(self):
         single_rule = """
             alert: BarRule
             expr: up < 1
@@ -140,7 +140,7 @@ class TestAddRuleFromStr(unittest.TestCase):
         }
         # GIVEN an alert rule
         rules = AlertRules(query_type="promql")
-        rules.groups = rules._from_str(self.rule, group_name="initial")
+        rules.groups = rules._from_dict(self.rule, group_name="initial")
         # WHEN a rule is added from string in single-rule format with a custom group name and prefix
         rules.add(
             yaml.safe_load(textwrap.dedent(single_rule)),
@@ -153,7 +153,7 @@ class TestAddRuleFromStr(unittest.TestCase):
         self.assertEqual({}, DeepDiff(expected_rules, rules_dict))
 
 
-class TestFromStrGroupName(unittest.TestCase):
+class TestFromDictGroupName(unittest.TestCase):
     def setUp(self):
         official_rule = """
             groups:
@@ -175,11 +175,11 @@ class TestFromStrGroupName(unittest.TestCase):
         self.official_rule = yaml.safe_load(textwrap.dedent(official_rule))
         self.single_rule = yaml.safe_load(textwrap.dedent(single_rule))
 
-    def test_single_rule_from_string_group_sanitized(self):
+    def test_single_rule_from_dict_group_sanitized(self):
         # GIVEN an alert rule in single-rule format
         rules = AlertRules(query_type="promql")
         # WHEN processed as string and provided an illegal custom group name
-        groups = rules._from_str(
+        groups = rules._from_dict(
             self.single_rule, group_name="Foo$123/Hello:World(go_od)bye!@#^&*()[]{}|;:,.<>?`~_"
         )
         for group in groups:
@@ -189,61 +189,61 @@ class TestFromStrGroupName(unittest.TestCase):
                 group["name"], "Foo_123_Hello:World_go_od_bye______________:_________alerts"
             )
 
-    def test_single_rule_from_string(self):
+    def test_single_rule_from_dict(self):
         # GIVEN an alert rule in single-rule format
         rules = AlertRules(query_type="promql")
         # WHEN processed as string
-        groups = rules._from_str(self.single_rule)
+        groups = rules._from_dict(self.single_rule)
         for group in groups:
             # THEN group name contains hash
             self.assertNotEqual(get_hash(group["name"]), "")
 
-    def test_single_rule_from_string_custom_group(self):
+    def test_single_rule_from_dict_custom_group(self):
         # GIVEN an alert rule in single-rule format
         rules = AlertRules(query_type="promql")
         # WHEN processed as string and provided custom group name
-        groups = rules._from_str(self.single_rule, group_name="foo")
+        groups = rules._from_dict(self.single_rule, group_name="foo")
         for group in groups:
             # THEN group name does not contain hash
             self.assertEqual(get_hash(group["name"]), "")
             # AND group name contains the custom group name
             self.assertIn("foo", group["name"])
 
-    def test_single_rule_from_string_custom_group_prefix(self):
+    def test_single_rule_from_dict_custom_group_prefix(self):
         # GIVEN an alert rule in single-rule format
         rules = AlertRules(query_type="promql")
         # WHEN processed as string and provided custom group name prefix
-        groups = rules._from_str(self.single_rule, group_name_prefix="foo")
+        groups = rules._from_dict(self.single_rule, group_name_prefix="foo")
         for group in groups:
             # THEN group name does not include the original group name
             self.assertNotIn("SomeGroupName", group["name"])
             # AND group name is prefixed with custom value
             self.assertTrue(group["name"].startswith("foo"))
 
-    def test_official_rule_from_string(self):
+    def test_official_rule_from_dict(self):
         # GIVEN an alert rule in official-rule format
         rules = AlertRules(query_type="promql")
-        # WHEN processed as string
-        groups = rules._from_str(self.official_rule)
+        # WHEN processed as dict
+        groups = rules._from_dict(self.official_rule)
         for group in groups:
             # THEN group name matches the group name in the alert
             self.assertIn("SomeGroupName", group["name"])
 
-    def test_official_rule_from_string_custom_group_prefix(self):
+    def test_official_rule_from_dict_custom_group_prefix(self):
         # GIVEN an alert rule in official-rule format
         rules = AlertRules(query_type="promql")
         # WHEN processed as string and provided custom group name prefix
-        groups = rules._from_str(self.official_rule, group_name_prefix="foo")
+        groups = rules._from_dict(self.official_rule, group_name_prefix="foo")
         for group in groups:
             # THEN group name includes the original group name
             self.assertIn("SomeGroupName", group["name"])
             # AND group name is prefixed with custom value
             self.assertTrue(group["name"].startswith("foo"))
 
-    def test_raises_value_error_empty_str(self):
+    def test_raises_value_error_empty_dict(self):
         rules = AlertRules(query_type="promql")
         with self.assertRaises(ValueError) as ctx:
-            rules._from_str("")
+            rules._from_dict("")
         self.assertEqual(str(ctx.exception), "Empty")
 
     def test_raises_value_error_invalid_rule_format(self):
@@ -255,7 +255,7 @@ class TestFromStrGroupName(unittest.TestCase):
         """
         rules = AlertRules(query_type="promql")
         with self.assertRaises(ValueError) as ctx:
-            rules._from_str(yaml.safe_load(textwrap.dedent(invalid_rule)))
+            rules._from_dict(yaml.safe_load(textwrap.dedent(invalid_rule)))
         self.assertEqual(str(ctx.exception), "Invalid rule format")
 
 
@@ -283,7 +283,7 @@ def expression_labels(expr):
 
 
 def get_hash(group_name: str) -> str:
-    """Extract the hash of the group name when a group name was not provided to _from_str method in the Rules class.
+    """Extract the hash of the group name when a group name was not provided to _from_dict method in the Rules class.
 
     This occurs when the single-rule format is provided rather than official-rule format.
 
