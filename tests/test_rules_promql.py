@@ -3,7 +3,6 @@
 
 import json
 import re
-import textwrap
 import unittest
 import uuid
 from pathlib import Path
@@ -80,62 +79,63 @@ class TestEndpointProvider(unittest.TestCase):
 
 class TestAddRuleFromStr(unittest.TestCase):
     def setUp(self):
-        rule = """
-            alert: SomeRuleName
-            expr: up
-            labels:
-              severity: critical
-        """
-        self.rule = yaml.safe_load(textwrap.dedent(rule))
+        self.rule = {
+            "alert": "SomeRuleName",
+            "expr": "up < 1",
+            "labels": {"severity": "critical"},
+        }
 
     def test_official_rule_add_alerts_from_dict(self):
-        official_rule = """
-            groups:
-              - name: SomeGroupName
-                rules:
-                - alert: FooRule
-                  expr: up < 1
-                  labels:
-                    severity: critical
-                - alert: BarRule
-                  expr: absent(up)
-                  labels:
-                    severity: critical
-        """
-        added_group = yaml.safe_load(textwrap.dedent(official_rule))["groups"][0]
+        official_rule = {
+            "groups": [
+                {
+                    "name": "SomeGroupName",
+                    "rules": [
+                        {
+                            "alert": "FooRule",
+                            "expr": "up < 1",
+                            "labels": {"severity": "critical"},
+                        },
+                        {
+                            "alert": "BarRule",
+                            "expr": "absent(up)",
+                            "labels": {"severity": "critical"},
+                        },
+                    ],
+                }
+            ]
+        }
         expected_rules = {
             "groups": [
                 {
                     "name": "initial_alerts",
                     "rules": [self.rule],
                 },
-                {"name": "SomeGroupName_alerts", "rules": added_group["rules"]},
+                {"name": "SomeGroupName_alerts", "rules": official_rule["groups"][0]["rules"]},
             ]
         }
         # GIVEN an alert rule
         rules = AlertRules(query_type="promql")
         rules.groups = rules._from_dict(self.rule, group_name="initial")
         # WHEN a rule is added from string in official-rule format
-        rules.add(yaml.safe_load(textwrap.dedent(official_rule)))
+        rules.add(official_rule)
         rules_dict = rules.as_dict()
         # THEN the new rule is a combination of all
         self.assertEqual({}, DeepDiff(expected_rules, rules_dict))
 
     def test_single_rule_add_alerts_from_dict(self):
-        single_rule = """
-            alert: BarRule
-            expr: up < 1
-            labels:
-              severity: critical
-        """
-        rules = yaml.safe_load(textwrap.dedent(single_rule))
+        single_rule = {
+            "alert": "BarRule",
+            "expr": "up < 1",
+            "labels": {"severity": "critical"},
+        }
         expected_rules = {
             "groups": [
                 {
                     "name": "initial_alerts",
                     "rules": [self.rule],
                 },
-                {"name": "some_new_alerts", "rules": [rules]},
+                {"name": "some_new_alerts", "rules": [single_rule]},
             ]
         }
         # GIVEN an alert rule
@@ -143,7 +143,7 @@ class TestAddRuleFromStr(unittest.TestCase):
         rules.groups = rules._from_dict(self.rule, group_name="initial")
         # WHEN a rule is added from string in single-rule format with a custom group name and prefix
         rules.add(
-            yaml.safe_load(textwrap.dedent(single_rule)),
+            single_rule,
             group_name="new",
             group_name_prefix="some",
         )
@@ -155,25 +155,25 @@ class TestAddRuleFromStr(unittest.TestCase):
 
 class TestFromDictGroupName(unittest.TestCase):
     def setUp(self):
-        official_rule = """
-            groups:
-              - name: SomeGroupName
-                rules:
-                - alert: SomeRuleName
-                  expr: up < 1
-                  for: 5m
-                  labels:
-                    severity: critical
-        """
-        single_rule = """
-            alert: SomeRuleName
-            expr: up < 1
-            for: 5m
-            labels:
-              severity: critical
-        """
-        self.official_rule = yaml.safe_load(textwrap.dedent(official_rule))
-        self.single_rule = yaml.safe_load(textwrap.dedent(single_rule))
+        self.official_rule = {
+            "groups": [
+                {
+                    "name": "SomeGroupName",
+                    "rules": [
+                        {
+                            "alert": "SomeRuleName",
+                            "expr": "up < 1",
+                            "labels": {"severity": "critical"},
+                        }
+                    ],
+                }
+            ]
+        }
+        self.single_rule = {
+            "alert": "SomeRuleName",
+            "expr": "up < 1",
+            "labels": {"severity": "critical"},
+        }
 
     def test_single_rule_from_dict_group_sanitized(self):
         # GIVEN an alert rule in single-rule format
@@ -247,15 +247,13 @@ class TestFromDictGroupName(unittest.TestCase):
         self.assertEqual(str(ctx.exception), "Empty")
 
     def test_raises_value_error_invalid_rule_format(self):
-        invalid_rule = """
-            expr: up < 1
-            for: 5m
-            labels:
-              severity: critical
-        """
+        invalid_rule = {
+            "expr": "up < 1",
+            "labels": {"severity": "critical"},
+        }
         rules = AlertRules(query_type="promql")
         with self.assertRaises(ValueError) as ctx:
-            rules._from_dict(yaml.safe_load(textwrap.dedent(invalid_rule)))
+            rules._from_dict(invalid_rule)
         self.assertEqual(str(ctx.exception), "Invalid rule format")
 
 
