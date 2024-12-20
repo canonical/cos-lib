@@ -4,7 +4,7 @@
 """Utils for observability Juju charms."""
 
 from .cos_tool import CosTool
-from .grafana_dashboard import GrafanaDashboard, LZMABase64, generate_dashboard_uid
+from .grafana_dashboard import GrafanaDashboard, LZMABase64, DashboardPath40UID
 from .juju_topology import JujuTopology
 from .mandatory_relation_pairs import MandatoryRelationPairs
 from .rules import AlertRules, RecordingRules
@@ -14,7 +14,7 @@ __all__ = [
     "CosTool",
     "GrafanaDashboard",
     "LZMABase64",
-    "generate_dashboard_uid",
+    "DashboardPath40UID",
     "AlertRules",
     "RecordingRules",
     "MandatoryRelationPairs",

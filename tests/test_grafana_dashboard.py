@@ -4,7 +4,7 @@
 import json
 import unittest
 
-from cosl import GrafanaDashboard, LZMABase64, generate_dashboard_uid
+from cosl import GrafanaDashboard, LZMABase64, DashboardPath40UID
 
 
 class TestRoundTripEncDec(unittest.TestCase):
@@ -31,16 +31,25 @@ class TestGenerateUID(unittest.TestCase):
     """Spec for the UID generation logic."""
 
     def test_uid_length_is_40(self):
-        self.assertEqual(40, len(generate_dashboard_uid("my-charm", "my-dash.json")))
+        self.assertEqual(40, len(DashboardPath40UID.generate("my-charm", "my-dash.json")))
 
     def test_collisions(self):
         """A very naive and primitive collision check that is meant to catch trivial errors."""
         self.assertNotEqual(
-            generate_dashboard_uid("some-charm", "dashboard1.json"),
-            generate_dashboard_uid("some-charm", "dashboard2.json"),
+            DashboardPath40UID.generate("some-charm", "dashboard1.json"),
+            DashboardPath40UID.generate("some-charm", "dashboard2.json"),
         )
 
         self.assertNotEqual(
-            generate_dashboard_uid("some-charm", "dashboard.json"),
-            generate_dashboard_uid("diff-charm", "dashboard.json"),
+            DashboardPath40UID.generate("some-charm", "dashboard.json"),
+            DashboardPath40UID.generate("diff-charm", "dashboard.json"),
         )
+
+    def test_validity(self):
+        """Make sure validity check fails for trivial cases."""
+        self.assertFalse(DashboardPath40UID.is_valid("1234"))
+        self.assertFalse(DashboardPath40UID.is_valid("short non-hex string"))
+        self.assertFalse(DashboardPath40UID.is_valid("non-hex string, crafted to be 40 chars!!"))
+
+        self.assertTrue(DashboardPath40UID.is_valid("0" * 40))
+        self.assertTrue(DashboardPath40UID.is_valid(DashboardPath40UID.generate("some-charm", "dashboard.json")))
