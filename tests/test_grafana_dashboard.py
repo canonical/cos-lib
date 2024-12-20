@@ -4,7 +4,7 @@
 import json
 import unittest
 
-from cosl import GrafanaDashboard, LZMABase64, DashboardPath40UID
+from cosl import DashboardPath40UID, GrafanaDashboard, LZMABase64
 
 
 class TestRoundTripEncDec(unittest.TestCase):
@@ -52,4 +52,8 @@ class TestGenerateUID(unittest.TestCase):
         self.assertFalse(DashboardPath40UID.is_valid("non-hex string, crafted to be 40 chars!!"))
 
         self.assertTrue(DashboardPath40UID.is_valid("0" * 40))
-        self.assertTrue(DashboardPath40UID.is_valid(DashboardPath40UID.generate("some-charm", "dashboard.json")))
+        self.assertTrue(
+            DashboardPath40UID.is_valid(
+                DashboardPath40UID.generate("some-charm", "dashboard.json")
+            )
+        )

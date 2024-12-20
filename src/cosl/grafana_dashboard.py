@@ -10,7 +10,7 @@ import json
 import logging
 import lzma
 import warnings
-from typing import Any, Dict, Tuple, Union, ClassVar
+from typing import Any, ClassVar, Dict, Tuple, Union
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +66,7 @@ class LZMABase64:
 
 
 class DashboardPath40UID:
+    """A helper class for dashboard UID of length 40, generated from charm name and dashboard path."""
 
     length: ClassVar[int] = 40
 
@@ -114,5 +115,3 @@ class DashboardPath40UID:
         except binascii.Error:
             return False
         return True
-
-
