@@ -80,7 +80,7 @@ import logging
 import re
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union, cast
+from typing import Any, Dict, Final, List, Optional, Union, cast
 
 import yaml
 
@@ -92,6 +92,58 @@ from .types import (
 )
 
 logger = logging.getLogger(__name__)
+
+"""
+Generic alert rules are in groups to ensure a predictable group name. The group names must be unique in a Prometheus installation.
+Charmed Prometheus-k8s handles this with injecting JujuTopology information into the group name.
+
+"""
+
+_HOST_DOWN = {
+    "alert": "HostDown",
+    "expr": "up < 1",
+    "for": "5m",
+    "labels": {"severity": "critical"},
+    "annotations": {
+        "summary": "Host '{{ $labels.instance }}' is down.",
+        "description": """Host '{{ $labels.instance }}' is down, failed to scrape.
+                            VALUE = {{ $value }}
+                            LABELS = {{ $labels }}""",
+    },
+}
+
+_HOST_METRICS_MISSING = {
+    "alert": "HostMetricsMissing",
+    "expr": "absent(up)",
+    "for": "5m",
+    "labels": {"severity": "critical"},
+    "annotations": {
+        "summary": "Metrics not received from host '{{ $labels.instance }}', failed to remote write.",
+        "description": """Metrics not received from host '{{ $labels.instance }}', failed to remote write.
+                            VALUE = {{ $value }}
+                            LABELS = {{ $labels }}""",
+    },
+}
+
+# TODO Consider namespacing class GenericAlertRules.application
+GENERIC_APPLICATION_RULES_GROUP: Final = {
+    "groups": [
+        {
+            "name": "HostHealth",
+            "rules": [_HOST_DOWN, _HOST_METRICS_MISSING],
+        },
+    ]
+}
+
+# TODO Mention why Aggregator only has absent
+GENERIC_AGGREGATOR_RULES_GROUP: Final = {
+    "groups": [
+        {
+            "name": "AggregatorHostHealth",
+            "rules": [_HOST_METRICS_MISSING],
+        },
+    ]
+}
 
 
 class InvalidRulePathError(Exception):
