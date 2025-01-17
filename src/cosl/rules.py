@@ -95,7 +95,7 @@ from .types import (
 logger = logging.getLogger(__name__)
 
 
-generic_alert_rules: Final = SimpleNamespace(
+_generic_alert_rules: Final = SimpleNamespace(
     host_down={
         "alert": "HostDown",
         "expr": "up < 1",
@@ -131,7 +131,7 @@ generic_alert_groups: Final = SimpleNamespace(
         "groups": [
             {
                 "name": "HostHealth",
-                "rules": [generic_alert_rules.host_down, generic_alert_rules.host_metrics_missing],
+                "rules": [_generic_alert_rules.host_down, _generic_alert_rules.host_metrics_missing],
             },
         ]
     },
@@ -140,7 +140,7 @@ generic_alert_groups: Final = SimpleNamespace(
         "groups": [
             {
                 "name": "AggregatorHostHealth",
-                "rules": [generic_alert_rules.host_metrics_missing],
+                "rules": [_generic_alert_rules.host_metrics_missing],
             },
         ]
     },
