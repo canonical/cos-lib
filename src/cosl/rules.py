@@ -113,8 +113,7 @@ _generic_alert_rules: Final = SimpleNamespace(
     host_metrics_missing={
         "alert": "HostMetricsMissing",
         # We use "for: 5m" instead of "absent_over_time" because ... (I forget)
-        "expr": "absent(up)",
-        "for": "5m",
+        "expr": "absent_over_time(up[5m])",
         "labels": {"severity": "critical"},
         "annotations": {
             "summary": "Metrics not received from host '{{ $labels.instance }}', failed to remote write.",
