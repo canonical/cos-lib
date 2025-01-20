@@ -96,6 +96,8 @@ logger = logging.getLogger(__name__)
 
 
 _generic_alert_rules: Final = SimpleNamespace(
+    # We use "5m" to avoid false positives on expected temporary "down", e.g. during intentional (re)start.
+    # Juju topology will be later injected by providers of alert rules.
     host_down={
         "alert": "HostDown",
         "expr": "up < 1",
@@ -110,6 +112,7 @@ _generic_alert_rules: Final = SimpleNamespace(
     },
     host_metrics_missing={
         "alert": "HostMetricsMissing",
+        # We use "for: 5m" instead of "absent_over_time" because ... (I forget)
         "expr": "absent(up)",
         "for": "5m",
         "labels": {"severity": "critical"},
@@ -123,10 +126,11 @@ _generic_alert_rules: Final = SimpleNamespace(
 )
 
 """
-Generic alert rules are in groups to ensure a predictable group name. The group names must be unique in a Prometheus installation.
-Charmed Prometheus-k8s handles this with injecting JujuTopology information into the group name.
+Generic alert rules are in groups to ensure a predictable group name.
 """
 generic_alert_groups: Final = SimpleNamespace(
+    # Group names must be unique per alert rule file. The final group names may be adjusted by the
+    # providers of alert rules to include some topology information, to addresses deduplication.
     application_rules={
         "groups": [
             {
@@ -138,9 +142,8 @@ generic_alert_groups: Final = SimpleNamespace(
             },
         ]
     },
-    # If we push to Prometheus via remote-write with an aggregator, there are no
-    # UP metrics associated. Only a time series for the metrics we have pushed is available
-    # so omit the HostDown and keep the HostMetricsMissing rules.
+    # If we push to Prometheus via remote-write with an aggregator, there are no UP metrics associated.
+    # Only a time series for the metrics we have pushed is available so omit the HostDown rule.
     aggregator_rules={
         "groups": [
             {
