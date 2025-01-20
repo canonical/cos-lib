@@ -140,7 +140,7 @@ generic_alert_groups: Final = SimpleNamespace(
     },
     # If we push to Prometheus via remote-write with an aggregator, there are no
     # UP metrics associated. Only a time series for the metrics we have pushed is available
-    # so ommit the HostDown and keep the HostMetricsMissing rules.
+    # so omit the HostDown and keep the HostMetricsMissing rules.
     aggregator_rules={
         "groups": [
             {
