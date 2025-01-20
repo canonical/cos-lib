@@ -124,7 +124,7 @@ _generic_alert_rules: Final = SimpleNamespace(
         },
     },
     host_metrics_missing_1={
-        "alert": "HostMetricsMissing",
+        "alert": "HostMetricsMissing1",
         # We use "for: 5m" instead of "absent_over_time" because ... (I forget)
         "expr": "absent_over_time(up[5m])",
         "labels": {"severity": "critical"},
