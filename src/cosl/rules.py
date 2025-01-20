@@ -147,7 +147,10 @@ generic_alert_groups: Final = SimpleNamespace(
         "groups": [
             {
                 "name": "AggregatorHostHealth",
-                "rules": [_generic_alert_rules.host_metrics_missing],
+                "rules": [
+                    _generic_alert_rules.host_down,
+                    _generic_alert_rules.host_metrics_missing,
+                ],
             },
         ]
     },
