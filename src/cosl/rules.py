@@ -112,7 +112,8 @@ _generic_alert_rules: Final = SimpleNamespace(
     },
     host_metrics_missing={
         "alert": "HostMetricsMissing",
-        # We use "for: 5m" instead of "absent_over_time" because ... (I forget)
+        # We use "absent(up)" with "for: 5m" because the alert transitions from "Pending" to "Firing".
+        # If query portability is desired, "absent_over_time(up[5m])" is an alternative.
         "expr": "absent(up)",
         "for": "5m",
         "labels": {"severity": "critical"},
@@ -148,7 +149,9 @@ generic_alert_groups: Final = SimpleNamespace(
         "groups": [
             {
                 "name": "AggregatorHostHealth",
-                "rules": [_generic_alert_rules.host_metrics_missing],
+                "rules": [
+                    _generic_alert_rules.host_metrics_missing,
+                ],
             },
         ]
     },
