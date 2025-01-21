@@ -112,21 +112,10 @@ _generic_alert_rules: Final = SimpleNamespace(
     },
     host_metrics_missing={
         "alert": "HostMetricsMissing",
-        # We use "for: 5m" instead of "absent_over_time" because ... (I forget)
+        # We use "absent(up)" with "for: 5m" because the alert transitions from "Pending" to "Firing".
+        # If query portability is desired, "absent_over_time(up[5m])" is an alternative.
         "expr": "absent(up)",
         "for": "5m",
-        "labels": {"severity": "critical"},
-        "annotations": {
-            "summary": "Metrics not received from host '{{ $labels.instance }}', failed to remote write.",
-            "description": """Metrics not received from host '{{ $labels.instance }}', failed to remote write.
-                            VALUE = {{ $value }}
-                            LABELS = {{ $labels }}""",
-        },
-    },
-    host_metrics_missing_1={
-        "alert": "HostMetricsMissing1",
-        # We use "for: 5m" instead of "absent_over_time" because ... (I forget)
-        "expr": "absent_over_time(up[5m])",
         "labels": {"severity": "critical"},
         "annotations": {
             "summary": "Metrics not received from host '{{ $labels.instance }}', failed to remote write.",
@@ -150,7 +139,6 @@ generic_alert_groups: Final = SimpleNamespace(
                 "rules": [
                     _generic_alert_rules.host_down,
                     _generic_alert_rules.host_metrics_missing,
-                    _generic_alert_rules.host_metrics_missing_1,
                 ],
             },
         ]
@@ -162,9 +150,7 @@ generic_alert_groups: Final = SimpleNamespace(
             {
                 "name": "AggregatorHostHealth",
                 "rules": [
-                    _generic_alert_rules.host_down,
                     _generic_alert_rules.host_metrics_missing,
-                    _generic_alert_rules.host_metrics_missing_1,
                 ],
             },
         ]
