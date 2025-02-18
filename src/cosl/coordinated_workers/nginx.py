@@ -210,11 +210,11 @@ class NginxPrometheusExporter:
 
 def is_ipv6_enabled() -> bool:
     """Check if IPv6 is enabled on the container's network interfaces."""
-    exit_code, output = subprocess.getstatusoutput("ip -6 address show")
-    if exit_code != 0:
+    try:
+        output = subprocess.run(
+            ["ip", "-6", "address", "show"], check=True, capture_output=True, text=True
+        )
+    except subprocess.CalledProcessError:
         # if running the command failed for any reason, assume ipv6 is not enabled.
-        logger.warning(f"Disabling ipv6 in nginx config: {output}")
         return False
-    if output:
-        return True
-    return False
+    return bool(output.stdout)
