@@ -903,3 +903,51 @@ def test_get_workload_tracing_receivers(remote_databag, expected):
         charm = mgr.charm
         # THEN the charm tracing receivers are picked up correctly
         assert charm.worker.cluster.get_workload_tracing_receivers() == expected
+
+
+@pytest.mark.parametrize(
+    "remote_databag, expected",
+    (
+        (
+            {
+                "worker_config_version": json.dumps("2.5.1"),
+                "worker_config": json.dumps("test"),
+            },
+            "2.5.1",
+        ),
+        (
+            {"worker_config": json.dumps("test")},
+            None,
+        ),
+    ),
+)
+def test_get_worker_config_version(remote_databag, expected):
+    # GIVEN a charm with a relation
+    ctx = testing.Context(
+        MyCharm,
+        meta={
+            "name": "foo",
+            "requires": {"cluster": {"interface": "cluster"}},
+            "containers": {"foo": {"type": "oci-image"}},
+        },
+        config={"options": {"role-all": {"type": "boolean", "default": True}}},
+    )
+    container = testing.Container(
+        "foo",
+        execs={testing.Exec(("update-ca-certificates", "--fresh"))},
+        can_connect=True,
+    )
+
+    relation = testing.Relation(
+        "cluster",
+        remote_app_data=remote_databag,
+    )
+
+    # WHEN the relation changes
+    with ctx(
+        ctx.on.relation_changed(relation),
+        testing.State(containers={container}, relations={relation}),
+    ) as mgr:
+        charm = mgr.charm
+        # THEN the charm tracing receivers are picked up correctly
+        assert charm.worker.cluster.get_worker_config_version() == expected

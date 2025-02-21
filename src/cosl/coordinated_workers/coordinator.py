@@ -237,7 +237,7 @@ class Coordinator(ops.Object):
             workload_tracing_protocols: A list of protocols that the worker intends to send
                 workload traces with.
             catalogue_item: A catalogue application entry to be sent to catalogue.
-            worker_config_version: A function generating the worker's workload version that corresponds to the generated worker config.
+            worker_config_version: A function returning the workload version for which the generated worker config is intended.
 
         Raises:
         ValueError:
@@ -376,6 +376,14 @@ class Coordinator(ops.Object):
                 "the situation is resolved by the cloud admin, to avoid data loss."
             )
             return
+
+        if len(self.cluster.gather_workload_versions()) > 1:
+            logger.error(
+                f"Incoherent deployment. {charm.unit.name} is connected to workers that are running "
+                f"different workload versions: {', '.join(self.cluster.gather_workload_versions())}. "
+                "This charm will be unresponsive and refuse to handle any event until "
+                "the situation is resolved by the cloud admin, to avoid data loss."
+            )
 
         self._reconcile()
 

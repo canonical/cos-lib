@@ -200,3 +200,51 @@ def test_status_check_k8s_patch_success_after_retries(
     ):
         state_out = ctx.run(ctx.on.update_status(), state_intermediate)
     assert state_out.unit_status == ops.ActiveStatus("Degraded.")
+
+
+def worker_with_version(version: str):
+    app_data = {}
+    ClusterProviderAppData(worker_config="some: yaml").dump(app_data)
+    remote_app_data = {}
+    ClusterRequirerAppData(role="role", workload_version=version).dump(remote_app_data)
+    return testing.Relation("cluster", local_app_data=app_data, remote_app_data=remote_app_data)
+
+
+@patch(
+    "charms.observability_libs.v0.kubernetes_compute_resources_patch.ResourcePatcher.apply",
+    MagicMock(return_value=None),
+)
+def test_status_check_workers_same_versions(ctx, base_state, s3, caplog):
+    state = set_containers(base_state, True, True)
+
+    # GIVEN workers that have the same workload version
+    state = dataclasses.replace(
+        state, relations={s3, worker_with_version("1.0"), worker_with_version("1.0")}
+    )
+
+    # WHEN we run any event
+    state_out = ctx.run(ctx.on.config_changed(), state)
+
+    # THEN the charm sets active
+    assert state_out.unit_status == ops.ActiveStatus()
+
+
+@patch(
+    "charms.observability_libs.v0.kubernetes_compute_resources_patch.ResourcePatcher.apply",
+    MagicMock(return_value=None),
+)
+def test_status_check_workers_different_versions(ctx, base_state, s3, caplog):
+    state = set_containers(base_state, True, True)
+
+    # GIVEN workers that have different workload version
+    state = dataclasses.replace(
+        state, relations={s3, worker_with_version("1.0"), worker_with_version("2.0")}
+    )
+
+    # WHEN we run any event
+    state_out = ctx.run(ctx.on.config_changed(), state)
+
+    # THEN the charm sets blocked
+    assert state_out.unit_status == ops.BlockedStatus(
+        "[consistency] Workers are running different versions: 1.0, 2.0"
+    )

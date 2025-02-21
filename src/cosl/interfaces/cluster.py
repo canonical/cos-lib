@@ -98,7 +98,7 @@ class ClusterRequirerAppData(cosl.interfaces.utils.DatabagModel):
 
     role: str
     workload_version: Optional[str] = None
-    """The version of the worker's workload."""
+    """The worker's workload version."""
 
 
 class ClusterRequirerUnitData(cosl.interfaces.utils.DatabagModel):
@@ -115,7 +115,7 @@ class ClusterProviderAppData(cosl.interfaces.utils.DatabagModel):
     worker_config: str
     """The whole worker workload configuration, whatever it is. E.g. yaml-encoded things."""
     worker_config_version: Optional[str] = None
-    """The version of the worker's workload that corresponds to the generated `worker_config`."""
+    """The workload version for which the generated `worker_config` is intended."""
 
     ### self-monitoring stuff
     loki_endpoints: Optional[Dict[str, str]] = None
@@ -347,7 +347,7 @@ class ClusterProvider(Object):
         return None
 
     def gather_workload_versions(self) -> Set[str]:
-        """Gather workerss published workload versions."""
+        """Gather workers' published workload versions."""
         data: Set[str] = set()
         for relation in self._relations:
             if relation.app:
