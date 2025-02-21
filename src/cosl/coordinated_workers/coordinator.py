@@ -611,6 +611,14 @@ class Coordinator(ops.Object):
             # if is_recommended is None: it means we don't have a recommended deployment criterion.
             statuses.append(ops.ActiveStatus("Degraded."))
 
+        worker_versions = self.cluster.gather_workload_versions()
+        if len(worker_versions) > 1:
+            statuses.append(
+                ops.BlockedStatus(
+                    f"[consistency] Workers are running different versions: {', '.join(worker_versions)}"
+                )
+            )
+
         if not self.s3_requirer.relations:
             statuses.append(ops.BlockedStatus("[s3] Missing S3 integration."))
         elif not self.s3_ready:

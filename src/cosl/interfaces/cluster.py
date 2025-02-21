@@ -346,6 +346,24 @@ class ClusterProvider(Object):
             return address_set.pop()
         return None
 
+    def gather_workload_versions(self) -> Set[str]:
+        """Gather workerss published workload versions."""
+        data: Set[str] = set()
+        for relation in self._relations:
+            if relation.app:
+                remote_app_databag = relation.data[relation.app]
+                try:
+                    workload_version = ClusterRequirerAppData.load(
+                        remote_app_databag
+                    ).workload_version
+                except cosl.interfaces.utils.DataValidationError as e:
+                    log.error(f"invalid databag contents: {e}")
+                    continue
+
+                if workload_version:
+                    data.add(workload_version)
+        return data
+
     def _remote_data_ready(self, relation: ops.Relation) -> bool:
         """Verify that each worker unit and the worker leader have published their data to the cluster relation.
 
