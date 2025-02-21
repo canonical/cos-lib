@@ -45,5 +45,8 @@ def patch_all(tmp_path: Path):
                 new=Path(tmp_path / "rootcacert"),
             )
         )
+        stack.enter_context(
+            patch("cosl.coordinated_workers.worker.Worker.running_version", lambda _: "2.0")
+        )
 
         yield

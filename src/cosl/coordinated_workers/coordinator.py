@@ -208,6 +208,7 @@ class Coordinator(ops.Object):
         remote_write_endpoints: Optional[Callable[[], List[RemoteWriteEndpoint]]] = None,
         workload_tracing_protocols: Optional[List[ReceiverProtocol]] = None,
         catalogue_item: Optional[CatalogueItem] = None,
+        worker_config_version: Optional[Callable[["Coordinator"], Optional[str]]] = None,
     ):
         """Constructor for a Coordinator object.
 
@@ -236,6 +237,7 @@ class Coordinator(ops.Object):
             workload_tracing_protocols: A list of protocols that the worker intends to send
                 workload traces with.
             catalogue_item: A catalogue application entry to be sent to catalogue.
+            worker_config_version: A function generating the worker's workload version that corresponds to the generated worker config.
 
         Raises:
         ValueError:
@@ -273,7 +275,12 @@ class Coordinator(ops.Object):
             partial(nginx_config, self),
             options=nginx_options,
         )
+
         self._workers_config_getter = partial(workers_config, self)
+        self._workers_config_version_getter = (
+            partial(worker_config_version, self) if worker_config_version else lambda: None
+        )
+
         self.nginx_exporter = NginxPrometheusExporter(self._charm, options=nginx_options)
 
         self.cert_handler = CertHandler(
@@ -694,6 +701,7 @@ class Coordinator(ops.Object):
         # are no changes, Juju will notice there's no delta and do nothing
         self.cluster.publish_data(
             worker_config=self._workers_config_getter(),
+            worker_config_version=self._workers_config_version_getter(),
             loki_endpoints=self.loki_endpoints_by_unit,
             # all arguments below are optional:
             ca_cert=self.cert_handler.ca_cert,
@@ -767,5 +775,7 @@ class Coordinator(ops.Object):
             "memory": self._charm.model.config.get(memory_limit_key),
         }
         return adjust_resource_requirements(
-            limits, self._resources_requests_getter(), adhere_to_requests=True  # type: ignore
+            limits,
+            self._resources_requests_getter(),  # type: ignore
+            adhere_to_requests=True,
         )

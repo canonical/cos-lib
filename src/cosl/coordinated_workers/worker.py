@@ -556,7 +556,7 @@ class Worker(ops.Object):
         if self._charm.unit.is_leader() and self.roles:
             logger.info(f"publishing roles: {self.roles}")
             try:
-                self.cluster.publish_app_roles(self.roles)
+                self.cluster.publish_app_data(self.roles, self.running_version())
             except ModelError as e:
                 # if we are handling an event prior to 'install', we could be denied write access
                 # Swallowing the exception here relies on the reconciler pattern - this will be

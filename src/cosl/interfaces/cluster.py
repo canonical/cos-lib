@@ -97,6 +97,8 @@ class ClusterRequirerAppData(cosl.interfaces.utils.DatabagModel):
     """App data that the worker sends to the coordinator."""
 
     role: str
+    workload_version: Optional[str] = None
+    """The version of the worker's workload."""
 
 
 class ClusterRequirerUnitData(cosl.interfaces.utils.DatabagModel):
@@ -112,6 +114,8 @@ class ClusterProviderAppData(cosl.interfaces.utils.DatabagModel):
     ### worker node configuration
     worker_config: str
     """The whole worker workload configuration, whatever it is. E.g. yaml-encoded things."""
+    worker_config_version: Optional[str] = None
+    """The version of the worker's workload that corresponds to the generated `worker_config`."""
 
     ### self-monitoring stuff
     loki_endpoints: Optional[Dict[str, str]] = None
@@ -213,6 +217,7 @@ class ClusterProvider(Object):
     def publish_data(
         self,
         worker_config: str,
+        worker_config_version: Optional[str],
         ca_cert: Optional[str] = None,
         server_cert: Optional[str] = None,
         s3_tls_ca_chain: Optional[str] = None,
@@ -227,6 +232,7 @@ class ClusterProvider(Object):
             if relation and self._remote_data_ready(relation):
                 local_app_databag = ClusterProviderAppData(
                     worker_config=worker_config,
+                    worker_config_version=worker_config_version,
                     loki_endpoints=loki_endpoints,
                     ca_cert=ca_cert,
                     server_cert=server_cert,
@@ -259,7 +265,6 @@ class ClusterProvider(Object):
         """Go through the worker's unit databags to collect all the addresses published by the units, by role."""
         data: Dict[str, Set[str]] = collections.defaultdict(set)
         for relation in self._relations:
-
             if not relation.app:
                 log.debug(f"skipped {relation} as .app is None")
                 continue
@@ -388,13 +393,16 @@ class ClusterRequirer(Object):
         )
 
         self.framework.observe(
-            self._charm.on[endpoint].relation_changed, self._on_cluster_relation_changed  # type: ignore
+            self._charm.on[endpoint].relation_changed,
+            self._on_cluster_relation_changed,  # type: ignore
         )
         self.framework.observe(
-            self._charm.on[endpoint].relation_created, self._on_cluster_relation_created  # type: ignore
+            self._charm.on[endpoint].relation_created,
+            self._on_cluster_relation_created,  # type: ignore
         )
         self.framework.observe(
-            self._charm.on[endpoint].relation_broken, self._on_cluster_relation_broken  # type: ignore
+            self._charm.on[endpoint].relation_broken,
+            self._on_cluster_relation_broken,  # type: ignore
         )
 
     def _on_cluster_relation_broken(self, _event: ops.RelationBrokenEvent):
@@ -453,14 +461,17 @@ class ClusterRequirer(Object):
             unit_databag = relation.data[self.model.unit]  # type: ignore # all checks are done in __init__
             databag_model.dump(unit_databag)
 
-    def publish_app_roles(self, roles: Iterable[str]):
-        """Publish this application's roles via the application databag."""
+    def publish_app_data(self, roles: Iterable[str], version: Optional[str]):
+        """Publish this application's data (i.e roles and workload version) via the application databag."""
         if not self._charm.unit.is_leader():
-            raise DatabagAccessPermissionError("only the leader unit can publish roles.")
+            raise DatabagAccessPermissionError("only the leader unit can publish app data.")
 
         relation = self.relation
         if relation:
-            databag_model = ClusterRequirerAppData(role=",".join(roles))
+            databag_model = ClusterRequirerAppData(
+                role=",".join(roles),
+                workload_version=version,
+            )
             databag_model.dump(relation.data[self.model.app])
 
     def _get_data_from_coordinator(self) -> Optional[ClusterProviderAppData]:
@@ -478,6 +489,13 @@ class ClusterRequirer(Object):
                 return None  # explicit is better than implicit
 
         return data
+
+    def get_worker_config_version(self) -> Optional[str]:
+        """Fetch the worker config workload version from the coordinator databag."""
+        data = self._get_data_from_coordinator()
+        if data:
+            return data.worker_config_version
+        return None
 
     def get_worker_config(self) -> Dict[str, Any]:
         """Fetch the worker config from the coordinator databag."""
