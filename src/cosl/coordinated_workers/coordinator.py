@@ -6,6 +6,7 @@
 import glob
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -20,7 +21,9 @@ from typing import (
     List,
     Mapping,
     Optional,
+    Protocol,
     Set,
+    Tuple,
     TypedDict,
 )
 from urllib.parse import urlparse
@@ -53,7 +56,6 @@ check_libs_installed(
     "charms.tls_certificates_interface.v3.tls_certificates",
     "charms.catalogue_k8s.v1.catalogue",
 )
-
 from charms.catalogue_k8s.v1.catalogue import CatalogueConsumer, CatalogueItem
 from charms.data_platform_libs.v0.s3 import S3Requirer
 from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
@@ -183,6 +185,132 @@ _ResourceLimitOptionsMapping = TypedDict(
 """Mapping of the resources limit option names that the charms use, as defined in config.yaml."""
 
 
+@dataclass(frozen=True)
+class VersionRange:
+    """Representation of a range of versions."""
+
+    lower: Tuple[int, int, int]
+    lower_inclusive: bool
+    upper: Tuple[int, int, int]
+    upper_inclusive: bool
+
+
+class ConfigBuilder(Protocol):
+    """An interface for building worker configs."""
+
+    @property
+    def version_range(self) -> VersionRange:
+        """The range of versions that this config builder supports."""
+        ...
+
+    def build(self, coordinator: "Coordinator") -> str:
+        """Build a worker config."""
+        ...
+
+
+class ConfigBuilderFactory:
+    """Factory to build a worker config using a corresponding version-specific config builder."""
+
+    def __init__(
+        self,
+        coordinator: "Coordinator",
+        config_generator: Callable[["Coordinator"], str],
+        config_builders: Optional[List[ConfigBuilder]] = None,
+    ):
+        self._coordinator = coordinator
+        self._config_builders = config_builders
+        self._config_generator = config_generator
+        self._versions_to_builders = self._construct_versions_map()
+
+    def build_config(self) -> str:
+        """Build a worker config."""
+        if self._config_builders:
+            builder = self._find_version_builder(self.get_version() or "")
+            if not builder:
+                # don't send a config if the worker requests a config for a version that is not supported
+                return ""
+            return builder.build(self._coordinator)
+        else:
+            # backwards-compatibility: generate the config using `workers_config` argument passed from the charm
+            return self._config_generator(self._coordinator)
+
+    def get_version(self) -> Optional[str]:
+        """Determines the workload version that the config is intended for."""
+        if not self._config_builders:
+            # if config_builders are not used
+            return None
+
+        worker_versions = self._coordinator.cluster.gather_workload_versions()
+        requested_version = next(iter(worker_versions), None)
+        if not requested_version:
+            # if the worker is not yet updated to request a specific config version,
+            # return the default supported version
+            return self._default_version
+
+        # return the requested version if it is supported
+        if self._find_version_builder(requested_version):
+            return requested_version
+        # or None if the worker requested a version that is not supported
+        return None
+
+    def _construct_versions_map(self) -> Optional[Dict[VersionRange, ConfigBuilder]]:
+        if not self._config_builders:
+            return None
+        version_ranges: Dict[VersionRange, ConfigBuilder] = {}
+        for builder in self._config_builders:
+            version_ranges[builder.version_range] = builder
+        return version_ranges
+
+    @property
+    def _default_version(self) -> Optional[str]:
+        """Returns the lowest supported version."""
+        if not self._versions_to_builders:
+            return None
+        min_version = (math.inf, math.inf, math.inf)
+        for version_range, _ in self._versions_to_builders.items():
+            if version_range.lower < min_version:
+                version_range_lower = version_range.lower
+                if version_range.lower_inclusive:
+                    min_version = version_range_lower
+                else:
+                    # if its not inclusive, increment the patch version by 1
+                    min_version = (
+                        version_range_lower[0],
+                        version_range_lower[1],
+                        version_range_lower[2] + 1,
+                    )
+        if min_version == (math.inf, math.inf, math.inf):
+            return None
+        return ".".join(map(str, min_version))
+
+    def _parse_version(self, version: str) -> Optional[Tuple[int, int, int]]:
+        """Parses a version string into a tuple of (major, minor, patch)."""
+        if not version:
+            return None
+        if version == "0":
+            return (0, 0, 0)
+        parts = list(map(int, version.split(".")))
+        return tuple(parts + [0] * (3 - len(parts)))  # type: ignore
+
+    def _find_version_builder(self, version: str) -> Optional[ConfigBuilder]:
+        """Finds the correct builder for this version."""
+        if not self._versions_to_builders:
+            return None
+        parsed_version = self._parse_version(version)
+        if not parsed_version:
+            return None
+        for version_range, builder in self._versions_to_builders.items():
+            lower = version_range.lower
+            lower_inclusive = version_range.lower_inclusive
+            upper = version_range.upper
+            upper_inclusive = version_range.upper_inclusive
+            if (lower < parsed_version or (lower_inclusive and lower == parsed_version)) and (
+                parsed_version < upper or (upper_inclusive and parsed_version == upper)
+            ):
+                return builder
+        return None
+
+
 class Coordinator(ops.Object):
     """Charming coordinator.
 
@@ -208,7 +336,7 @@ class Coordinator(ops.Object):
         remote_write_endpoints: Optional[Callable[[], List[RemoteWriteEndpoint]]] = None,
         workload_tracing_protocols: Optional[List[ReceiverProtocol]] = None,
         catalogue_item: Optional[CatalogueItem] = None,
-        worker_config_version: Optional[Callable[["Coordinator"], Optional[str]]] = None,
+        config_builders: Optional[List[ConfigBuilder]] = None,
     ):
         """Constructor for a Coordinator object.
 
@@ -237,7 +365,7 @@ class Coordinator(ops.Object):
             workload_tracing_protocols: A list of protocols that the worker intends to send
                 workload traces with.
             catalogue_item: A catalogue application entry to be sent to catalogue.
-            worker_config_version: A function returning the workload version for which the generated worker config is intended.
+            config_builders: An optional list of config builders that will be used for multi-config generation.
 
         Raises:
         ValueError:
@@ -269,6 +397,7 @@ class Coordinator(ops.Object):
         self._resources_limit_options = resources_limit_options or {}
         self.remote_write_endpoints_getter = remote_write_endpoints
         self._catalogue_item = catalogue_item
+        self._config_builders = config_builders
 
         self.nginx = Nginx(
             self._charm,
@@ -276,9 +405,10 @@ class Coordinator(ops.Object):
             options=nginx_options,
         )
 
-        self._workers_config_getter = partial(workers_config, self)
-        self._workers_config_version_getter = (
-            partial(worker_config_version, self) if worker_config_version else lambda: None
+        self._workers_config = ConfigBuilderFactory(
+            self,
+            workers_config,
+            config_builders,
         )
 
         self.nginx_exporter = NginxPrometheusExporter(self._charm, options=nginx_options)
@@ -620,12 +750,20 @@ class Coordinator(ops.Object):
             statuses.append(ops.ActiveStatus("Degraded."))
 
         worker_versions = self.cluster.gather_workload_versions()
-        if len(worker_versions) > 1:
-            statuses.append(
-                ops.BlockedStatus(
-                    f"[consistency] Workers are running different versions: {', '.join(worker_versions)}"
+        worker_versions_len = len(worker_versions)
+        if worker_versions_len > 0:
+            if worker_versions_len > 1:
+                statuses.append(
+                    ops.BlockedStatus(
+                        f"[consistency] Workers are running different versions: {', '.join(sorted(worker_versions))}"
+                    )
                 )
-            )
+            if self._config_builders and not self._workers_config.get_version():
+                statuses.append(
+                    ops.BlockedStatus(
+                        f"Workers are requesting a config for a version: {worker_versions.pop()} that is not supported."
+                    )
+                )
 
         if not self.s3_requirer.relations:
             statuses.append(ops.BlockedStatus("[s3] Missing S3 integration."))
@@ -716,8 +854,8 @@ class Coordinator(ops.Object):
         # On every function call, we always publish everything to the databag; however, if there
         # are no changes, Juju will notice there's no delta and do nothing
         self.cluster.publish_data(
-            worker_config=self._workers_config_getter(),
-            worker_config_version=self._workers_config_version_getter(),
+            worker_config=self._workers_config.build_config(),
+            worker_config_version=self._workers_config.get_version(),
             loki_endpoints=self.loki_endpoints_by_unit,
             # all arguments below are optional:
             ca_cert=self.cert_handler.ca_cert,

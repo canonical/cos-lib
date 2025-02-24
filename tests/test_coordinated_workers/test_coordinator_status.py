@@ -8,7 +8,7 @@ import tenacity
 from lightkube import ApiError
 from ops import testing
 
-from cosl.coordinated_workers.coordinator import ClusterRolesConfig, Coordinator
+from cosl.coordinated_workers.coordinator import ClusterRolesConfig, Coordinator, VersionRange
 from cosl.interfaces.cluster import ClusterProviderAppData, ClusterRequirerAppData
 from tests.test_coordinated_workers.test_worker_status import k8s_patch
 
@@ -18,6 +18,20 @@ my_roles = ClusterRolesConfig(
     minimal_deployment={"role": 1},
     recommended_deployment={"role": 2},
 )
+
+
+class MyConfigBuilder:
+    @property
+    def version_range(self):
+        return VersionRange(
+            lower=(2, 7, 1),
+            lower_inclusive=True,
+            upper=(2, 8, 0),
+            upper_inclusive=False,
+        )
+
+    def build(self, coordinator: Coordinator) -> str:
+        return "worker config v2.7,1"
 
 
 class MyCoordCharm(ops.CharmBase):
@@ -48,6 +62,35 @@ class MyCoordCharm(ops.CharmBase):
         )
 
 
+class MyCoordCharmWithBuilders(ops.CharmBase):
+    def __init__(self, framework: ops.Framework):
+        super().__init__(framework)
+
+        self.coordinator = Coordinator(
+            charm=self,
+            roles_config=my_roles,
+            external_url="localhost:3200",
+            worker_metrics_port="8080",
+            endpoints={
+                "cluster": "cluster",
+                "s3": "s3",
+                "certificates": "certificates",
+                "grafana-dashboards": "grafana-dashboard",
+                "logging": "logging",
+                "metrics": "metrics-endpoint",
+                "charm-tracing": "self-charm-tracing",
+                "workload-tracing": "self-workload-tracing",
+                "send-datasource": None,
+                "receive-datasource": "my-ds-exchange-require",
+            },
+            nginx_config=lambda _: "nginx config",
+            workers_config=lambda _: "worker config",
+            resources_requests=lambda _: {"cpu": "50m", "memory": "100Mi"},
+            container_name="charm",
+            config_builders=[MyConfigBuilder()],
+        )
+
+
 @pytest.fixture
 def coord_charm():
     with k8s_patch():
@@ -55,31 +98,44 @@ def coord_charm():
 
 
 @pytest.fixture
-def ctx(coord_charm):
-    return testing.Context(
-        coord_charm,
-        meta={
-            "name": "lilith",
-            "requires": {
-                "s3": {"interface": "s3"},
-                "logging": {"interface": "loki_push_api"},
-                "certificates": {"interface": "tls-certificates"},
-                "self-charm-tracing": {"interface": "tracing", "limit": 1},
-                "self-workload-tracing": {"interface": "tracing", "limit": 1},
-                "my-ds-exchange-require": {"interface": "grafana_datasource_exchange"},
-            },
-            "provides": {
-                "cluster": {"interface": "cluster"},
-                "grafana-dashboard": {"interface": "grafana_dashboard"},
-                "metrics-endpoint": {"interface": "prometheus_scrape"},
-                "my-ds-exchange-provide": {"interface": "grafana_datasource_exchange"},
-            },
-            "containers": {
-                "nginx": {"type": "oci-image"},
-                "nginx-prometheus-exporter": {"type": "oci-image"},
-            },
+def coord_with_builder_charm():
+    with k8s_patch():
+        yield MyCoordCharmWithBuilders
+
+
+@pytest.fixture
+def meta():
+    return {
+        "name": "lilith",
+        "requires": {
+            "s3": {"interface": "s3"},
+            "logging": {"interface": "loki_push_api"},
+            "certificates": {"interface": "tls-certificates"},
+            "self-charm-tracing": {"interface": "tracing", "limit": 1},
+            "self-workload-tracing": {"interface": "tracing", "limit": 1},
+            "my-ds-exchange-require": {"interface": "grafana_datasource_exchange"},
         },
-    )
+        "provides": {
+            "cluster": {"interface": "cluster"},
+            "grafana-dashboard": {"interface": "grafana_dashboard"},
+            "metrics-endpoint": {"interface": "prometheus_scrape"},
+            "my-ds-exchange-provide": {"interface": "grafana_datasource_exchange"},
+        },
+        "containers": {
+            "nginx": {"type": "oci-image"},
+            "nginx-prometheus-exporter": {"type": "oci-image"},
+        },
+    }
+
+
+@pytest.fixture
+def ctx_with_builder(coord_with_builder_charm, meta):
+    return testing.Context(coord_with_builder_charm, meta=meta)
+
+
+@pytest.fixture
+def ctx(coord_charm, meta):
+    return testing.Context(coord_charm, meta=meta)
 
 
 @pytest.fixture()
@@ -247,4 +303,23 @@ def test_status_check_workers_different_versions(ctx, base_state, s3, caplog):
     # THEN the charm sets blocked
     assert state_out.unit_status == ops.BlockedStatus(
         "[consistency] Workers are running different versions: 1.0, 2.0"
+    )
+
+
+@patch(
+    "charms.observability_libs.v0.kubernetes_compute_resources_patch.ResourcePatcher.apply",
+    MagicMock(return_value=None),
+)
+def test_status_check_with_unsupported_version(ctx_with_builder, base_state, s3):
+    state = set_containers(base_state, True, True)
+
+    # GIVEN a worker with an unsupported workload version
+    state = dataclasses.replace(state, relations={s3, worker_with_version("2.6")})
+
+    # WHEN we run any event
+    state_out = ctx_with_builder.run(ctx_with_builder.on.config_changed(), state)
+
+    # THEN the charm sets blocked
+    assert state_out.unit_status == ops.BlockedStatus(
+        "Workers are requesting a config for a version: 2.6 that is not supported."
     )
