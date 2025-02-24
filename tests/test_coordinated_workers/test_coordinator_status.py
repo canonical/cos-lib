@@ -31,7 +31,7 @@ class MyConfigBuilder:
         )
 
     def build(self, coordinator: Coordinator) -> str:
-        return "worker config v2.7,1"
+        return "custom worker config"
 
 
 class MyCoordCharm(ops.CharmBase):
@@ -306,20 +306,38 @@ def test_status_check_workers_different_versions(ctx, base_state, s3, caplog):
     )
 
 
+@pytest.mark.parametrize(
+    "worker_version, expected_version, expected_config, expected_state",
+    (
+        ("2.6", None, "", "blocked"),
+        ("2.7.2", "2.7.2", "custom worker config", "active"),
+        (None, "2.7.1", "custom worker config", "active"),
+    ),
+)
 @patch(
     "charms.observability_libs.v0.kubernetes_compute_resources_patch.ResourcePatcher.apply",
     MagicMock(return_value=None),
 )
-def test_status_check_with_unsupported_version(ctx_with_builder, base_state, s3):
+def test_status_check_with_config_builder(
+    ctx_with_builder,
+    base_state,
+    s3,
+    worker_version,
+    expected_version,
+    expected_config,
+    expected_state,
+):
     state = set_containers(base_state, True, True)
 
     # GIVEN a worker with an unsupported workload version
-    state = dataclasses.replace(state, relations={s3, worker_with_version("2.6")})
+    state = dataclasses.replace(state, relations={s3, worker_with_version(worker_version)})
 
     # WHEN we run any event
-    state_out = ctx_with_builder.run(ctx_with_builder.on.config_changed(), state)
+    with ctx_with_builder(ctx_with_builder.on.config_changed(), state) as mgr:
+        charm = mgr.charm
+        state_out = mgr.run()
+        assert charm.coordinator._config_builder_factory.get_version() == expected_version
+        assert charm.coordinator._config_builder_factory.build_config() == expected_config
 
-    # THEN the charm sets blocked
-    assert state_out.unit_status == ops.BlockedStatus(
-        "Workers are requesting a config for a version: 2.6 that is not supported."
-    )
+        # THEN the charm sets state
+        assert state_out.unit_status.name == expected_state

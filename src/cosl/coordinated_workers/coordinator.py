@@ -405,7 +405,7 @@ class Coordinator(ops.Object):
             options=nginx_options,
         )
 
-        self._workers_config = ConfigBuilderFactory(
+        self._config_builder_factory = ConfigBuilderFactory(
             self,
             workers_config,
             config_builders,
@@ -758,7 +758,7 @@ class Coordinator(ops.Object):
                         f"[consistency] Workers are running different versions: {', '.join(sorted(worker_versions))}"
                     )
                 )
-            if self._config_builders and not self._workers_config.get_version():
+            if self._config_builders and not self._config_builder_factory.get_version():
                 statuses.append(
                     ops.BlockedStatus(
                         f"Workers are requesting a config for a version: {worker_versions.pop()} that is not supported."
@@ -854,8 +854,8 @@ class Coordinator(ops.Object):
         # On every function call, we always publish everything to the databag; however, if there
         # are no changes, Juju will notice there's no delta and do nothing
         self.cluster.publish_data(
-            worker_config=self._workers_config.build_config(),
-            worker_config_version=self._workers_config.get_version(),
+            worker_config=self._config_builder_factory.build_config(),
+            worker_config_version=self._config_builder_factory.get_version(),
             loki_endpoints=self.loki_endpoints_by_unit,
             # all arguments below are optional:
             ca_cert=self.cert_handler.ca_cert,
