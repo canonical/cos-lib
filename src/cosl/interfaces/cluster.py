@@ -23,8 +23,7 @@ from typing import (
     NamedTuple,
     Optional,
     Set,
-    Tuple, Callable, Sequence,
-)
+    Tuple, Callable, )
 from urllib.parse import urlparse
 
 import ops
@@ -122,7 +121,7 @@ class ClusterProviderAppData(cosl.interfaces.utils.DatabagModel):
     """Endpoints to which the the worker can push workload traces to."""
     remote_write_endpoints: Optional[List[RemoteWriteEndpoint]] = None
     """Endpoints to which the workload (and the worker charm) can push metrics to."""
-    ports: Optional[List[str]] = None
+    worker_ports: Optional[List[str]] = None
     """Ports that the worker should open. If not provided, the worker will open all the legacy ones."""
 
     ### TLS stuff
@@ -172,13 +171,13 @@ class ClusterProvider(Object):
     on = ClusterProviderEvents()  # type: ignore
 
     def __init__(
-        self,
-        charm: ops.CharmBase,
-        roles: FrozenSet[str],
-        meta_roles: Optional[Mapping[str, Iterable[str]]] = None,
-        key: Optional[str] = None,
-        endpoint: str = DEFAULT_ENDPOINT_NAME,
-        worker_ports: Optional[Callable[[str], Tuple[str]]]=None
+            self,
+            charm: ops.CharmBase,
+            roles: FrozenSet[str],
+            meta_roles: Optional[Mapping[str, Iterable[str]]] = None,
+            key: Optional[str] = None,
+            endpoint: str = DEFAULT_ENDPOINT_NAME,
+            worker_ports: Optional[Callable[[str], Tuple[str]]] = None
     ):
         super().__init__(charm, key or endpoint)
         self._charm = charm
@@ -215,22 +214,26 @@ class ClusterProvider(Object):
         return secret.get_info().id
 
     def publish_data(
-        self,
-        worker_config: str,
-        ca_cert: Optional[str] = None,
-        server_cert: Optional[str] = None,
-        s3_tls_ca_chain: Optional[str] = None,
-        privkey_secret_id: Optional[str] = None,
-        loki_endpoints: Optional[Dict[str, str]] = None,
-        charm_tracing_receivers: Optional[Dict[str, str]] = None,
-        workload_tracing_receivers: Optional[Dict[str, str]] = None,
-        remote_write_endpoints: Optional[List[RemoteWriteEndpoint]] = None,
+            self,
+            worker_config: str,
+            ca_cert: Optional[str] = None,
+            server_cert: Optional[str] = None,
+            s3_tls_ca_chain: Optional[str] = None,
+            privkey_secret_id: Optional[str] = None,
+            loki_endpoints: Optional[Dict[str, str]] = None,
+            charm_tracing_receivers: Optional[Dict[str, str]] = None,
+            workload_tracing_receivers: Optional[Dict[str, str]] = None,
+            remote_write_endpoints: Optional[List[RemoteWriteEndpoint]] = None,
     ) -> None:
         """Publish the config to all related worker clusters."""
         for relation in self._relations:
             if relation and self._remote_data_ready(relation):
+                # obtain the worker ports for this relation, given the role advertised by the remote
                 if worker_ports := self._worker_ports:
-                    ports = worker_ports(ClusterRequirerAppData.load(relation.data[relation.app]).role)
+                    _worker_ports = worker_ports(ClusterRequirerAppData.load(relation.data[relation.app]).role)
+                else:
+                    _worker_ports = None
+
                 local_app_databag = ClusterProviderAppData(
                     worker_config=worker_config,
                     loki_endpoints=loki_endpoints,
@@ -241,7 +244,7 @@ class ClusterProvider(Object):
                     workload_tracing_receivers=workload_tracing_receivers,
                     remote_write_endpoints=remote_write_endpoints,
                     s3_tls_ca_chain=s3_tls_ca_chain,
-                    ports=ports
+                    worker_ports=_worker_ports
                 )
                 local_app_databag.dump(relation.data[self.model.app])
 
@@ -380,10 +383,10 @@ class ClusterRequirer(Object):
     on = ClusterRequirerEvents()  # type: ignore
 
     def __init__(
-        self,
-        charm: ops.CharmBase,
-        key: Optional[str] = None,
-        endpoint: str = DEFAULT_ENDPOINT_NAME,
+            self,
+            charm: ops.CharmBase,
+            key: Optional[str] = None,
+            endpoint: str = DEFAULT_ENDPOINT_NAME,
     ):
         super().__init__(charm, key or endpoint)
         self._charm = charm
@@ -493,6 +496,13 @@ class ClusterRequirer(Object):
             return yaml.safe_load(data.worker_config)
         return {}
 
+    def get_worker_ports(self) -> Optional[Tuple[int]]:
+        """Obtain, from the cluster relation, the ports that the worker should be opening."""
+        data = self._get_data_from_coordinator()
+        if data:
+            return yaml.safe_load(data.worker_ports)
+        return
+
     def get_loki_endpoints(self) -> Dict[str, str]:
         """Fetch the loki endpoints from the coordinator databag."""
         data = self._get_data_from_coordinator()
@@ -507,7 +517,7 @@ class ClusterRequirer(Object):
             return None
 
         if (
-            not data.ca_cert or not data.server_cert or not data.privkey_secret_id
+                not data.ca_cert or not data.server_cert or not data.privkey_secret_id
         ) and not allow_none:
             return None
 
