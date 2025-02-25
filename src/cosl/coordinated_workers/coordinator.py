@@ -20,8 +20,9 @@ from typing import (
     List,
     Mapping,
     Optional,
+    Sequence,
     Set,
-    TypedDict, Sequence, Tuple,
+    TypedDict,
 )
 from urllib.parse import urlparse
 
@@ -199,7 +200,7 @@ class Coordinator(ops.Object):
         endpoints: _EndpointMapping,
         nginx_config: Callable[["Coordinator"], str],
         workers_config: Callable[["Coordinator"], str],
-        worker_ports: Optional[Callable[[str], Tuple[str]]]=None,
+        worker_ports: Optional[Callable[[str], Sequence[int]]] = None,
         nginx_options: Optional[NginxMappingOverrides] = None,
         is_coherent: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
         is_recommended: Optional[Callable[[ClusterProvider, ClusterRolesConfig], bool]] = None,
@@ -258,7 +259,7 @@ class Coordinator(ops.Object):
             frozenset(roles_config.roles),
             roles_config.meta_roles,
             endpoint=self._endpoints["cluster"],
-            worker_ports=worker_ports
+            worker_ports=worker_ports,
         )
 
         self._is_coherent = is_coherent
