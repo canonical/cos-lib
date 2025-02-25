@@ -501,11 +501,11 @@ class ClusterRequirer(Object):
             return yaml.safe_load(data.worker_config)
         return {}
 
-    def get_worker_ports(self) -> Optional[Tuple[int]]:
+    def get_worker_ports(self) -> Optional[Tuple[int, ...]]:
         """Obtain, from the cluster relation, the ports that the worker should be opening."""
         data = self._get_data_from_coordinator()
-        if data:
-            return yaml.safe_load(data.worker_ports)
+        if data and data.worker_ports:
+            return tuple(data.worker_ports)
         return
 
     def get_loki_endpoints(self) -> Dict[str, str]:

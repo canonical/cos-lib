@@ -368,7 +368,9 @@ def test_worker_ports(ports):
     with patch("ops.model.Unit.set_ports") as set_ports_patch:
         ctx.run(
             ctx.on.relation_changed(relation),
-            testing.State(containers={testing.Container("foo")}, relations={relation}),
+            testing.State(
+                containers={testing.Container("foo", can_connect=True)}, relations={relation}
+            ),
         )
         set_ports_patch.assert_called_with(*ports)
 
