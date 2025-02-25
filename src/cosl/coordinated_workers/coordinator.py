@@ -507,10 +507,11 @@ class Coordinator(ops.Object):
             )
             return
 
-        if len(self.cluster.gather_workload_versions()) > 1:
+        workload_versions = self.cluster.gather_workload_versions()
+        if len(workload_versions) > 1:
             logger.error(
                 f"Incoherent deployment. {charm.unit.name} is connected to workers that are running "
-                f"different workload versions: {', '.join(self.cluster.gather_workload_versions())}. "
+                f"different workload versions: {', '.join(workload_versions)}. "
                 "This charm will be unresponsive and refuse to handle any event until "
                 "the situation is resolved by the cloud admin, to avoid data loss."
             )
