@@ -233,9 +233,9 @@ class ClusterProvider(Object):
             if relation and self._remote_data_ready(relation):
                 # obtain the worker ports for this relation, given the role advertised by the remote
                 if worker_ports := self._worker_ports:
-                    _worker_ports = worker_ports(
+                    _worker_ports = list(worker_ports(
                         ClusterRequirerAppData.load(relation.data[relation.app]).role
-                    )
+                    ))
                 else:
                     _worker_ports = None
 
