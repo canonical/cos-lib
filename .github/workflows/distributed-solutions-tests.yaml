@@ -44,13 +44,29 @@ jobs:
       - name: Add charmcraft build dependencies (git)
         run: yq e '.parts.charm.build-packages += ["git"]' -i charmcraft.yaml
 
-      - name: Run the charm's unit & scenario tests
+      - name: Run the charm's unit tests
         id: unit
-        run: tox -e unit,scenario
+        run: |
+          if [ -f tox.ini ]; then  # Run Tox
+            tox -e unit,scenario
+          elif [ -f Makefile ]; then # Run Make
+            make unit
+          else
+            echo "Error: Taskrunner file not found."
+            exit 1
+          fi
 
       - name: Run the charm's static analysis checks
         id: static
-        run: tox -e static-charm,static-lib
+        run: |
+          if [ -f tox.ini ]; then  # Run Tox
+            tox -e static-charm,static-lib
+          elif [ -f Makefile ]; then # Run Make
+            make static
+          else
+            echo "Error: Taskrunner file not found."
+            exit 1
+          fi
 
       - name: Setup Charmcraft's pip cache
         uses: actions/cache@v4
