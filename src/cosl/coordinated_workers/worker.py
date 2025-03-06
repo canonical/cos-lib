@@ -826,6 +826,7 @@ class Worker(ops.Object):
         has_server_cert = bool(getattr(self.cluster.get_tls_data(), "server_cert", None))
         if any_receiver_endpoint_is_https and not has_server_cert:
             return True
+        return False
 
     def charm_tracing_config(self) -> Tuple[Optional[str], Optional[str]]:
         """Get the charm tracing configuration from the coordinator.
