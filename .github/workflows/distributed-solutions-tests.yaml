@@ -9,7 +9,8 @@ on:
 
 jobs:
   test-distributed-charms:
-    runs-on: ubuntu-latest
+    # Pin due to itests failing on 24.04
+    runs-on: ubuntu-22.04
     continue-on-error: true
 
     strategy:
