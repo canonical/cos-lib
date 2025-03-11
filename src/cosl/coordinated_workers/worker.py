@@ -814,7 +814,9 @@ class Worker(ops.Object):
     @property
     def _tls_misconfigured(self) -> bool:
         """Helper method to determine if tls is misconfigured."""
-        # case 1: our ingress has a tls relation, but we don't
+        # misconfiguration: the ingress has a tls relation, but we (the coordinator) don't:
+        # as a consequence, we obtain **https** receiver endpoints,
+        # but we don't have a server certificate.
         receiver_endpoints = {
             *self.cluster.get_workload_tracing_receivers().values(),
             *self.cluster.get_charm_tracing_receivers().values(),
