@@ -184,7 +184,10 @@ class CosTool:
 
     def _get_tool_path(self) -> Optional[Path]:
         arch = platform.machine()
-        arch = "amd64" if arch == "x86_64" else arch
+        if arch == "x86_64":
+            arch = "amd64"
+        elif arch == "aarch64":
+            arch = "arm64"
         res = "cos-tool-{}".format(arch)
         try:
             path = Path(res).resolve(strict=True)
