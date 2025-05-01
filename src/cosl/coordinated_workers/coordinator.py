@@ -783,7 +783,5 @@ class Coordinator(ops.Object):
             "memory": self._charm.model.config.get(memory_limit_key),
         }
         return adjust_resource_requirements(
-            limits,
-            self._resources_requests_getter(),
-            adhere_to_requests=True,  # type: ignore
+            limits, self._resources_requests_getter(), adhere_to_requests=True  # type: ignore
         )
