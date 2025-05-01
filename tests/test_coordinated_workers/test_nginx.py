@@ -1,5 +1,9 @@
 import logging
 import tempfile
+from contextlib import contextmanager
+from pathlib import Path
+from typing import List
+from unittest.mock import MagicMock, patch
 
 import ops
 import pytest
@@ -11,7 +15,12 @@ from src.cosl.coordinated_workers.nginx import (
     KEY_PATH,
     NGINX_CONFIG,
     Nginx,
+    NginxConfig,
+    NginxLocationConfig,
+    NginxLocationModifier,
 )
+
+sample_dns_ip = "198.18.0.0"
 
 logger = logging.getLogger(__name__)
 
@@ -139,3 +148,94 @@ def test_has_config_changed(nginx_context: testing.Context):
 
         # THEN the _has_config_changed method correctly determines that foo != bar
         assert nginx._has_config_changed(new_config)
+
+
+def test_nginx_config_is_list_before_crossplane():
+    coordinator = MagicMock().cluster.gather_addresses_by_role.return_value = {}
+    nginx = NginxConfig("localhost", {}, {})
+    prepared_config = nginx._prepare_config(coordinator, False)
+    assert isinstance(prepared_config, List)
+
+
+def test_nginx_config_is_parsed_by_crossplane():
+    nginx = NginxConfig("localhost", {}, {})
+    prepared_config = nginx.get_config({}, False)
+    assert isinstance(prepared_config, str)
+
+
+@contextmanager
+def mock_resolv_conf(contents: str):
+    with tempfile.NamedTemporaryFile() as tf:
+        Path(tf.name).write_text(contents)
+        with patch("src.cosl.coordinated_workers.nginx.RESOLV_CONF_PATH", tf.name):
+            yield
+
+
+@pytest.mark.parametrize(
+    "mock_contents, expected_dns_ip",
+    (
+        (f"foo bar\nnameserver {sample_dns_ip}", sample_dns_ip),
+        (f"nameserver {sample_dns_ip}\n foo bar baz", sample_dns_ip),
+        (
+            f"foo bar\nfoo bar\nnameserver {sample_dns_ip}\nnameserver 198.18.0.1",
+            sample_dns_ip,
+        ),
+    ),
+)
+def test_dns_ip_addr_getter(mock_contents, expected_dns_ip):
+    with mock_resolv_conf(mock_contents):
+        assert NginxConfig._get_dns_ip_address() == expected_dns_ip
+
+
+def test_dns_ip_addr_fail():
+    with pytest.raises(RuntimeError):
+        with mock_resolv_conf("foo bar"):
+            NginxConfig._get_dns_ip_address()
+
+
+@pytest.mark.parametrize("tls", (False,))
+def test_generate_nginx_config(tls):
+    roles_to_upstreams = {
+        "read": {
+            "read": 3200,
+            "write": {
+                "write": 3201,
+            },
+            "distributor": {
+                "otlp-http": 9095,
+            },
+            "ingester": {
+                "invalid-upstream": 9096,
+            },
+        }
+    }
+
+    server_ports_to_locations = {
+        3200: [NginxLocationConfig(upstream="read")],
+        3201: [
+            NginxLocationConfig(
+                upstream="write", path="/write", modifier=NginxLocationModifier.EXACT, is_grpc=True
+            ),
+            NginxLocationConfig(
+                upstream="read", path="/read", modifier=NginxLocationModifier.REGEX
+            ),
+        ],
+        9095: [NginxLocationConfig(upstream="distributor")],
+        9096: [NginxLocationConfig(upstream="invalid-upstream")],
+    }
+
+    addrs_by_role = {
+        "read": {"1.2.3.4"},
+        "write": {"5.6.7.8"},
+        "distributor": {"9.10.11.12", "13.14.15.16"},
+    }
+
+    nginx = NginxConfig(
+        "localhost",
+        roles_to_upstreams=roles_to_upstreams,
+        server_ports_to_locations=server_ports_to_locations,
+    )
+    generated_config = nginx.get_config(addrs_by_role, tls)
+
+    logger.info("CONFIG %s", generated_config)
+    assert False

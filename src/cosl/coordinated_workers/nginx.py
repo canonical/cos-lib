@@ -283,7 +283,11 @@ class NginxConfig:
                 nginx_locations.append(
                     {
                         "directive": "location",
-                        "args": [location.modifier.value, location.path],
+                        "args": (
+                            [location.path]
+                            if location.modifier == NginxLocationModifier.DEFAULT
+                            else [location.modifier.value, location.path]
+                        ),
                         "block": [
                             {
                                 "directive": "set",
