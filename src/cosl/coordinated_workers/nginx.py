@@ -5,8 +5,10 @@
 
 import logging
 import subprocess
+from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
-from typing import Callable, Optional, TypedDict
+from typing import Any, Callable, Dict, List, Optional, Set, TypedDict
 
 from ops import CharmBase, pebble
 
@@ -29,6 +31,315 @@ DEFAULT_OPTIONS: _NginxMapping = {
     "nginx_port": 8080,
     "nginx_exporter_port": 9113,
 }
+RESOLV_CONF_PATH = "/etc/resolv.conf"
+
+
+class NginxLocationModifier(Enum):
+    """Enum representing valid Nginx `location` block modifiers."""
+
+    DEFAULT = ""  # prefix match
+    EXACT = "="  # exact match
+    REGEX = "~"  # case-sensitive regex
+
+
+@dataclass
+class NginxLocationConfig:
+    """Represents a `location` block in an Nginx configuration."""
+
+    upstream: str
+    path: str = "/"
+    modifier: NginxLocationModifier = NginxLocationModifier.DEFAULT
+    is_grpc: bool = False
+
+
+class NginxConfig:
+    """Builds the Nginx configuration."""
+
+    def __init__(
+        self,
+        server_name: str,
+        roles_to_upstreams: Dict[str, Dict[str, int]],
+        server_ports_to_locations: Dict[int, List[NginxLocationConfig]],
+    ):
+        try:
+            # TODO: lazy load crossplane to avoid adding an additional dependency to cosl
+            import crossplane
+
+            self._builder = crossplane.build
+        except ModuleNotFoundError:
+            raise RuntimeError(
+                "Unmet dependencies: the coordinator charm base is missing some dependencies. \
+            Please install them with: pip install crossplane"
+            )
+        self._server_name = server_name
+        self._dns_IP_address = self._get_dns_ip_address()
+        self._ipv6_enabled = is_ipv6_enabled()
+        self._roles_to_upstreams = roles_to_upstreams
+        self._server_ports_to_locations = server_ports_to_locations
+
+    def get_config(self, addresses_by_role: Dict[str, Set[str]], tls: bool) -> str:
+        """Returns the rendered Nginx configuration as a string."""
+        full_config = self._prepare_config(addresses_by_role, tls)
+        return self._builder(full_config)
+
+    def _prepare_config(
+        self, addresses_by_role: Dict[str, Set[str]], tls: bool
+    ) -> List[Dict[str, Any]]:
+        log_level = "error"
+        upstreams = self._upstreams(addresses_by_role)
+        # extract the upstream name
+        upstream_names = [upstream["args"][0] for upstream in upstreams]
+        # build the complete configuration
+        full_config = [
+            {"directive": "worker_processes", "args": ["5"]},
+            {"directive": "error_log", "args": ["/dev/stderr", log_level]},
+            {"directive": "pid", "args": ["/tmp/nginx.pid"]},
+            {"directive": "worker_rlimit_nofile", "args": ["8192"]},
+            {
+                "directive": "events",
+                "args": [],
+                "block": [{"directive": "worker_connections", "args": ["4096"]}],
+            },
+            {
+                "directive": "http",
+                "args": [],
+                "block": [
+                    # upstreams (load balancing)
+                    *upstreams,
+                    # temp paths
+                    {
+                        "directive": "client_body_temp_path",
+                        "args": ["/tmp/client_temp"],
+                    },
+                    {"directive": "proxy_temp_path", "args": ["/tmp/proxy_temp_path"]},
+                    {"directive": "fastcgi_temp_path", "args": ["/tmp/fastcgi_temp"]},
+                    {"directive": "uwsgi_temp_path", "args": ["/tmp/uwsgi_temp"]},
+                    {"directive": "scgi_temp_path", "args": ["/tmp/scgi_temp"]},
+                    # logging
+                    {"directive": "default_type", "args": ["application/octet-stream"]},
+                    {
+                        "directive": "log_format",
+                        "args": [
+                            "main",
+                            '$remote_addr - $remote_user [$time_local]  $status "$request" $body_bytes_sent "$http_referer" "$http_user_agent" "$http_x_forwarded_for"',
+                        ],
+                    },
+                    *self._log_verbose(verbose=False),
+                    # tempo-related
+                    {"directive": "sendfile", "args": ["on"]},
+                    {"directive": "tcp_nopush", "args": ["on"]},
+                    *self._resolver(),
+                    # TODO: add custom http block for the user to config?
+                    {
+                        "directive": "map",
+                        "args": ["$http_x_scope_orgid", "$ensured_x_scope_orgid"],
+                        "block": [
+                            {"directive": "default", "args": ["$http_x_scope_orgid"]},
+                            {"directive": "", "args": ["anonymous"]},
+                        ],
+                    },
+                    {"directive": "proxy_read_timeout", "args": ["300"]},
+                    # server block
+                    *self._build_servers_config(upstream_names, tls),
+                ],
+            },
+        ]
+        return full_config
+
+    def _log_verbose(self, verbose: bool = True) -> List[Dict[str, Any]]:
+        if verbose:
+            return [{"directive": "access_log", "args": ["/dev/stderr", "main"]}]
+        return [
+            {
+                "directive": "map",
+                "args": ["$status", "$loggable"],
+                "block": [
+                    {"directive": "~^[23]", "args": ["0"]},
+                    {"directive": "default", "args": ["1"]},
+                ],
+            },
+            {"directive": "access_log", "args": ["/dev/stderr"]},
+        ]
+
+    def _resolver(
+        self,
+        custom_resolver: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        # pass a custom resolver, such as kube-dns.kube-system.svc.cluster.local.
+        if custom_resolver:
+            return [{"directive": "resolver", "args": [custom_resolver]}]
+
+        # by default, fetch the DNS resolver address from /etc/resolv.conf
+        return [
+            {
+                "directive": "resolver",
+                "args": [self._dns_IP_address],
+            }
+        ]
+
+    @staticmethod
+    def _get_dns_ip_address() -> str:
+        """Obtain DNS ip address from /etc/resolv.conf."""
+        resolv = Path(RESOLV_CONF_PATH).read_text()
+        for line in resolv.splitlines():
+            if line.startswith("nameserver"):
+                # assume there's only one
+                return line.split()[1].strip()
+        raise RuntimeError("cannot find nameserver in /etc/resolv.conf")
+
+    def _upstreams(self, addresses_by_role: Dict[str, Set[str]]) -> List[Any]:
+        nginx_upstreams: List[Any] = []
+
+        for role, upstreams in self._roles_to_upstreams.items():
+            addresses = addresses_by_role.get(role)
+            # don't add an upstream block if there are no addresses
+            if addresses:
+                for upstream, port in upstreams.items():
+                    nginx_upstreams.append(
+                        {
+                            "directive": "upstream",
+                            "args": [upstream],
+                            "block": [
+                                {"directive": "server", "args": [f"{addr}:{port}"]}
+                                for addr in addresses
+                            ],
+                        }
+                    )
+
+        return nginx_upstreams
+
+    def _build_servers_config(self, upstream_names: List[str], tls: bool = False) -> List[Any]:
+        servers = []
+        for port, locations in self._server_ports_to_locations.items():
+            server_config = self._build_server_config(
+                port,
+                locations,
+                upstream_names,
+                tls,
+            )
+            if server_config:
+                servers.append(server_config)
+        return servers
+
+    def _build_server_config(
+        self,
+        port: int,
+        locations: List[NginxLocationConfig],
+        upstream_names: List[str],
+        tls: bool = False,
+    ) -> Dict[str, Any]:
+        auth_enabled = False
+        is_grpc = any(loc.is_grpc for loc in locations)
+        locations = self._locations(locations, is_grpc, upstream_names, tls)
+        server_config = {}
+        if len(locations) == 0:
+            server_config = {
+                "directive": "server",
+                "args": [],
+                "block": [
+                    *self._listen(port, ssl=tls, http2=is_grpc),
+                    *self._basic_auth(auth_enabled),
+                    {
+                        "directive": "proxy_set_header",
+                        "args": ["X-Scope-OrgID", "$ensured_x_scope_orgid"],
+                    },
+                    {"directive": "server_name", "args": [self._server_name]},
+                    *locations,
+                    *(
+                        [
+                            {"directive": "ssl_certificate", "args": [CERT_PATH]},
+                            {"directive": "ssl_certificate_key", "args": [KEY_PATH]},
+                            {
+                                "directive": "ssl_protocols",
+                                "args": ["TLSv1", "TLSv1.1", "TLSv1.2", "TLSv1.3"],
+                            },
+                            {
+                                "directive": "ssl_ciphers",
+                                "args": ["HIGH:!aNULL:!MD5"],  # codespell:ignore
+                            },
+                        ]
+                        if tls
+                        else []
+                    ),
+                ],
+            }
+
+        return server_config
+
+    def _locations(
+        self,
+        locations: List[NginxLocationConfig],
+        grpc: bool,
+        upstream_names: List[str],
+        tls: bool,
+    ) -> List[Dict[str, Any]]:
+        s = "s" if tls else ""
+        protocol = f"grpc{s}" if grpc else f"http{s}"
+        nginx_locations = []
+
+        for location in locations:
+            # don't add a location block if the upstream backend doesn't exist in the config
+            if location.upstream in upstream_names:
+                nginx_locations.append(
+                    {
+                        "directive": "location",
+                        "args": [location.modifier, location.path],
+                        "block": [
+                            {
+                                "directive": "set",
+                                "args": ["$backend", f"{protocol}://{location.upstream}"],
+                            },
+                            {
+                                "directive": "grpc_pass" if grpc else "proxy_pass",
+                                "args": ["$backend"],
+                            },
+                            # if a server is down, no need to wait for a long time to pass on the request to the next available server
+                            {
+                                "directive": "proxy_connect_timeout",
+                                "args": ["5s"],
+                            },
+                        ],
+                    }
+                )
+
+        return nginx_locations
+
+    def _basic_auth(self, enabled: bool) -> List[Optional[Dict[str, Any]]]:
+        if enabled:
+            return [
+                {"directive": "auth_basic", "args": ['"Tempo"']},
+                {
+                    "directive": "auth_basic_user_file",
+                    "args": ["/etc/nginx/secrets/.htpasswd"],
+                },
+            ]
+        return []
+
+    def _listen(self, port: int, ssl: bool, http2: bool) -> List[Dict[str, Any]]:
+        directives = []
+        directives.append(
+            {"directive": "listen", "args": self._listen_args(port, False, ssl, http2)}
+        )
+        if self._ipv6_enabled:
+            directives.append(
+                {
+                    "directive": "listen",
+                    "args": self._listen_args(port, True, ssl, http2),
+                }
+            )
+        return directives
+
+    def _listen_args(self, port: int, ipv6: bool, ssl: bool, http2: bool) -> List[str]:
+        args = []
+        if ipv6:
+            args.append(f"[::]:{port}")
+        else:
+            args.append(f"{port}")
+        if ssl:
+            args.append("ssl")
+        if http2:
+            args.append("http2")
+        return args
 
 
 class Nginx:
@@ -41,7 +352,7 @@ class Nginx:
     def __init__(
         self,
         charm: CharmBase,
-        config_getter: Callable[[], str],
+        config_getter: Callable[[bool], str],
         options: Optional[NginxMappingOverrides] = None,
     ):
         self._charm = charm
@@ -133,7 +444,7 @@ class Nginx:
     def configure_pebble_layer(self) -> None:
         """Configure pebble layer."""
         if self._container.can_connect():
-            new_config: str = self._config_getter()
+            new_config: str = self._config_getter(tls=self.are_certificates_on_disk)
             should_restart: bool = self._has_config_changed(new_config)
             self._container.push(self.config_path, new_config, make_dirs=True)  # type: ignore
             self._container.add_layer("nginx", self.layer, combine=True)
