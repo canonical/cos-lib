@@ -232,7 +232,7 @@ class NginxConfig:
         is_grpc = any(loc.is_grpc for loc in locations)
         locations = self._locations(locations, is_grpc, upstream_names, tls)
         server_config = {}
-        if len(locations) == 0:
+        if len(locations) > 0:
             server_config = {
                 "directive": "server",
                 "args": [],
@@ -283,7 +283,7 @@ class NginxConfig:
                 nginx_locations.append(
                     {
                         "directive": "location",
-                        "args": [location.modifier, location.path],
+                        "args": [location.modifier.value, location.path],
                         "block": [
                             {
                                 "directive": "set",
