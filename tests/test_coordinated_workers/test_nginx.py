@@ -2,8 +2,8 @@ import logging
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
-from typing import List
-from unittest.mock import MagicMock, patch
+from typing import List, Tuple
+from unittest.mock import patch
 
 import ops
 import pytest
@@ -150,19 +150,6 @@ def test_has_config_changed(nginx_context: testing.Context):
         assert nginx._has_config_changed(new_config)
 
 
-def test_nginx_config_is_list_before_crossplane():
-    coordinator = MagicMock().cluster.gather_addresses_by_role.return_value = {}
-    nginx = NginxConfig("localhost", {}, {})
-    prepared_config = nginx._prepare_config(coordinator, False)
-    assert isinstance(prepared_config, List)
-
-
-def test_nginx_config_is_parsed_by_crossplane():
-    nginx = NginxConfig("localhost", {}, {})
-    prepared_config = nginx.get_config({}, False)
-    assert isinstance(prepared_config, str)
-
-
 @contextmanager
 def mock_resolv_conf(contents: str):
     with tempfile.NamedTemporaryFile() as tf:
@@ -193,34 +180,36 @@ def test_dns_ip_addr_fail():
             NginxConfig._get_dns_ip_address()
 
 
-@pytest.mark.parametrize("tls", (False,))
+@pytest.mark.parametrize("tls", (False, True))
 def test_generate_nginx_config(tls):
     roles_to_upstreams = {
         "read": {
             "read": 3200,
-            "write": {
-                "write": 3201,
-            },
-            "distributor": {
-                "otlp-http": 9095,
-            },
-            "ingester": {
-                "invalid-upstream": 9096,
-            },
-        }
+        },
+        "write": {
+            "write": 3201,
+        },
+        "ingester": {
+            "invalid-upstream": 9096,
+        },
+        "distributor": {
+            "otlp-http": 9095,
+        },
     }
 
     server_ports_to_locations = {
-        3200: [NginxLocationConfig(upstream="read")],
+        3200: [
+            NginxLocationConfig(upstream="read"),
+            NginxLocationConfig(
+                upstream="write", path="/write", modifier=NginxLocationModifier.REGEX
+            ),
+        ],
         3201: [
             NginxLocationConfig(
                 upstream="write", path="/write", modifier=NginxLocationModifier.EXACT, is_grpc=True
             ),
-            NginxLocationConfig(
-                upstream="read", path="/read", modifier=NginxLocationModifier.REGEX
-            ),
         ],
-        9095: [NginxLocationConfig(upstream="distributor")],
+        9095: [NginxLocationConfig(upstream="otlp-http")],
         9096: [NginxLocationConfig(upstream="invalid-upstream")],
     }
 
@@ -237,5 +226,59 @@ def test_generate_nginx_config(tls):
     )
     generated_config = nginx.get_config(addrs_by_role, tls)
 
-    logger.info("CONFIG %s", generated_config)
-    assert False
+    _assert_upstreams(
+        generated_config,
+        valid_upstreams=["read", "write", "otlp-http"],
+        invalid_upstreams=["invalid-upstream"],
+    )
+    _assert_listeners(
+        generated_config,
+        tls,
+        valid_listeners=(("3200", "http"), ("3201", "grpc"), ("9095", "http")),
+        invalid_listeners=(("9096", "http"),),
+    )
+    _assert_locations(
+        generated_config,
+        tls,
+        valid_upstreams=(
+            ("read", "http"),
+            ("write", "http"),
+            ("write", "grpc"),
+            ("otlp-http", "http"),
+        ),
+        invalid_upstreams=(("invalid-upstream", "http"),),
+    )
+
+
+def _assert_upstreams(config: str, valid_upstreams: List[str], invalid_upstreams: List[str]):
+    for upstream in valid_upstreams:
+        assert f"upstream {upstream}" in config
+    for upstream in invalid_upstreams:
+        assert f"upstream {upstream}" not in config
+
+
+def _assert_listeners(
+    config: str, tls: bool, valid_listeners: Tuple[str, str], invalid_listeners: Tuple[str, str]
+):
+    for port, protocol in valid_listeners:
+        config_protocol = ""
+        if tls:
+            config_protocol += " ssl"
+        if protocol == "grpc":
+            config_protocol += " http2"
+        assert f"listen {port}{config_protocol};" in config
+
+    for port, protocol in invalid_listeners:
+        assert f"listen {port}" not in config
+
+
+def _assert_locations(
+    config: str, tls: bool, valid_upstreams: Tuple[str, str], invalid_upstreams: Tuple[str, str]
+):
+    s = "s" if tls else ""
+    for upstream, protocol in valid_upstreams:
+        config_protocol = f"grpc{s}" if protocol == "grpc" else f"http{s}"
+        assert f"set $backend {config_protocol}://{upstream}" in config
+    for upstream, protocol in invalid_upstreams:
+        config_protocol = f"grpc{s}" if protocol == "grpc" else f"http{s}"
+        assert f"set $backend {config_protocol}://{upstream}" not in config
