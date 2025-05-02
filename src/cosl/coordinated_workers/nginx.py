@@ -36,11 +36,14 @@ RESOLV_CONF_PATH = "/etc/resolv.conf"
 
 class NginxLocationModifier(Enum):
     """Enum representing valid Nginx `location` block modifiers."""
-# cfr. https://www.digitalocean.com/community/tutorials/nginx-location-directive#nginx-location-directive-syntax
 
-    DEFAULT = ""  # prefix match
+    # cfr. https://www.digitalocean.com/community/tutorials/nginx-location-directive#nginx-location-directive-syntax
+
+    PREFIX = ""  # prefix match
     EXACT = "="  # exact match
-    REGEX = "~"  # case-sensitive regex
+    REGEX_CASE_SENSITIVE = "~"  # case-sensitive regex match
+    REGEX_CASE_INSENSITIVE = "~*"  # case-insensitive regex match
+    PREFIX_NO_REGEX = "^~"  # prefix match that disables further regex matching
 
 
 @dataclass
@@ -48,13 +51,13 @@ class NginxLocationConfig:
     """Represents a `location` block in an Nginx configuration."""
 
     upstream: str
-    path: str = "/"
-    modifier: NginxLocationModifier = NginxLocationModifier.DEFAULT
+    path: str
+    modifier: NginxLocationModifier = NginxLocationModifier.PREFIX
     is_grpc: bool = False
 
 
 class NginxConfig:
-    """Builds the Nginx configuration."""
+    """Responsible for building the Nginx configuration used by the coordinators."""
 
     def __init__(
         self,
@@ -286,7 +289,7 @@ class NginxConfig:
                         "directive": "location",
                         "args": (
                             [location.path]
-                            if location.modifier == NginxLocationModifier.DEFAULT
+                            if location.modifier == NginxLocationModifier.PREFIX
                             else [location.modifier.value, location.path]
                         ),
                         "block": [
