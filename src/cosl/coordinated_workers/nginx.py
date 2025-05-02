@@ -5,7 +5,7 @@
 
 import logging
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, TypedDict
@@ -50,10 +50,30 @@ class NginxLocationModifier(Enum):
 class NginxLocationConfig:
     """Represents a `location` block in an Nginx configuration."""
 
-    upstream: str
     path: str
+    backend: str
+    backend_url: str = ""
+    headers: Dict[str, str] = field(default_factory=dict)
     modifier: NginxLocationModifier = NginxLocationModifier.PREFIX
     is_grpc: bool = False
+
+
+@dataclass
+class NginxUpstream:
+    """Represents metadata needed to construct an Nginx `upstream` block."""
+
+    name: str
+    """Name of the upstream block."""
+    port: int
+    """Port number that all backend servers in this upstream listen on.
+
+    Our coordinators assume that all servers under an upstream share the same port.
+    """
+    worker_role: str
+    """The worker role that corresponds to this upstream.
+
+    This role will be used to look up workers (backend server) addresses for this upstream.
+    """
 
 
 class NginxConfig:
@@ -62,9 +82,36 @@ class NginxConfig:
     def __init__(
         self,
         server_name: str,
-        roles_to_upstreams: Dict[str, Dict[str, int]],
+        upstream_configs: List[NginxUpstream],
         server_ports_to_locations: Dict[int, List[NginxLocationConfig]],
+        enable_health_check: bool = False,
+        enable_status_page: bool = False,
     ):
+        """Constructor for an Nginx config generator object.
+
+        Args:
+            server_name: The name of the server (e.g. coordinator fqdn), which is used to identify the server in Nginx configurations.
+            upstream_configs: List of Nginx upstream metadata configurations used to generate Nginx `upstream` blocks.
+            server_ports_to_locations: Mapping from server ports to a list of Nginx location configurations.
+            enable_health_check: If True, adds a `/` location that returns a basic 200 OK response.
+            enable_status_page: If True, adds a `/status` location that enables `stub_status` for basic Nginx metrics.
+
+        Example:
+            .. code-block:: python
+            NginxConfig(
+            server_name = "tempo-coordinator-0.tempo-coordinator-endpoints.model.svc.cluster.local",
+            upstreams = [
+                NginxUpstream(name="zipkin", port=9411, worker_role="distributor"),
+            ],
+            server_ports_to_locations = {
+                9411: [
+                    NginxLocationConfig(
+                        path="/",
+                        backend="zipkin"
+                    )
+                ]
+            })
+        """
         try:
             # we lazy-load crossplane to avoid adding a dependency to cosl as a whole
             import crossplane
@@ -78,8 +125,10 @@ class NginxConfig:
         self._server_name = server_name
         self._dns_IP_address = self._get_dns_ip_address()
         self._ipv6_enabled = is_ipv6_enabled()
-        self._roles_to_upstreams = roles_to_upstreams
+        self._upstream_configs = upstream_configs
         self._server_ports_to_locations = server_ports_to_locations
+        self._enable_health_check = enable_health_check
+        self._enable_status_page = enable_status_page
 
     def get_config(self, addresses_by_role: Dict[str, Set[str]], tls: bool) -> str:
         """Render the Nginx configuration as a string."""
@@ -91,7 +140,7 @@ class NginxConfig:
     ) -> List[Dict[str, Any]]:
         upstreams = self._upstreams(addresses_by_role)
         # extract the upstream name
-        upstream_names = [upstream["args"][0] for upstream in upstreams]
+        backends = [upstream["args"][0] for upstream in upstreams]
         # build the complete configuration
         full_config = [
             {"directive": "worker_processes", "args": ["5"]},
@@ -143,7 +192,7 @@ class NginxConfig:
                     },
                     {"directive": "proxy_read_timeout", "args": ["300"]},
                     # server block
-                    *self._build_servers_config(upstream_names, tls),
+                    *self._build_servers_config(backends, tls),
                 ],
             },
         ]
@@ -193,31 +242,30 @@ class NginxConfig:
     def _upstreams(self, addresses_by_role: Dict[str, Set[str]]) -> List[Any]:
         nginx_upstreams: List[Any] = []
 
-        for role, upstreams in self._roles_to_upstreams.items():
-            addresses = addresses_by_role.get(role)
+        for upstream_config in self._upstream_configs:
+            addresses = addresses_by_role.get(upstream_config.worker_role)
             # don't add an upstream block if there are no addresses
             if addresses:
-                for upstream, port in upstreams.items():
-                    nginx_upstreams.append(
-                        {
-                            "directive": "upstream",
-                            "args": [upstream],
-                            "block": [
-                                {"directive": "server", "args": [f"{addr}:{port}"]}
-                                for addr in addresses
-                            ],
-                        }
-                    )
+                nginx_upstreams.append(
+                    {
+                        "directive": "upstream",
+                        "args": [upstream_config.name],
+                        "block": [
+                            {"directive": "server", "args": [f"{addr}:{upstream_config.port}"]}
+                            for addr in addresses
+                        ],
+                    }
+                )
 
         return nginx_upstreams
 
-    def _build_servers_config(self, upstream_names: List[str], tls: bool = False) -> List[Any]:
+    def _build_servers_config(self, backends: List[str], tls: bool = False) -> List[Any]:
         servers = []
         for port, locations in self._server_ports_to_locations.items():
             server_config = self._build_server_config(
                 port,
                 locations,
-                upstream_names,
+                backends,
                 tls,
             )
             if server_config:
@@ -228,12 +276,12 @@ class NginxConfig:
         self,
         port: int,
         locations: List[NginxLocationConfig],
-        upstream_names: List[str],
+        backends: List[str],
         tls: bool = False,
     ) -> Dict[str, Any]:
         auth_enabled = False
         is_grpc = any(loc.is_grpc for loc in locations)
-        locations = self._locations(locations, is_grpc, upstream_names, tls)
+        locations = self._locations(locations, is_grpc, backends, tls)
         server_config = {}
         if len(locations) > 0:
             server_config = {
@@ -247,7 +295,6 @@ class NginxConfig:
                         "args": ["X-Scope-OrgID", "$ensured_x_scope_orgid"],
                     },
                     {"directive": "server_name", "args": [self._server_name]},
-                    *locations,
                     *(
                         [
                             {"directive": "ssl_certificate", "args": [CERT_PATH]},
@@ -264,6 +311,7 @@ class NginxConfig:
                         if tls
                         else []
                     ),
+                    *locations,
                 ],
             }
 
@@ -273,28 +321,62 @@ class NginxConfig:
         self,
         locations: List[NginxLocationConfig],
         grpc: bool,
-        upstream_names: List[str],
+        backends: List[str],
         tls: bool,
     ) -> List[Dict[str, Any]]:
         s = "s" if tls else ""
         protocol = f"grpc{s}" if grpc else f"http{s}"
         nginx_locations = []
 
+        if self._enable_health_check:
+            nginx_locations.append(
+                {
+                    "directive": "location",
+                    "args": ["=", "/"],
+                    "block": [
+                        {
+                            "directive": "return",
+                            "args": ["200", "'OK'"],
+                        },
+                        {
+                            "directive": "auth_basic",
+                            "args": ["off"],
+                        },
+                    ],
+                },
+            )
+        if self._enable_status_page:
+            nginx_locations.append(
+                {
+                    "directive": "location",
+                    "args": ["=", "/status"],
+                    "block": [
+                        {
+                            "directive": "stub_status",
+                            "args": [],
+                        },
+                    ],
+                },
+            )
+
         for location in locations:
             # don't add a location block if the upstream backend doesn't exist in the config
-            if location.upstream in upstream_names:
+            if location.backend in backends:
                 nginx_locations.append(
                     {
                         "directive": "location",
                         "args": (
                             [location.path]
                             if location.modifier == NginxLocationModifier.PREFIX
-                            else [location.modifier.value, location.path]
+                            else [location.modifier, location.path]
                         ),
                         "block": [
                             {
                                 "directive": "set",
-                                "args": ["$backend", f"{protocol}://{location.upstream}"],
+                                "args": [
+                                    "$backend",
+                                    f"{protocol}://{location.backend}{location.backend_url}",
+                                ],
                             },
                             {
                                 "directive": "grpc_pass" if grpc else "proxy_pass",
@@ -305,6 +387,15 @@ class NginxConfig:
                                 "directive": "proxy_connect_timeout",
                                 "args": ["5s"],
                             },
+                            # add headers if any
+                            *(
+                                [
+                                    {"directive": "proxy_set_header", "args": [key, val]}
+                                    for key, val in location.headers.items()
+                                ]
+                                if location.headers
+                                else []
+                            ),
                         ],
                     }
                 )

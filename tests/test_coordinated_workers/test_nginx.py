@@ -2,7 +2,7 @@ import logging
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
-from typing import List, Tuple
+from typing import Tuple
 from unittest.mock import patch
 
 import ops
@@ -17,7 +17,7 @@ from src.cosl.coordinated_workers.nginx import (
     Nginx,
     NginxConfig,
     NginxLocationConfig,
-    NginxLocationModifier,
+    NginxUpstream,
 )
 
 sample_dns_ip = "198.18.0.0"
@@ -180,105 +180,114 @@ def test_dns_ip_addr_fail():
             NginxConfig._get_dns_ip_address()
 
 
+@pytest.mark.parametrize("workload", ("tempo",))
 @pytest.mark.parametrize("tls", (False, True))
-def test_generate_nginx_config(tls):
-    roles_to_upstreams = {
-        "read": {
-            "read": 3200,
-        },
-        "write": {
-            "write": 3201,
-        },
-        "ingester": {
-            "invalid-upstream": 9096,
-        },
-        "distributor": {
-            "otlp-http": 9095,
-        },
-    }
-
-    server_ports_to_locations = {
-        3200: [
-            NginxLocationConfig(upstream="read"),
-            NginxLocationConfig(
-                upstream="write", path="/write", modifier=NginxLocationModifier.REGEX
-            ),
-        ],
-        3201: [
-            NginxLocationConfig(
-                upstream="write", path="/write", modifier=NginxLocationModifier.EXACT, is_grpc=True
-            ),
-        ],
-        9095: [NginxLocationConfig(upstream="otlp-http")],
-        9096: [NginxLocationConfig(upstream="invalid-upstream")],
-    }
+def test_generate_nginx_config(tls, workload):
+    upstream_configs, server_ports_to_locations = _get_nginx_config_params(workload)
+    # loki & mimir changes the port from 8080 to 443 when TLS is enabled
+    if workload in ("loki", "mimir") and tls:
+        server_ports_to_locations[443] = server_ports_to_locations.pop(8080)
 
     addrs_by_role = {
-        "read": {"1.2.3.4"},
-        "write": {"5.6.7.8"},
-        "distributor": {"9.10.11.12", "13.14.15.16"},
+        role: {"worker-address"}
+        for role in (upstream.worker_role for upstream in upstream_configs)
     }
-
-    nginx = NginxConfig(
-        "localhost",
-        roles_to_upstreams=roles_to_upstreams,
-        server_ports_to_locations=server_ports_to_locations,
-    )
-    generated_config = nginx.get_config(addrs_by_role, tls)
-
-    _assert_upstreams(
-        generated_config,
-        valid_upstreams=["read", "write", "otlp-http"],
-        invalid_upstreams=["invalid-upstream"],
-    )
-    _assert_listeners(
-        generated_config,
-        tls,
-        valid_listeners=(("3200", "http"), ("3201", "grpc"), ("9095", "http")),
-        invalid_listeners=(("9096", "http"),),
-    )
-    _assert_locations(
-        generated_config,
-        tls,
-        valid_upstreams=(
-            ("read", "http"),
-            ("write", "http"),
-            ("write", "grpc"),
-            ("otlp-http", "http"),
-        ),
-        invalid_upstreams=(("invalid-upstream", "http"),),
-    )
+    with mock_resolv_conf(f"foo bar\nnameserver {sample_dns_ip}"):
+        nginx = NginxConfig(
+            "localhost",
+            upstream_configs=upstream_configs,
+            server_ports_to_locations=server_ports_to_locations,
+            enable_health_check=True if workload in ("mimir", "loki") else False,
+            enable_status_page=True if workload in ("mimir", "loki") else False,
+        )
+        generated_config = nginx.get_config(addrs_by_role, tls)
+        sample_config_path = (
+            Path(__file__).parent
+            / "resources"
+            / f"sample_{workload}_nginx_conf{'_tls' if tls else ''}.txt"
+        )
+        assert sample_config_path.read_text() == generated_config
 
 
-def _assert_upstreams(config: str, valid_upstreams: List[str], invalid_upstreams: List[str]):
-    for upstream in valid_upstreams:
-        assert f"upstream {upstream}" in config
-    for upstream in invalid_upstreams:
-        assert f"upstream {upstream}" not in config
+upstream_configs = {
+    "tempo": [
+        NginxUpstream("zipkin", 9411, "distributor"),
+        NginxUpstream("otlp-grpc", 4317, "distributor"),
+        NginxUpstream("otlp-http", 4318, "distributor"),
+        NginxUpstream("jaeger-thrift-http", 14268, "distributor"),
+        NginxUpstream("jaeger-grpc", 14250, "distributor"),
+        NginxUpstream("tempo-http", 3200, "query-frontend"),
+        NginxUpstream("tempo-grpc", 9096, "query-frontend"),
+    ],
+    "mimir": [
+        NginxUpstream("distributor", 8080, "distributor"),
+        NginxUpstream("compactor", 8080, "compactor"),
+        NginxUpstream("query-frontend", 8080, "query-frontend"),
+        NginxUpstream("ingester", 8080, "ingester"),
+        NginxUpstream("ruler", 8080, "ruler"),
+        NginxUpstream("store-gateway", 8080, "store-gateway"),
+    ],
+    "loki": [
+        NginxUpstream("read", 3100, "read"),
+        NginxUpstream("write", 3100, "write"),
+        NginxUpstream("all", 3100, "all"),
+        NginxUpstream("backend", 3100, "backend"),
+        NginxUpstream("worker", 3100, "worker"),
+    ],
+}
+server_ports_to_locations = {
+    "tempo": {
+        9411: [NginxLocationConfig(backend="zipkin", path="/")],
+        4317: [NginxLocationConfig(backend="otlp-grpc", path="/", is_grpc=True)],
+        4318: [NginxLocationConfig(backend="otlp-http", path="/")],
+        14268: [NginxLocationConfig(backend="jaeger-thrift-http", path="/")],
+        14250: [NginxLocationConfig(backend="jaeger-grpc", path="/", is_grpc=True)],
+        3200: [NginxLocationConfig(backend="tempo-http", path="/")],
+        9096: [NginxLocationConfig(backend="tempo-grpc", path="/", is_grpc=True)],
+    },
+    "mimir": {
+        8080: [
+            NginxLocationConfig(path="/distributor", backend="distributor"),
+            NginxLocationConfig(path="/api/v1/push", backend="distributor"),
+            NginxLocationConfig(path="/otlp/v1/metrics", backend="distributor"),
+            NginxLocationConfig(path="/prometheus/config/v1/rules", backend="ruler"),
+            NginxLocationConfig(path="/prometheus/api/v1/rules", backend="ruler"),
+            NginxLocationConfig(path="/prometheus/api/v1/alerts", backend="ruler"),
+            NginxLocationConfig(path="/ruler/ring", backend="ruler", modifier="="),
+            NginxLocationConfig(path="/prometheus", backend="query-frontend"),
+            NginxLocationConfig(
+                path="/api/v1/status/buildinfo", backend="query-frontend", modifier="="
+            ),
+            NginxLocationConfig(path="/api/v1/upload/block/", backend="compactor", modifier="="),
+        ]
+    },
+    "loki": {
+        8080: [
+            NginxLocationConfig(path="/loki/api/v1/push", modifier="=", backend="write"),
+            NginxLocationConfig(path="/loki/api/v1/rules", modifier="=", backend="backend"),
+            NginxLocationConfig(path="/prometheus", modifier="=", backend="backend"),
+            NginxLocationConfig(
+                path="/api/v1/rules",
+                modifier="=",
+                backend="backend",
+                backend_url="/loki/api/v1/rules",
+            ),
+            NginxLocationConfig(path="/loki/api/v1/tail", modifier="=", backend="read"),
+            NginxLocationConfig(
+                path="/loki/api/.*",
+                modifier="~",
+                backend="read",
+                headers={"Upgrade": "$http_upgrade", "Connection": "upgrade"},
+            ),
+            NginxLocationConfig(path="/loki/api/v1/format_query", modifier="=", backend="worker"),
+            NginxLocationConfig(
+                path="/loki/api/v1/status/buildinfo", modifier="=", backend="worker"
+            ),
+            NginxLocationConfig(path="/ring", modifier="=", backend="worker"),
+        ]
+    },
+}
 
 
-def _assert_listeners(
-    config: str, tls: bool, valid_listeners: Tuple[str, str], invalid_listeners: Tuple[str, str]
-):
-    for port, protocol in valid_listeners:
-        config_protocol = ""
-        if tls:
-            config_protocol += " ssl"
-        if protocol == "grpc":
-            config_protocol += " http2"
-        assert f"listen {port}{config_protocol};" in config
-
-    for port, protocol in invalid_listeners:
-        assert f"listen {port}" not in config
-
-
-def _assert_locations(
-    config: str, tls: bool, valid_upstreams: Tuple[str, str], invalid_upstreams: Tuple[str, str]
-):
-    s = "s" if tls else ""
-    for upstream, protocol in valid_upstreams:
-        config_protocol = f"grpc{s}" if protocol == "grpc" else f"http{s}"
-        assert f"set $backend {config_protocol}://{upstream}" in config
-    for upstream, protocol in invalid_upstreams:
-        config_protocol = f"grpc{s}" if protocol == "grpc" else f"http{s}"
-        assert f"set $backend {config_protocol}://{upstream}" not in config
+def _get_nginx_config_params(workload: str) -> Tuple[list, dict]:
+    return (upstream_configs.get(workload), server_ports_to_locations.get(workload))
