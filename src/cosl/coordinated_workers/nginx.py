@@ -36,6 +36,7 @@ RESOLV_CONF_PATH = "/etc/resolv.conf"
 
 class NginxLocationModifier(Enum):
     """Enum representing valid Nginx `location` block modifiers."""
+# cfr. https://www.digitalocean.com/community/tutorials/nginx-location-directive#nginx-location-directive-syntax
 
     DEFAULT = ""  # prefix match
     EXACT = "="  # exact match
@@ -62,14 +63,14 @@ class NginxConfig:
         server_ports_to_locations: Dict[int, List[NginxLocationConfig]],
     ):
         try:
-            # TODO: lazy load crossplane to avoid adding an additional dependency to cosl
+            # we lazy-load crossplane to avoid adding a dependency to cosl as a whole
             import crossplane
 
             self._builder = crossplane.build
         except ModuleNotFoundError:
             raise RuntimeError(
-                "Unmet dependencies: the coordinator charm base is missing some dependencies. \
-            Please install them with: pip install crossplane"
+                "Unmet dependency: the coordinated-workers NginxConfig object depends on the 'crossplane' package. \
+            Please install it with: `pip install crossplane` and add it to your charm's dependencies."
             )
         self._server_name = server_name
         self._dns_IP_address = self._get_dns_ip_address()
@@ -78,7 +79,7 @@ class NginxConfig:
         self._server_ports_to_locations = server_ports_to_locations
 
     def get_config(self, addresses_by_role: Dict[str, Set[str]], tls: bool) -> str:
-        """Returns the rendered Nginx configuration as a string."""
+        """Render the Nginx configuration as a string."""
         full_config = self._prepare_config(addresses_by_role, tls)
         return self._builder(full_config)
 
