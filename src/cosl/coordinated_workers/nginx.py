@@ -89,14 +89,13 @@ class NginxConfig:
     def _prepare_config(
         self, addresses_by_role: Dict[str, Set[str]], tls: bool
     ) -> List[Dict[str, Any]]:
-        log_level = "error"
         upstreams = self._upstreams(addresses_by_role)
         # extract the upstream name
         upstream_names = [upstream["args"][0] for upstream in upstreams]
         # build the complete configuration
         full_config = [
             {"directive": "worker_processes", "args": ["5"]},
-            {"directive": "error_log", "args": ["/dev/stderr", log_level]},
+            {"directive": "error_log", "args": ["/dev/stderr", "error"]},
             {"directive": "pid", "args": ["/tmp/nginx.pid"]},
             {"directive": "worker_rlimit_nofile", "args": ["8192"]},
             {
