@@ -1,7 +1,157 @@
 # Copyright 2023 Canonical
 # See LICENSE file for licensing details.
 
-"""Workload manager for Nginx. Used by the coordinator to load-balance and group the workers."""
+r"""## Overview.
+
+This module provides a set of utilities for generating Nginx configurations and managing Nginx workloads.
+Used by the coordinator to load-balance and group the workers.
+
+- `NginxLocationModifier`: An enum representing valid Nginx `location` block modifiers (e.g., `=`, `~`, `^~`).
+Should be used to populate an `NginxLocationConfig` object.
+
+- `NginxLocationConfig`: A class that defines a single Nginx `location` block, including path matching, modifier, custom headers, .etc.
+
+- `NginxUpstream`: A class that describes an Nginx `upstream` block — specifying an upstream `name`, `port`, and `worker_role` used to resolve backend endpoints.
+
+- `NginxConfig`: A class that builds a full Nginx configuration to be used by the coordinator to load-balance traffic across the workers.
+
+- `Nginx`: A helper class for managing the Nginx container workload (e.g., pebble service lifecycle, config reloads).
+
+- `NginxPrometheusExporter`: A helper class for managing the Nginx Prometheus exporter container workload (e.g., pebble service lifecycle, config reloads).
+
+- `is_ipv6_enabled()`: A utility function to check whether IPv6 is enabled on the container's network interfaces.
+
+## Usage
+### Nginx Config Generation
+
+To generate an Nginx configuration for a charm, instantiate the `NginxConfig` class with the required inputs:
+
+1. `server_name`: The name of the server (e.g. charm fqdn), which is used to identify the server in Nginx configurations.
+2. `upstream_configs`: List of `NginxUpstream` used to generate Nginx `upstream` blocks.
+3. `server_ports_to_locations`: Mapping from server ports to a list of `NginxLocationConfig`.
+
+#### Use `NginxConfig` in the context of the shared `Coordinator` object
+
+A coordinator charm may instantiate the `NginxConfig` in its constructor as follows:
+    from cosl.coordinated_workers.nginx import NginxConfig, NginxUpstream, NginxLocationConfig
+    ...
+
+    class CoordinatorCharm(CharmBase):
+        ...
+        def __init__(self, *args):
+            super().__init__(*args)
+            ...
+            self.coordinator = Coordinator(
+                ...
+                nginx_config=NginxConfig(
+                    server_name=self.hostname,
+                    upstream_configs=self._nginx_upstreams(),
+                    server_ports_to_locations=self._server_ports_to_locations(),
+                )
+            )
+        ...
+        @property
+        def hostname(self) -> str:
+            return socket.getfqdn()
+
+        @property
+        def _nginx_locations(self) -> List[NginxLocationConfig]:
+            return [
+                NginxLocationConfig(path="/loki/api/v1/rules", backend="backend",modifier=NginxLocationModifier("=")),
+                NginxLocationConfig(path="/prometheus", backend="backend",modifier=NginxLocationModifier("=")),
+                NginxLocationConfig(path="/api/v1/rules", backend="backend", backend_url="/loki/api/v1/rules",modifier=NginxLocationModifier("~")),
+            ]
+
+        def _nginx_upstreams(self) -> List[NginxUpstream]:
+            # WORKER_ROLES is a list of worker roles that we want to route traffic to
+            for upstream in WORKER_ROLES:
+                # WORKER_PORT is the port the worker services are running on
+                upstreams.append(NginxUpstream(upstream, WORKER_PORT, upstream))
+                return upstreams
+
+        def _server_ports_to_locations(self) -> Dict[int, List[NginxLocationConfig]]:
+            # NGINX_PORT is the port an nginx server is running on
+            # Note that: you can define multiple server blocks, each running on a different port
+            return {NGINX_PORT: self._nginx_locations}
+
+Passing the populated `NginxConfig` to the shared `Coordinator` will:
+1. generate the full Nginx configuration
+2. write the config to a file inside the `nginx` container
+3. start the `nginx` pebble service to run with that config file
+
+#### Use `NginxConfig` as a standalone
+
+Any charm can instantiate `NginxConfig` to generate its own Nginx configuration as follows:
+    from cosl.coordinated_workers.nginx import NginxConfig, NginxUpstream, NginxLocationConfig
+    ...
+
+    class AnyCharm(CharmBase):
+        ...
+        def __init__(self, *args):
+            super().__init__(*args)
+            ...
+            self._container = self.unit.get_container("nginx")
+            self._nginx = NginxConfig(
+                server_name=self.hostname,
+                upstream_configs=self._nginx_upstreams(),
+                server_ports_to_locations=self._server_ports_to_locations(),
+            )
+            ...
+            self._reconcile()
+
+
+        ...
+        @property
+        def hostname(self) -> str:
+            return socket.getfqdn()
+
+        @property
+        def _nginx_locations(self) -> List[NginxLocationConfig]:
+            return [
+                NginxLocationConfig(path="/api/v1", backend="upstream1",modifier=NginxLocationModifier("~")),
+                NginxLocationConfig(path="/status", backend="upstream2",modifier=NginxLocationModifier("=")),
+            ]
+
+        @property
+        def _upstream_addresses(self) -> Dict[str, Set[str]]:
+            # a mapping from an upstream "role" to the set of addresses that belong to this upstream
+            return {
+                "upstream1": {"address1", "address2"},
+                "upstream2": {"address3", "address4"},
+            }
+
+        @property
+        def _tls_available(self) -> bool:
+            # return if the Nginx config should have TLS enabled
+            pass
+
+        def _reconcile(self):
+            self.configure_pebble_layer()
+
+        def _nginx_upstreams(self) -> List[NginxUpstream]:
+            # UPSTREAMS is a list of backend services that we want to route traffic to
+            for upstream in UPSTREAMS:
+                # UPSTREAMS_PORT is the port the backend services are running on
+                upstreams.append(NginxUpstream(upstream, UPSTREAMS_PORT, upstream))
+                return upstreams
+
+        def _server_ports_to_locations(self) -> Dict[int, List[NginxLocationConfig]]:
+            # NGINX_PORT is the port an nginx server is running on
+            # Note that: you can define multiple server blocks, each running on a different port
+            return {NGINX_PORT: self._nginx_locations}
+
+        def configure_pebble_layer(self) -> None:
+            if self._container.can_connect():
+                new_config: str = self._nginx.get_config(self._upstream_addresses, self._tls_available)
+                should_restart: bool = self._has_config_changed(new_config)
+                self._container.push(self.config_path, new_config, make_dirs=True)
+                self._container.add_layer("nginx", self.layer, combine=True)
+                self._container.autostart()
+
+                if should_restart:
+                    logger.info("new nginx config: restarting the service")
+                    self.reload()
+"""
 
 import logging
 import subprocess
@@ -89,6 +239,15 @@ class NginxUpstream:
 class NginxConfig:
     """Responsible for building the Nginx configuration used by the coordinators."""
 
+    _worker_processes = "5"
+    _pid = "/tmp/nginx.pid"
+    _worker_rlimit_nofile = "8192"
+    _worker_connections = "4096"
+    _proxy_read_timeout = "300"
+    _supported_tls_versions = ["TLSv1", "TLSv1.1", "TLSv1.2", "TLSv1.3"]
+    _ssl_ciphers = ["HIGH:!aNULL:!MD5"]
+    _proxy_connect_timeout = "5s"
+
     def __init__(
         self,
         server_name: str,
@@ -140,27 +299,27 @@ class NginxConfig:
         self._enable_health_check = enable_health_check
         self._enable_status_page = enable_status_page
 
-    def get_config(self, addresses_by_role: Dict[str, Set[str]], tls: bool) -> str:
+    def get_config(self, upstreams_to_addresses: Dict[str, Set[str]], tls: bool) -> str:
         """Render the Nginx configuration as a string."""
-        full_config = self._prepare_config(addresses_by_role, tls)
+        full_config = self._prepare_config(upstreams_to_addresses, tls)
         return self._builder(full_config)  # type: ignore
 
     def _prepare_config(
-        self, addresses_by_role: Dict[str, Set[str]], tls: bool
+        self, upstreams_to_addresses: Dict[str, Set[str]], tls: bool
     ) -> List[Dict[str, Any]]:
-        upstreams = self._upstreams(addresses_by_role)
+        upstreams = self._upstreams(upstreams_to_addresses)
         # extract the upstream name
         backends = [upstream["args"][0] for upstream in upstreams]
         # build the complete configuration
         full_config = [
-            {"directive": "worker_processes", "args": ["5"]},
+            {"directive": "worker_processes", "args": [self._worker_processes]},
             {"directive": "error_log", "args": ["/dev/stderr", "error"]},
-            {"directive": "pid", "args": ["/tmp/nginx.pid"]},
-            {"directive": "worker_rlimit_nofile", "args": ["8192"]},
+            {"directive": "pid", "args": [self._pid]},
+            {"directive": "worker_rlimit_nofile", "args": [self._worker_rlimit_nofile]},
             {
                 "directive": "events",
                 "args": [],
-                "block": [{"directive": "worker_connections", "args": ["4096"]}],
+                "block": [{"directive": "worker_connections", "args": [self._worker_connections]}],
             },
             {
                 "directive": "http",
@@ -187,7 +346,6 @@ class NginxConfig:
                         ],
                     },
                     *self._log_verbose(verbose=False),
-                    # tempo-related
                     {"directive": "sendfile", "args": ["on"]},
                     {"directive": "tcp_nopush", "args": ["on"]},
                     *self._resolver(),
@@ -200,7 +358,7 @@ class NginxConfig:
                             {"directive": "", "args": ["anonymous"]},
                         ],
                     },
-                    {"directive": "proxy_read_timeout", "args": ["300"]},
+                    {"directive": "proxy_read_timeout", "args": [self._proxy_read_timeout]},
                     # server block
                     *self._build_servers_config(backends, tls),
                 ],
@@ -249,11 +407,11 @@ class NginxConfig:
                 return line.split()[1].strip()
         raise RuntimeError("cannot find nameserver in /etc/resolv.conf")
 
-    def _upstreams(self, addresses_by_role: Dict[str, Set[str]]) -> List[Any]:
+    def _upstreams(self, upstreams_to_addresses: Dict[str, Set[str]]) -> List[Any]:
         nginx_upstreams: List[Any] = []
 
         for upstream_config in self._upstream_configs:
-            addresses = addresses_by_role.get(upstream_config.worker_role)
+            addresses = upstreams_to_addresses.get(upstream_config.worker_role)
             # don't add an upstream block if there are no addresses
             if addresses:
                 nginx_upstreams.append(
@@ -261,7 +419,22 @@ class NginxConfig:
                         "directive": "upstream",
                         "args": [upstream_config.name],
                         "block": [
-                            {"directive": "server", "args": [f"{addr}:{upstream_config.port}"]}
+                            # TODO: uncomment the below directive when nginx version >= 1.27.3
+                            # monitor changes of IP addresses and automatically modify the upstream config without the need of restarting nginx.
+                            # this nginx plus feature has been part of opensource nginx in 1.27.3
+                            # ref: https://nginx.org/en/docs/http/ngx_http_upstream_module.html#upstream
+                            # {
+                            #     "directive": "zone",
+                            #     "args": [f"{upstream_config.name}_zone", "64k"],
+                            # },
+                            {
+                                "directive": "server",
+                                "args": [
+                                    f"{addr}:{upstream_config.port}",
+                                    # TODO: uncomment the below arg when nginx version >= 1.27.3
+                                    #  "resolve"
+                                ],
+                            }
                             for addr in addresses
                         ],
                     }
@@ -313,11 +486,11 @@ class NginxConfig:
                             {"directive": "ssl_certificate_key", "args": [KEY_PATH]},
                             {
                                 "directive": "ssl_protocols",
-                                "args": ["TLSv1", "TLSv1.1", "TLSv1.2", "TLSv1.3"],
+                                "args": self._supported_tls_versions,
                             },
                             {
                                 "directive": "ssl_ciphers",
-                                "args": ["HIGH:!aNULL:!MD5"],  # codespell:ignore
+                                "args": self._ssl_ciphers,
                             },
                         ]
                         if tls
@@ -397,7 +570,7 @@ class NginxConfig:
                             # if a server is down, no need to wait for a long time to pass on the request to the next available server
                             {
                                 "directive": "proxy_connect_timeout",
-                                "args": ["5s"],
+                                "args": [self._proxy_connect_timeout],
                             },
                             # add headers if any
                             *(
@@ -417,7 +590,7 @@ class NginxConfig:
     def _basic_auth(self, enabled: bool) -> List[Optional[Dict[str, Any]]]:
         if enabled:
             return [
-                {"directive": "auth_basic", "args": ['"Tempo"']},
+                {"directive": "auth_basic", "args": ['"workload"']},
                 {
                     "directive": "auth_basic_user_file",
                     "args": ["/etc/nginx/secrets/.htpasswd"],
