@@ -55,7 +55,7 @@ http {
         ssl_certificate /etc/nginx/certs/server.cert;
         ssl_certificate_key /etc/nginx/certs/server.key;
         ssl_protocols TLSv1 TLSv1.1 TLSv1.2 TLSv1.3;
-        ssl_ciphers HIGH:!aNULL:!MD5;
+        ssl_ciphers HIGH:!aNULL:!MD5;z
         location = / {
             return 200 "'OK'";
             auth_basic off;

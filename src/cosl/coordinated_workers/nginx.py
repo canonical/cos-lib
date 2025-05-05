@@ -48,7 +48,17 @@ class NginxLocationModifier(Enum):
 
 @dataclass
 class NginxLocationConfig:
-    """Represents a `location` block in an Nginx configuration."""
+    """Represents a `location` block in an Nginx configuration.
+
+    For example, NginxLocationConfig('/', 'foo', backend_url="/api/v1" headers={'a': 'b'}, modifier=EXACT, is_grpc=True)
+    would result in:
+        location = / {
+            set $backend grpc://foo/api/v1;
+            grpc_pass $backend;
+            proxy_connect_timeout 5s;
+            proxy_set_header a b;
+        }
+    """
 
     path: str
     backend: str
