@@ -290,4 +290,4 @@ server_ports_to_locations = {
 
 
 def _get_nginx_config_params(workload: str) -> Tuple[list, dict]:
-    return (upstream_configs.get(workload), server_ports_to_locations.get(workload))
+    return upstream_configs[workload], server_ports_to_locations[workload]
