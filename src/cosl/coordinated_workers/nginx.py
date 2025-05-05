@@ -34,7 +34,7 @@ DEFAULT_OPTIONS: _NginxMapping = {
 RESOLV_CONF_PATH = "/etc/resolv.conf"
 
 
-class NginxLocationModifier(Enum):
+class NginxLocationModifier(str, Enum):
     """Enum representing valid Nginx `location` block modifiers."""
 
     # cfr. https://www.digitalocean.com/community/tutorials/nginx-location-directive#nginx-location-directive-syntax
