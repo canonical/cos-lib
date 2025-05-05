@@ -124,9 +124,9 @@ class NginxConfig:
         """
         try:
             # we lazy-load crossplane to avoid adding a dependency to cosl as a whole
-            import crossplane
+            import crossplane  # type: ignore
 
-            self._builder = crossplane.build
+            self._builder = crossplane.build  # type: ignore
         except ModuleNotFoundError:
             raise RuntimeError(
                 "Unmet dependency: the coordinated-workers NginxConfig object depends on the 'crossplane' package. \
@@ -143,7 +143,7 @@ class NginxConfig:
     def get_config(self, addresses_by_role: Dict[str, Set[str]], tls: bool) -> str:
         """Render the Nginx configuration as a string."""
         full_config = self._prepare_config(addresses_by_role, tls)
-        return self._builder(full_config)
+        return self._builder(full_config)  # type: ignore
 
     def _prepare_config(
         self, addresses_by_role: Dict[str, Set[str]], tls: bool
@@ -269,8 +269,10 @@ class NginxConfig:
 
         return nginx_upstreams
 
-    def _build_servers_config(self, backends: List[str], tls: bool = False) -> List[Any]:
-        servers = []
+    def _build_servers_config(
+        self, backends: List[str], tls: bool = False
+    ) -> List[Dict[str, Any]]:
+        servers: List[Dict[str, Any]] = []
         for port, locations in self._server_ports_to_locations.items():
             server_config = self._build_server_config(
                 port,
@@ -291,9 +293,9 @@ class NginxConfig:
     ) -> Dict[str, Any]:
         auth_enabled = False
         is_grpc = any(loc.is_grpc for loc in locations)
-        locations = self._locations(locations, is_grpc, backends, tls)
+        nginx_locations = self._locations(locations, is_grpc, backends, tls)
         server_config = {}
-        if len(locations) > 0:
+        if len(nginx_locations) > 0:
             server_config = {
                 "directive": "server",
                 "args": [],
@@ -321,7 +323,7 @@ class NginxConfig:
                         if tls
                         else []
                     ),
-                    *locations,
+                    *nginx_locations,
                 ],
             }
 
@@ -336,7 +338,7 @@ class NginxConfig:
     ) -> List[Dict[str, Any]]:
         s = "s" if tls else ""
         protocol = f"grpc{s}" if grpc else f"http{s}"
-        nginx_locations = []
+        nginx_locations: List[Dict[str, Any]] = []
 
         if self._enable_health_check:
             nginx_locations.append(
@@ -424,7 +426,7 @@ class NginxConfig:
         return []
 
     def _listen(self, port: int, ssl: bool, http2: bool) -> List[Dict[str, Any]]:
-        directives = []
+        directives: List[Dict[str, Any]] = []
         directives.append(
             {"directive": "listen", "args": self._listen_args(port, False, ssl, http2)}
         )
@@ -438,7 +440,7 @@ class NginxConfig:
         return directives
 
     def _listen_args(self, port: int, ipv6: bool, ssl: bool, http2: bool) -> List[str]:
-        args = []
+        args: List[str] = []
         if ipv6:
             args.append(f"[::]:{port}")
         else:
@@ -552,7 +554,7 @@ class Nginx:
     def configure_pebble_layer(self) -> None:
         """Configure pebble layer."""
         if self._container.can_connect():
-            new_config: str = self._config_getter(tls=self.are_certificates_on_disk)
+            new_config: str = self._config_getter(self.are_certificates_on_disk)
             should_restart: bool = self._has_config_changed(new_config)
             self._container.push(self.config_path, new_config, make_dirs=True)  # type: ignore
             self._container.add_layer("nginx", self.layer, combine=True)
