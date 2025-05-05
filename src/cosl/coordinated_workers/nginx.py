@@ -8,7 +8,7 @@ import subprocess
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, TypedDict
+from typing import Any, Callable, Dict, List, Optional, Set, TypedDict, cast
 
 from ops import CharmBase, pebble
 
@@ -63,7 +63,7 @@ class NginxLocationConfig:
     path: str
     backend: str
     backend_url: str = ""
-    headers: Dict[str, str] = field(default_factory=dict)
+    headers: Dict[str, str] = field(default_factory=lambda: cast(Dict[str, str], {}))
     modifier: NginxLocationModifier = NginxLocationModifier.PREFIX
     is_grpc: bool = False
 
