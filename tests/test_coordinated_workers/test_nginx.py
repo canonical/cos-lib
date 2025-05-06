@@ -232,7 +232,7 @@ upstream_configs = {
         NginxUpstream("write", 3100, "write"),
         NginxUpstream("all", 3100, "all"),
         NginxUpstream("backend", 3100, "backend"),
-        NginxUpstream("worker", 3100, "worker"),
+        NginxUpstream("worker", 3100, "worker", ignore_worker_role=True),
     ],
 }
 server_ports_to_locations = {
