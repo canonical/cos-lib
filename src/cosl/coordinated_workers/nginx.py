@@ -57,9 +57,9 @@ A coordinator charm may instantiate the `NginxConfig` in its constructor as foll
         @property
         def _nginx_locations(self) -> List[NginxLocationConfig]:
             return [
-                NginxLocationConfig(path="/loki/api/v1/rules", backend="backend",modifier=NginxLocationModifier("=")),
-                NginxLocationConfig(path="/prometheus", backend="backend",modifier=NginxLocationModifier("=")),
-                NginxLocationConfig(path="/api/v1/rules", backend="backend", backend_url="/loki/api/v1/rules",modifier=NginxLocationModifier("~")),
+                NginxLocationConfig(path="/loki/api/v1/rules", backend="backend",modifier="="),
+                NginxLocationConfig(path="/prometheus", backend="backend",modifier="="),
+                NginxLocationConfig(path="/api/v1/rules", backend="backend", backend_url="/loki/api/v1/rules",modifier="~"),
             ]
 
         def _nginx_upstreams(self) -> List[NginxUpstream]:
@@ -108,8 +108,8 @@ Any charm can instantiate `NginxConfig` to generate its own Nginx configuration 
         @property
         def _nginx_locations(self) -> List[NginxLocationConfig]:
             return [
-                NginxLocationConfig(path="/api/v1", backend="upstream1",modifier=NginxLocationModifier("~")),
-                NginxLocationConfig(path="/status", backend="upstream2",modifier=NginxLocationModifier("=")),
+                NginxLocationConfig(path="/api/v1", backend="upstream1",modifier="~"),
+                NginxLocationConfig(path="/status", backend="upstream2",modifier="="),
             ]
 
         @property
@@ -156,9 +156,8 @@ Any charm can instantiate `NginxConfig` to generate its own Nginx configuration 
 import logging
 import subprocess
 from dataclasses import dataclass, field
-from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, TypedDict, cast
+from typing import Any, Callable, Dict, List, Literal, Optional, Set, TypedDict, cast
 
 from ops import CharmBase, pebble
 
@@ -184,16 +183,15 @@ DEFAULT_OPTIONS: _NginxMapping = {
 RESOLV_CONF_PATH = "/etc/resolv.conf"
 
 
-class NginxLocationModifier(str, Enum):
-    """Enum representing valid Nginx `location` block modifiers."""
-
-    # cfr. https://www.digitalocean.com/community/tutorials/nginx-location-directive#nginx-location-directive-syntax
-
-    PREFIX = ""  # prefix match
-    EXACT = "="  # exact match
-    REGEX_CASE_SENSITIVE = "~"  # case-sensitive regex match
-    REGEX_CASE_INSENSITIVE = "~*"  # case-insensitive regex match
-    PREFIX_NO_REGEX = "^~"  # prefix match that disables further regex matching
+# Define valid Nginx `location` block modifiers.
+# cfr. https://www.digitalocean.com/community/tutorials/nginx-location-directive#nginx-location-directive-syntax
+NginxLocationModifier = Literal[
+    "",  # prefix match
+    "=",  # exact match
+    "~",  # case-sensitive regex match
+    "~*",  # case-insensitive regex match
+    "^~",  # prefix match that disables further regex matching
+]
 
 
 @dataclass
@@ -218,7 +216,7 @@ class NginxLocationConfig:
     """An optional URL path to append when forwarding to the upstream (e.g., '/v1')."""
     headers: Dict[str, str] = field(default_factory=lambda: cast(Dict[str, str], {}))
     """Custom headers to include in the proxied request."""
-    modifier: NginxLocationModifier = NginxLocationModifier.PREFIX
+    modifier: NginxLocationModifier = ""
     """The Nginx location modifier."""
     is_grpc: bool = False
     """Whether to use gRPC proxying (i.e. `grpc_pass` instead of `proxy_pass`)."""
@@ -307,12 +305,12 @@ class NginxConfig:
             Please install it with: `pip install crossplane` and add it to your charm's dependencies."
             )
         self._server_name = server_name
-        self._dns_IP_address = self._get_dns_ip_address()
-        self._ipv6_enabled = is_ipv6_enabled()
         self._upstream_configs = upstream_configs
         self._server_ports_to_locations = server_ports_to_locations
         self._enable_health_check = enable_health_check
         self._enable_status_page = enable_status_page
+        self._dns_IP_address = self._get_dns_ip_address()
+        self._ipv6_enabled = is_ipv6_enabled()
 
     def get_config(self, upstreams_to_addresses: Dict[str, Set[str]], listen_tls: bool) -> str:
         """Render the Nginx configuration as a string.
@@ -582,7 +580,7 @@ class NginxConfig:
                         "directive": "location",
                         "args": (
                             [location.path]
-                            if location.modifier == NginxLocationModifier.PREFIX
+                            if location.modifier == ""
                             else [location.modifier, location.path]
                         ),
                         "block": [
