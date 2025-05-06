@@ -200,10 +200,10 @@ class NginxLocationModifier(str, Enum):
 class NginxLocationConfig:
     """Represents a `location` block in an Nginx configuration.
 
-    For example, NginxLocationConfig('/', 'foo', backend_url="/api/v1" headers={'a': 'b'}, modifier=EXACT, is_grpc=True)
+    For example, NginxLocationConfig('/', 'foo', backend_url="/api/v1" headers={'a': 'b'}, modifier=EXACT, is_grpc=True, use_tls=True)
     would result in:
         location = / {
-            set $backend grpc://foo/api/v1;
+            set $backend grpcs://foo/api/v1;
             grpc_pass $backend;
             proxy_connect_timeout 5s;
             proxy_set_header a b;
@@ -211,11 +211,21 @@ class NginxLocationConfig:
     """
 
     path: str
+    """The location path (e.g., '/', '/api') to match incoming requests."""
     backend: str
+    """The name of the upstream service to route requests to (e.g., defined in an `upstream` block)."""
     backend_url: str = ""
+    """An optional URL path to append when forwarding to the upstream (e.g., '/v1')."""
     headers: Dict[str, str] = field(default_factory=lambda: cast(Dict[str, str], {}))
+    """Custom headers to include in the proxied request."""
     modifier: NginxLocationModifier = NginxLocationModifier.PREFIX
+    """The Nginx location modifier."""
     is_grpc: bool = False
+    """Whether to use gRPC proxying (i.e. `grpc_pass` instead of `proxy_pass`)."""
+    upstream_tls: Optional[bool] = None
+    """Whether to connect to the upstream over TLS (e.g., https:// or grpcs://)
+    If None, it will inherit the TLS setting from the server block that the location is part of.
+    """
 
 
 @dataclass
@@ -299,13 +309,18 @@ class NginxConfig:
         self._enable_health_check = enable_health_check
         self._enable_status_page = enable_status_page
 
-    def get_config(self, upstreams_to_addresses: Dict[str, Set[str]], tls: bool) -> str:
-        """Render the Nginx configuration as a string."""
-        full_config = self._prepare_config(upstreams_to_addresses, tls)
+    def get_config(self, upstreams_to_addresses: Dict[str, Set[str]], listen_tls: bool) -> str:
+        """Render the Nginx configuration as a string.
+
+        Args:
+            upstreams_to_addresses: A dictionary mapping each upstream name to a set of addresses associated with that upstream.
+            listen_tls: Whether Nginx should listen for incoming traffic over TLS.
+        """
+        full_config = self._prepare_config(upstreams_to_addresses, listen_tls)
         return self._builder(full_config)  # type: ignore
 
     def _prepare_config(
-        self, upstreams_to_addresses: Dict[str, Set[str]], tls: bool
+        self, upstreams_to_addresses: Dict[str, Set[str]], listen_tls: bool
     ) -> List[Dict[str, Any]]:
         upstreams = self._upstreams(upstreams_to_addresses)
         # extract the upstream name
@@ -360,7 +375,7 @@ class NginxConfig:
                     },
                     {"directive": "proxy_read_timeout", "args": [self._proxy_read_timeout]},
                     # server block
-                    *self._build_servers_config(backends, tls),
+                    *self._build_servers_config(backends, listen_tls),
                 ],
             },
         ]
@@ -443,7 +458,7 @@ class NginxConfig:
         return nginx_upstreams
 
     def _build_servers_config(
-        self, backends: List[str], tls: bool = False
+        self, backends: List[str], listen_tls: bool = False
     ) -> List[Dict[str, Any]]:
         servers: List[Dict[str, Any]] = []
         for port, locations in self._server_ports_to_locations.items():
@@ -451,7 +466,7 @@ class NginxConfig:
                 port,
                 locations,
                 backends,
-                tls,
+                listen_tls,
             )
             if server_config:
                 servers.append(server_config)
@@ -462,18 +477,18 @@ class NginxConfig:
         port: int,
         locations: List[NginxLocationConfig],
         backends: List[str],
-        tls: bool = False,
+        listen_tls: bool = False,
     ) -> Dict[str, Any]:
         auth_enabled = False
         is_grpc = any(loc.is_grpc for loc in locations)
-        nginx_locations = self._locations(locations, is_grpc, backends, tls)
+        nginx_locations = self._locations(locations, is_grpc, backends, listen_tls)
         server_config = {}
         if len(nginx_locations) > 0:
             server_config = {
                 "directive": "server",
                 "args": [],
                 "block": [
-                    *self._listen(port, ssl=tls, http2=is_grpc),
+                    *self._listen(port, ssl=listen_tls, http2=is_grpc),
                     *self._basic_auth(auth_enabled),
                     {
                         "directive": "proxy_set_header",
@@ -493,7 +508,7 @@ class NginxConfig:
                                 "args": self._ssl_ciphers,
                             },
                         ]
-                        if tls
+                        if listen_tls
                         else []
                     ),
                     *nginx_locations,
@@ -507,10 +522,9 @@ class NginxConfig:
         locations: List[NginxLocationConfig],
         grpc: bool,
         backends: List[str],
-        tls: bool,
+        listen_tls: bool,
     ) -> List[Dict[str, Any]]:
-        s = "s" if tls else ""
-        protocol = f"grpc{s}" if grpc else f"http{s}"
+
         nginx_locations: List[Dict[str, Any]] = []
 
         if self._enable_health_check:
@@ -547,6 +561,10 @@ class NginxConfig:
         for location in locations:
             # don't add a location block if the upstream backend doesn't exist in the config
             if location.backend in backends:
+                # if upstream_tls is explicitly set for this location, use that; otherwise, use the server's listen_tls setting.
+                tls = location.upstream_tls if location.upstream_tls is not None else listen_tls
+                s = "s" if tls else ""
+                protocol = f"grpc{s}" if grpc else f"http{s}"
                 nginx_locations.append(
                     {
                         "directive": "location",
