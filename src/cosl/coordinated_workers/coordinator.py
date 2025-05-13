@@ -57,7 +57,11 @@ check_libs_installed(
 )
 
 from charms.catalogue_k8s.v1.catalogue import CatalogueConsumer, CatalogueItem
-from s3_lib import S3Requires, StorageConnectionInfoChangedEvent, StorageConnectionInfoGoneEvent
+from cosl.coordinated_workers.s3_lib import (
+    S3Requires,
+    StorageConnectionInfoChangedEvent,
+    StorageConnectionInfoGoneEvent,
+)
 from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
 from charms.loki_k8s.v1.loki_push_api import LogForwarder, LokiPushApiConsumer
 from charms.observability_libs.v0.kubernetes_compute_resources_patch import (
