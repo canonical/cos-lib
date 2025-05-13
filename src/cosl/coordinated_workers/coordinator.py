@@ -57,7 +57,7 @@ check_libs_installed(
 )
 
 from charms.catalogue_k8s.v1.catalogue import CatalogueConsumer, CatalogueItem
-from charms.data_platform_libs.v0.s3 import S3Requirer
+from s3_lib import S3Requires, StorageConnectionInfoChangedEvent, StorageConnectionInfoGoneEvent
 from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
 from charms.loki_k8s.v1.loki_push_api import LogForwarder, LokiPushApiConsumer
 from charms.observability_libs.v0.kubernetes_compute_resources_patch import (
@@ -292,7 +292,11 @@ class Coordinator(ops.Object):
             sans=[self.hostname, *self.cluster.gather_addresses()],
         )
 
-        self.s3_requirer = S3Requirer(self._charm, self._endpoints["s3"])
+        self.s3_requirer = S3Requires(self._charm, self._endpoints["s3"])
+        self.framework.observe(
+            self.s3_requirer.on.s3_connection_info_changed,
+            self._on_storage_connection_info_changed,
+        )
         self.datasource_exchange = DatasourceExchange(
             self._charm,
             provider_endpoint=self._endpoints.get("send-datasource", None),
@@ -591,6 +595,10 @@ class Coordinator(ops.Object):
     # EVENT HANDLERS #
     ##################
 
+    def _on_storage_connection_info_changed(self, e: StorageConnectionInfoChangedEvent):
+        credentials = self.s3_requirer.get_s3_connection_info()
+        logger.info(f"Relation_1 credentials changed. New credentials: {credentials}")
+
     def _on_peers_relation_created(self, event: ops.RelationCreatedEvent):
         if self._local_ip:
             event.relation.data[self._charm.unit]["local-ip"] = self._local_ip
@@ -783,5 +791,7 @@ class Coordinator(ops.Object):
             "memory": self._charm.model.config.get(memory_limit_key),
         }
         return adjust_resource_requirements(
-            limits, self._resources_requests_getter(), adhere_to_requests=True  # type: ignore
+            limits,
+            self._resources_requests_getter(),
+            adhere_to_requests=True,  # type: ignore
         )
