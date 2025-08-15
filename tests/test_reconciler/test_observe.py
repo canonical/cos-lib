@@ -3,9 +3,12 @@ from unittest.mock import MagicMock, patch
 import ops.framework
 import pytest
 from ops.testing import Context, Relation, State
-from utils import get_observed_events
 
 from cosl.reconciler import ALL_EVENTS, observe_all
+
+
+def get_observed_events(observe_mock):
+    return {call.args[0].event_type for call in observe_mock.call_args_list}
 
 
 @pytest.fixture
