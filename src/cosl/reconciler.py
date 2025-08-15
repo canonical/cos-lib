@@ -1,6 +1,7 @@
 """Regretful reconciler charm utils."""
 
 import inspect
+import itertools
 from typing import Any, Callable, Final, Iterable, Optional, Set, Type, TypeVar, Union, cast
 
 import ops
@@ -70,6 +71,9 @@ ALL_EVENTS_VM: Final[Set[Type[ops.EventBase]]] = ALL_EVENTS.difference(
 )
 
 
+_CTR = itertools.count()
+
+
 def observe_all(
     charm: ops.CharmBase,
     include: Optional[Iterable[_EventTyp]],
@@ -125,10 +129,12 @@ def observe_all(
     if not inspect.signature(callback).parameters:
         # we're passing the reconciler method directly
         class _Observer(ops.Object):
+            _key = f"_observer_proxy_{next(_CTR)}"
+
             def __init__(self):
-                super().__init__(charm, key="_observer_proxy_obj")
-                # attach ref to something solid to prevent GC
-                charm.framework._observer_proxy_obj = self  # type: ignore
+                super().__init__(charm, key=self._key)
+                # attach ref to something solid to prevent inadvertently GC'ing this thang
+                setattr(charm.framework, self._key, self)
 
             def evt_handler(self, _: ops.EventBase) -> None:
                 callback()  # type: ignore

@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 import ops.framework
 import pytest
 from ops.testing import Context, Relation, State
+from scenario.context import CharmEvents
 
 from cosl.reconciler import ALL_EVENTS, observe_all
 
@@ -89,3 +90,76 @@ def test_observe_emission(event_arg):
         ctx.run(ctx.on.relation_changed(relation), state=State(relations={relation}))
         # THEN the reconciler gets called on included events
         assert mm.called
+
+
+@pytest.mark.parametrize(
+    "event, name",
+    (
+        (CharmEvents.install(), "install"),
+        (CharmEvents.upgrade_charm(), "upgradecharm"),
+        (CharmEvents.update_status(), "updatestatus"),
+    ),
+)
+def test_observe_groups(event, name):
+    # GIVEN a regular luca charm that only observes certain event types
+    class LucaCharm(ops.CharmBase):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            observe_all(
+                self,
+                callback=self._install,
+                include=(ops.InstallEvent,),
+            )
+            observe_all(
+                self,
+                callback=self._upgradecharm,
+                include=[ops.UpgradeCharmEvent],
+            )
+            observe_all(
+                self,
+                callback=self._updatestatus,
+                include={ops.UpdateStatusEvent},
+            )
+
+        def _updatestatus(self):  # observe target
+            self.updatestatus()
+
+        def _upgradecharm(self):  # observe target
+            self.upgradecharm()
+
+        def _install(self):  # observe target
+            self.install()
+
+        def updatestatus(self):  # mock target (for testing)
+            pass
+
+        def upgradecharm(self):  # mock target (for testing)
+            pass
+
+        def install(self):  # mock target (for testing)
+            pass
+
+    # WHEN we observe_all
+    ctx = Context(
+        LucaCharm,
+        meta={
+            "name": "luca",
+            "requires": {"bax": {"interface": "bar"}},
+            "containers": {"foo": {}},
+        },
+        actions={"foo": {}},
+    )
+    mocks = [MagicMock(), MagicMock(), MagicMock()]
+    with patch.object(LucaCharm, "updatestatus", mocks[0]):
+        with patch.object(LucaCharm, "upgradecharm", mocks[1]):
+            with patch.object(LucaCharm, "install", mocks[2]):
+                # THEN the right reconciler gets called
+                ctx.run(event, state=State())
+
+                expected = {
+                    "install": [False, False, True],
+                    "upgradecharm": [False, True, False],
+                    "updatestatus": [True, False, False],
+                }[name]
+                calls = [mock.called for mock in mocks]
+                assert calls == expected
