@@ -1,7 +1,7 @@
 """Regretful reconciler charm utils."""
 
 import inspect
-from typing import Any, Callable, Final, Iterable, Set, Type, TypeVar, Union, Optional, cast
+from typing import Any, Callable, Final, Iterable, Optional, Set, Type, TypeVar, Union, cast
 
 import ops
 
@@ -128,7 +128,7 @@ def observe_all(
             def __init__(self):
                 super().__init__(charm, key="_observer_proxy_obj")
                 # attach ref to something solid to prevent GC
-                charm.framework._observer_proxy_obj = self # type: ignore
+                charm.framework._observer_proxy_obj = self  # type: ignore
 
             def evt_handler(self, _: ops.EventBase) -> None:
                 callback()  # type: ignore

@@ -35,8 +35,7 @@ def test_observe_all(charm, observe_mock, event_arg):
     # GIVEN a regular luca charm
     # WHEN we observe_all with no custom filters
     observe_all(
-        charm,
-        (lambda _: None) if event_arg else (lambda: None),
+        charm, callback=(lambda _: None) if event_arg else (lambda: None), include=ALL_EVENTS
     )
     # THEN events from all categories are observed
     observed_events = get_observed_events(observe_mock)
@@ -51,7 +50,7 @@ def test_observe_emission(event_arg):
             super().__init__(*a, **kw)
             observe_all(
                 self,
-                self._event_observer if event_arg else self._reconcile,
+                callback=self._event_observer if event_arg else self._reconcile,
                 include={ops.RelationEvent, ops.SecretEvent, ops.StorageEvent},
             )
 
