@@ -1,13 +1,13 @@
 """Regretful reconciler charm utils."""
 
 import inspect
-from typing import Any, Callable, Final, Iterable, Set, Type, TypeVar, Union
+from typing import Any, Callable, Final, Iterable, Set, Type, TypeVar, Union, Optional, cast
 
 import ops
 
-_eventTyp = TypeVar("_eventTyp", bound=ops.EventBase)
-_EventBaseSubclassIterable = Iterable[Type[_eventTyp]]
-_EventBaseSubclassSet = Set[Type[_eventTyp]]
+_EventTyp = TypeVar("_EventTyp", bound=Type[ops.EventBase])
+_EventBaseSubclassIterable = Iterable[_EventTyp]
+_EventBaseSubclassSet = Set[_EventTyp]
 
 # baseline obtained by:
 # ALL_EVENTS = _get_inheritance_tree_leaves(ops.HookEvent)
@@ -22,7 +22,7 @@ _EventBaseSubclassSet = Set[Type[_eventTyp]]
 #         )
 #     )
 # at: 11/8/2025 (ops==2.17.1)
-ALL_EVENTS: Final[_EventBaseSubclassSet] = {
+ALL_EVENTS: Final[Set[Type[ops.EventBase]]] = {
     ops.charm.PebbleCheckRecoveredEvent,
     ops.charm.PebbleCheckFailedEvent,
     ops.charm.ConfigChangedEvent,
@@ -52,14 +52,14 @@ ALL_EVENTS: Final[_EventBaseSubclassSet] = {
     ops.charm.PebbleCustomNoticeEvent,
 }
 
-ALL_EVENTS_K8S: Final[_EventBaseSubclassSet] = ALL_EVENTS.difference(
+ALL_EVENTS_K8S: Final[Set[Type[ops.EventBase]]] = ALL_EVENTS.difference(
     {
         ops.charm.UpgradeCharmEvent,  # this is your only chance to know you've been upgraded
         ops.charm.PebbleCustomNoticeEvent,  # sometimes you want to handle the various notices differently
     }
 )
 
-ALL_EVENTS_VM: Final[_EventBaseSubclassSet] = ALL_EVENTS.difference(
+ALL_EVENTS_VM: Final[Set[Type[ops.EventBase]]] = ALL_EVENTS.difference(
     {
         ops.charm.UpgradeCharmEvent,  # this is your only chance to know you've been upgraded
         ops.charm.InstallEvent,  # (machine) charms may want to observe this
@@ -72,9 +72,8 @@ ALL_EVENTS_VM: Final[_EventBaseSubclassSet] = ALL_EVENTS.difference(
 
 def observe_all(
     charm: ops.CharmBase,
+    include: Optional[Iterable[_EventTyp]],
     callback: Union[Callable[[Any], None], Callable[[], None]],
-    *,
-    include: _EventBaseSubclassIterable = None,
 ):
     """Observe all events that are subtypes of any ``include``d types, and map them to a single handler.
 
@@ -84,7 +83,7 @@ def observe_all(
     >>> class MyCharm(ops.CharmBase):
     ...    def __init__(self, ...):
     ...        super().__init__(...)
-    ...        observe_all(self, self.reconcile)
+    ...        observe_all(self, ALL_EVENTS, self.reconcile)
     ...
     ...     def reconcile(self):
     ...         pass
@@ -121,23 +120,24 @@ def observe_all(
     ...        super().__init__(...)
     ...        observe_all(self, lambda: print("I am running a relation event"), {ops.RelationEvent})
     """
+    # ops types it with Any!
+    evthandler: Callable[[Any], None]
     if not inspect.signature(callback).parameters:
         # we're passing the reconciler method directly
         class _Observer(ops.Object):
             def __init__(self):
                 super().__init__(charm, key="_observer_proxy_obj")
-                charm.framework._observer_proxy_obj = (
-                    self  # attach to something solid to prevent GC
-                )
+                # attach ref to something solid to prevent GC
+                charm.framework._observer_proxy_obj = self # type: ignore
 
-            def evt_handler(self, _):
-                callback()
+            def evt_handler(self, _: ops.EventBase) -> None:
+                callback()  # type: ignore
 
         evthandler = _Observer().evt_handler
     else:
-        evthandler = callback
+        evthandler = cast(Callable[[Any], None], callback)
 
-    included_events = include or ALL_EVENTS
+    included_events: Set[Type[ops.EventBase]] = set(include) if include else ALL_EVENTS
     for bound_evt in charm.on.events().values():
         if any(issubclass(bound_evt.event_type, include_type) for include_type in included_events):
             charm.framework.observe(bound_evt, evthandler)
