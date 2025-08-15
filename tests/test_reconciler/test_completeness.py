@@ -12,9 +12,7 @@ def _get_inheritance_tree_leaves(cl: Type):
             *[
                 (
                     [subc]
-                    if (
-                        subc.__module__.startswith("ops.") and not subc.__subclasses__()
-                    )
+                    if (subc.__module__.startswith("ops.") and not subc.__subclasses__())
                     else _get_inheritance_tree_leaves(subc)
                 )
                 for subc in cl.__subclasses__()
@@ -27,18 +25,22 @@ EXCLUDED_EVENTS = {
     ops.CollectMetricsEvent,
 }
 
-EXCLUDED_EVENTS_K8S = EXCLUDED_EVENTS.union({
-    ops.UpgradeCharmEvent,
-    ops.PebbleCustomNoticeEvent,
-})
+EXCLUDED_EVENTS_K8S = EXCLUDED_EVENTS.union(
+    {
+        ops.UpgradeCharmEvent,
+        ops.PebbleCustomNoticeEvent,
+    }
+)
 
-EXCLUDED_EVENTS_VM = EXCLUDED_EVENTS.union({
-    ops.UpgradeCharmEvent,
-    ops.InstallEvent,
-    ops.StartEvent,
-    ops.RemoveEvent,
-    ops.StopEvent,
-})
+EXCLUDED_EVENTS_VM = EXCLUDED_EVENTS.union(
+    {
+        ops.UpgradeCharmEvent,
+        ops.InstallEvent,
+        ops.StartEvent,
+        ops.RemoveEvent,
+        ops.StopEvent,
+    }
+)
 
 
 def test_correctness():
@@ -53,6 +55,7 @@ def test_completeness():
     Then we'll have to make a
     choice about whether to put those events in the safe or unsafe bucket.
     """
+
     all_event_types = set(_get_inheritance_tree_leaves(ops.HookEvent))
     assert set(ALL_EVENTS).union(EXCLUDED_EVENTS) == all_event_types
     assert set(ALL_EVENTS_K8S).union(EXCLUDED_EVENTS_K8S) == all_event_types

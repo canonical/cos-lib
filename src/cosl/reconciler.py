@@ -1,4 +1,5 @@
 """Regretful reconciler charm utils."""
+
 import inspect
 from typing import Any, Callable, Final, Iterable, Set, Type, TypeVar, Union
 
@@ -48,21 +49,25 @@ ALL_EVENTS: Final[_EventBaseSubclassSet] = {
     ops.charm.RemoveEvent,
     ops.charm.StopEvent,
     ops.charm.UpgradeCharmEvent,
-    ops.charm.PebbleCustomNoticeEvent
+    ops.charm.PebbleCustomNoticeEvent,
 }
 
-ALL_EVENTS_K8S: Final[_EventBaseSubclassSet] = ALL_EVENTS.difference({
-    ops.charm.UpgradeCharmEvent,             # this is your only chance to know you've been upgraded
-    ops.charm.PebbleCustomNoticeEvent        # sometimes you want to handle the various notices differently
-})
+ALL_EVENTS_K8S: Final[_EventBaseSubclassSet] = ALL_EVENTS.difference(
+    {
+        ops.charm.UpgradeCharmEvent,  # this is your only chance to know you've been upgraded
+        ops.charm.PebbleCustomNoticeEvent,  # sometimes you want to handle the various notices differently
+    }
+)
 
-ALL_EVENTS_VM: Final[_EventBaseSubclassSet] = ALL_EVENTS.difference({
-    ops.charm.UpgradeCharmEvent,             # this is your only chance to know you've been upgraded
-    ops.charm.InstallEvent,                  # (machine) charms may want to observe this
-    ops.charm.StartEvent,                    # same
-    ops.charm.RemoveEvent,                   # usually pointless to reconcile towards an up state if you're shutting down
-    ops.charm.StopEvent,                     # same
-})
+ALL_EVENTS_VM: Final[_EventBaseSubclassSet] = ALL_EVENTS.difference(
+    {
+        ops.charm.UpgradeCharmEvent,  # this is your only chance to know you've been upgraded
+        ops.charm.InstallEvent,  # (machine) charms may want to observe this
+        ops.charm.StartEvent,  # same
+        ops.charm.RemoveEvent,  # usually pointless to reconcile towards an up state if you're shutting down
+        ops.charm.StopEvent,  # same
+    }
+)
 
 
 def observe_all(
@@ -121,7 +126,9 @@ def observe_all(
         class _Observer(ops.Object):
             def __init__(self):
                 super().__init__(charm, key="_observer_proxy_obj")
-                charm.framework._observer_proxy_obj = self  # attach to something solid to prevent GC
+                charm.framework._observer_proxy_obj = (
+                    self  # attach to something solid to prevent GC
+                )
 
             def evt_handler(self, _):
                 callback()

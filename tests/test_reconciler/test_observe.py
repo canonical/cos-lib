@@ -1,11 +1,11 @@
-import pytest
 from unittest.mock import MagicMock, patch
 
 import ops.framework
-from ops.testing import Context, State, Relation
-from cosl.reconciler import observe_all, ALL_EVENTS
-
+import pytest
+from ops.testing import Context, Relation, State
 from utils import get_observed_events
+
+from cosl.reconciler import ALL_EVENTS, observe_all
 
 
 @pytest.fixture
@@ -22,7 +22,7 @@ def charm(observe_mock):
             "name": "luca",
             "requires": {"bax": {"interface": "bar"}},
             "containers": {"foo": {}},
-            "storage": {"foo": {"type": "bar"}}
+            "storage": {"foo": {"type": "bar"}},
         },
         actions={"foo": {}},
     )
@@ -52,16 +52,16 @@ def test_observe_emission(event_arg):
             observe_all(
                 self,
                 self._event_observer if event_arg else self._reconcile,
-                include={ops.RelationEvent, ops.SecretEvent, ops.StorageEvent}
+                include={ops.RelationEvent, ops.SecretEvent, ops.StorageEvent},
             )
 
-        def _event_observer(self, _): # observe target
+        def _event_observer(self, _):  # observe target
             self._reconcile()
 
-        def _reconcile(self): # observe target
+        def _reconcile(self):  # observe target
             self.reconcile()
 
-        def reconcile(self): # mock target (for testing)
+        def reconcile(self):  # mock target (for testing)
             pass
 
     # WHEN we observe_all
