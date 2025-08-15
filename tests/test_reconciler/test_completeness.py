@@ -3,7 +3,7 @@ from typing import Type
 
 import ops
 
-from cosl.reconciler import ALL_EVENTS, ALL_EVENTS_K8S, ALL_EVENTS_VM
+from cosl.reconciler import all_events, reconcilable_events_k8s, reconcilable_events_machine
 
 
 def _get_inheritance_tree_leaves(cl: Type):
@@ -27,18 +27,19 @@ EXCLUDED_EVENTS = {
 
 EXCLUDED_EVENTS_K8S = EXCLUDED_EVENTS.union(
     {
-        ops.UpgradeCharmEvent,
         ops.PebbleCustomNoticeEvent,
+        ops.RemoveEvent,
+        ops.UpgradeCharmEvent,
     }
 )
 
 EXCLUDED_EVENTS_VM = EXCLUDED_EVENTS.union(
     {
-        ops.UpgradeCharmEvent,
         ops.InstallEvent,
-        ops.StartEvent,
         ops.RemoveEvent,
+        ops.StartEvent,
         ops.StopEvent,
+        ops.UpgradeCharmEvent,
     }
 )
 
@@ -46,7 +47,7 @@ EXCLUDED_EVENTS_VM = EXCLUDED_EVENTS.union(
 def test_correctness():
     """Verify we are surfacing only valid events."""
     all_event_types = set(_get_inheritance_tree_leaves(ops.EventBase))
-    assert set(ALL_EVENTS).issubset(all_event_types)
+    assert set(all_events).issubset(all_event_types)
 
 
 def test_completeness():
@@ -57,13 +58,13 @@ def test_completeness():
     choice about whether to put those events in the safe or unsafe bucket.
     """
     all_event_types = set(_get_inheritance_tree_leaves(ops.HookEvent))
-    assert set(ALL_EVENTS).union(EXCLUDED_EVENTS) == all_event_types
-    assert set(ALL_EVENTS_K8S).union(EXCLUDED_EVENTS_K8S) == all_event_types
-    assert set(ALL_EVENTS_VM).union(EXCLUDED_EVENTS_VM) == all_event_types
+    assert set(all_events).union(EXCLUDED_EVENTS) == all_event_types
+    assert set(reconcilable_events_k8s).union(EXCLUDED_EVENTS_K8S) == all_event_types
+    assert set(reconcilable_events_machine).union(EXCLUDED_EVENTS_VM) == all_event_types
 
 
 def test_exclusiveness():
     """Verify the safe and unsafe buckets have no intersection."""
-    assert set(ALL_EVENTS).intersection(EXCLUDED_EVENTS) == set()
-    assert set(ALL_EVENTS_K8S).intersection(EXCLUDED_EVENTS_K8S) == set()
-    assert set(ALL_EVENTS_VM).intersection(EXCLUDED_EVENTS_VM) == set()
+    assert set(all_events).intersection(EXCLUDED_EVENTS) == set()
+    assert set(reconcilable_events_k8s).intersection(EXCLUDED_EVENTS_K8S) == set()
+    assert set(reconcilable_events_machine).intersection(EXCLUDED_EVENTS_VM) == set()

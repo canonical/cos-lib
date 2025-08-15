@@ -5,7 +5,7 @@ import pytest
 from ops.testing import Context, Relation, State
 from scenario.context import CharmEvents
 
-from cosl.reconciler import ALL_EVENTS, observe_all
+from cosl.reconciler import all_events, observe_events
 
 
 def get_observed_events(observe_mock):
@@ -35,15 +35,15 @@ def charm(observe_mock):
 
 
 @pytest.mark.parametrize("event_arg", (True, False))
-def test_observe_all(charm, observe_mock, event_arg):
+def test_observe_events(charm, observe_mock, event_arg):
     # GIVEN a regular luca charm
-    # WHEN we observe_all with no custom filters
-    observe_all(
-        charm, callback=(lambda _: None) if event_arg else (lambda: None), include=ALL_EVENTS
+    # WHEN we observe_events with no custom filters
+    observe_events(
+        charm, events=all_events, handler=(lambda _: None) if event_arg else (lambda: None)
     )
     # THEN events from all categories are observed
     observed_events = get_observed_events(observe_mock)
-    assert observed_events == ALL_EVENTS
+    assert observed_events == all_events
 
 
 @pytest.mark.parametrize("event_arg", (True, False))
@@ -52,10 +52,10 @@ def test_observe_emission(event_arg):
     class LucaCharm(ops.CharmBase):
         def __init__(self, *a, **kw):
             super().__init__(*a, **kw)
-            observe_all(
+            observe_events(
                 self,
-                callback=self._event_observer if event_arg else self._reconcile,
-                include={ops.RelationEvent, ops.SecretEvent, ops.StorageEvent},
+                events={ops.RelationEvent, ops.SecretEvent, ops.StorageEvent},
+                handler=self._event_observer if event_arg else self._reconcile,
             )
 
         def _event_observer(self, _):  # observe target
@@ -67,7 +67,7 @@ def test_observe_emission(event_arg):
         def reconcile(self):  # mock target (for testing)
             pass
 
-    # WHEN we observe_all
+    # WHEN we observe_events
     ctx = Context(
         LucaCharm,
         meta={
@@ -105,20 +105,20 @@ def test_observe_groups(event, name):
     class LucaCharm(ops.CharmBase):
         def __init__(self, *a, **kw):
             super().__init__(*a, **kw)
-            observe_all(
+            observe_events(
                 self,
-                callback=self._install,
-                include=(ops.InstallEvent,),
+                events=(ops.InstallEvent,),
+                handler=self._install,
             )
-            observe_all(
+            observe_events(
                 self,
-                callback=self._upgradecharm,
-                include=[ops.UpgradeCharmEvent],
+                events=[ops.UpgradeCharmEvent],
+                handler=self._upgradecharm,
             )
-            observe_all(
+            observe_events(
                 self,
-                callback=self._updatestatus,
-                include={ops.UpdateStatusEvent},
+                events={ops.UpdateStatusEvent},
+                handler=self._updatestatus,
             )
 
         def _updatestatus(self):  # observe target
@@ -139,7 +139,7 @@ def test_observe_groups(event, name):
         def install(self):  # mock target (for testing)
             pass
 
-    # WHEN we observe_all
+    # WHEN we observe_events
     ctx = Context(
         LucaCharm,
         meta={
