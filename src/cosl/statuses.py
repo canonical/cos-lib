@@ -17,16 +17,20 @@ def get_disk_usage_status(location: str, *, threshold: int = 1024**3) -> ops.Sta
     """Returns a status that matches the disk usage.
 
     Returns:
-     - ActiveStatus when the provided <location> has more <threshold> bytes;
+     - ActiveStatus when the provided <location> has more than <threshold> free bytes;
      - BlockedStatus when <location> is below <threshold>;
      - MaintenanceStatus when the <location> is not found i.e. before storage is attached.
+
+    Args:
+        location (str): The file system path to check for available disk space e.g. /var/lib/prometheus. In most cases, the charm calling this function would get this by calling self.model.storages["database"][0].location.
+        threshold (int): The minimum number of free bytes required before blocking. The default is 1024**3.
     """
     try:
         # NOTE: we measure the disk space from the charm container because it shares the same storage as the workload container
         free_disk_space = shutil.disk_usage(location).free
         if free_disk_space < threshold:
-            logger.warning(f"Less than 1GiB of disk space remaining in {location}")
-            return ops.BlockedStatus("<1 GiB remaining")
+            logger.warning(f"Less than {threshold} bytes of disk space remaining in {location}")
+            return ops.BlockedStatus(f"<{threshold / 1024**3:.1g} GiB remaining")
 
         else:
             return ops.ActiveStatus()

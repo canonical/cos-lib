@@ -24,5 +24,22 @@ def test_get_disk_usage_status(free_space, expected_status):
     with patch("shutil.disk_usage") as mock_disk_usage:
         mock_disk_usage.return_value.free = free_space
         unit_status = get_disk_usage_status(location="/foo/bar")
-
         assert type(unit_status) is type(expected_status)
+
+
+def test_get_maintenance_status_when_storage_not_attached():
+    unit_status = get_disk_usage_status(location="foo/bar")
+    assert type(unit_status) is type(ops.MaintenanceStatus())
+
+
+@pytest.mark.parametrize(
+    "free_space,threshold,expected_status",
+    [
+        (1024**3, 1024**4, ops.BlockedStatus("<1e+03 GiB remaining")),
+    ],
+)
+def test_blocked_status_message(free_space, threshold, expected_status):
+    with patch("shutil.disk_usage") as mock_disk_usage:
+        mock_disk_usage.return_value.free = free_space
+        unit_status = get_disk_usage_status(location="/foo/bar", threshold=threshold)
+        assert unit_status == expected_status
