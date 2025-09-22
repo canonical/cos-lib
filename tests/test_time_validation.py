@@ -2,9 +2,6 @@
 # See LICENSE file for licensing details.
 
 
-from unittest.mock import patch
-
-import ops
 import pytest
 
 from cosl.time_validation import is_valid_timespec
@@ -25,7 +22,6 @@ from cosl.time_validation import is_valid_timespec
         ("1sdgs", False),
         ("one week", False),
         ("one hour", False),
-        
     ],
 )
 def test_is_valid_timespec(given_time, expected_validity):
