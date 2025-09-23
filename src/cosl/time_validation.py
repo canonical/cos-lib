@@ -4,6 +4,8 @@
 
 import re
 
+_VALID_TIMESPEC_RE = re.compile(r"^(0|[0-9]+(y|w|d|h|m|s|ms))$")
+
 
 def is_valid_timespec(timeval: str) -> bool:
     """Returns a boolean based on whether the passed parameter is a valid timespec.
@@ -26,8 +28,4 @@ def is_valid_timespec(timeval: str) -> bool:
         - ms for milliseconds.
         Otherwise, it returns False.
     """
-    timespec_re = re.compile(
-        r"^((([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?|0)$"
-    )
-    matched = timespec_re.search(timeval)
-    return bool(matched)
+    return bool(_VALID_TIMESPEC_RE.match(timeval))

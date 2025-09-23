@@ -20,6 +20,7 @@ from cosl.time_validation import is_valid_timespec
         ("1s", True),
         ("1ms", True),
         ("1sdgs", False),
+        ("1w2d", False),
         ("one week", False),
         ("one hour", False),
     ],
