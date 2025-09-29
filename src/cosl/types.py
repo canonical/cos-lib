@@ -50,7 +50,10 @@ class OfficialRuleFileFormat(TypedDict):
 def type_convert_stored(
     obj: Union[StoredList, StoredDict, Any],
 ) -> Union[List[Any], Dict[Any, Any], Any]:
-    """Convert Stored* to their appropriate types, recursively."""
+    """Helper for converting Stored[Dict|List|Set] to the objects they pretend to be.
+
+    Ref: https://github.com/canonical/operator/pull/572
+    """
     if isinstance(obj, StoredList):
         return list(map(type_convert_stored, obj))
     if isinstance(obj, StoredDict):
