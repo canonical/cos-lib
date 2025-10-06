@@ -17,10 +17,11 @@ import logging
 import socket
 from typing import Dict
 
-from juju_topology import JujuTopology
 from ops import CharmBase
 from ops.charm import RelationEvent
 from ops.framework import EventBase, EventSource, Object, ObjectEvents
+
+from . import JujuTopology
 
 DEFAULT_CONSUMER_RELATION_NAME = "send-otlp"
 DEFAULT_PROVIDER_RELATION_NAME = "receive-otlp"
