@@ -18,10 +18,11 @@ import socket
 from enum import Enum
 from typing import Dict, List
 
-from juju_topology import JujuTopology
 from ops import CharmBase
 from ops.charm import RelationEvent
 from ops.framework import EventBase, EventSource, Object, ObjectEvents
+
+from . import JujuTopology
 
 DEFAULT_CONSUMER_GRPC_RELATION_NAME = "send-grpc-otlp"
 DEFAULT_CONSUMER_HTTP_RELATION_NAME = "send-http-otlp"
