@@ -16,8 +16,6 @@ provide OTLP telemetry for Opentelemetry-collector.
 import logging
 import socket
 from enum import Enum
-from pathlib import Path
-from typing import Dict
 
 from juju_topology import JujuTopology
 from ops import CharmBase
@@ -128,7 +126,7 @@ class OtlpProvider(Object):
         charm: CharmBase,
         port: int,
         relation_name: str = DEFAULT_PROVIDER_RELATION_NAME,
-        path: Path = Path(""),
+        path: str = "",
     ):
         super().__init__(charm, relation_name)
         self._charm = charm
