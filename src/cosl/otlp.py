@@ -16,6 +16,7 @@ provide OTLP telemetry for Opentelemetry-collector.
 import logging
 import socket
 from enum import Enum
+from typing import Dict, List
 
 from juju_topology import JujuTopology
 from ops import CharmBase
@@ -43,7 +44,7 @@ class OtlpConsumerEvents(ObjectEvents):
     endpoints_changed = EventSource(OtlpEndpointsChangedEvent)
 
 
-class Protocols(Enum, str):
+class OtlpProtocols(Enum, str):
     """Supported OTLP protocols."""
     grpc = "grpc"
     http = "http"
@@ -77,7 +78,18 @@ class BaseOtlpConsumer(Object):
         self.framework.observe(on_relation.relation_broken, self._reconcile)
 
     def _reconcile(self, event: RelationEvent) -> None:
-        pass
+        self.get_remote_otlp_endpoints()
+
+    def get_remote_otlp_endpoints(self) -> Dict[int, Dict[str, str]]:
+        """Return endpoints for each relation."""
+        self.framework.breakpoint()
+        aggregate = {}
+        for rel in self.model.relations[self._relation_name]:
+            if rel.data[rel.app]:
+                endpoints = dict(rel.data[rel.app])
+                aggregate[rel.id] = endpoints
+
+        return aggregate
 
 
 class OtlpHttpConsumer(BaseOtlpConsumer):
