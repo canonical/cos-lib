@@ -102,30 +102,17 @@ def _validate_endpoints(
         )
 
 
-class DatasourceExchange:
-    """``grafana_datasource_exchange`` interface endpoint wrapper (provider AND requirer)."""
+class DatasourceExchangeProvider:
+    """``grafana_datasource_exchange`` interface endpoint wrapper (provider)."""
 
     def __init__(
         self,
         charm: ops.CharmBase,
-        *,
-        provider_endpoint: Optional[str],
-        requirer_endpoint: Optional[str],
+        relation_name: str,
     ):
         self._charm = charm
-        _validate_endpoints(charm, provider_endpoint, requirer_endpoint)
-
-        # gather all relations, provider or requirer
-        all_relations = []
-        if provider_endpoint:
-            all_relations.extend(charm.model.relations.get(provider_endpoint, ()))
-        if requirer_endpoint:
-            all_relations.extend(charm.model.relations.get(requirer_endpoint, ()))
-
-        # filter out some common unhappy relation states
-        self._relations: List[ops.Relation] = [
-            rel for rel in all_relations if (rel.app and rel.data)
-        ]
+        self._relation_name = relation_name
+        self._relations = List[ops.Relation] = charm.model.relations.get(relation_name, ())
 
     def publish(self, datasources: Iterable[DatasourceDict]):
         """Submit these datasources to all remotes.
@@ -141,11 +128,22 @@ class DatasourceExchange:
         for relation in self._relations:
             app_data.dump(relation.data[self._charm.app])
 
+
+class DatasourceExchangeRequirer:
+    """``grafana_datasource_exchange`` interface endpoint wrapper (requirer)."""
+
+    def __init__(self, charm: ops.CharmBase, relation_name: str):
+        self._charm = charm
+        self._relation_name = relation_name
+        self._relations = List[ops.Relation] = [
+            rel for rel in charm.model.relations.get(relation_name, ()) if rel.app and rel.data  # I'd prefer filtering this in received_datasources, but that's outside this discussion
+        ]
+
     @property
     def received_datasources(self) -> Tuple[GrafanaDatasource, ...]:
         """Collect all datasources that the remotes have shared.
 
-        This operation is leader-only.
+        This operation is leader-only.  <-- TODO: I think this is incorrect, but outside the scope of this discussion :D
         """
         datasources: List[GrafanaDatasource] = []
 
