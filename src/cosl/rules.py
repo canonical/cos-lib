@@ -117,7 +117,7 @@ _generic_alert_rules: Final = SimpleNamespace(
         "for": "5m",
         "labels": {"severity": "critical"},
         "annotations": {
-            "summary": "Metrics not received from host '{{ $labels.instance }}', failed to remote write.",
+            "summary": "Metrics not received from charm '{{ $labels.juju_application }}'. Remote writing of metrics has failed.",
             "description": """
                 Juju application '{{ $labels.juju_application }}' of type '{{ $labels.juju_charm }}' in model '{{ $labels.juju_model }}'
                 has failed to remote write metrics into Prometheus since at least the past 5 minutes.
