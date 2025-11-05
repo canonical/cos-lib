@@ -71,7 +71,8 @@ class TestGenerateUID(unittest.TestCase):
         combinations = [
             ("some-charm", "dashboard1.json"),
             ("some-charm", "dashboard2.json"),
-            ("diff-charm", "dashboard.json"),
+            ("some-charm", "tmp/dashboard1.json"),
+            ("diff-charm", "dashboard1.json"),
             ("arg1",),
             ("arg1", "arg2"),
             ("arg1", "arg2", "arg3"),
