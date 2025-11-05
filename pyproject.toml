@@ -41,7 +41,7 @@ include = ["py.typed"]
 [tool.coverage.run]
 branch = true
 parallel = true
-omit = ["tests/**"]
+omit = ["tests/**", "**/__init__.py"]
 
 [tool.coverage.report]
 show_missing = true
