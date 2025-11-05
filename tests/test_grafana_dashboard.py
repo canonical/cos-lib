@@ -106,5 +106,5 @@ class TestGenerateUID(unittest.TestCase):
             DashboardPath40UID.is_valid("a1b2c3d4e5f6789012345678901234567890abcd")
         )  # 40 chars
         # Generated UIDs should always be valid (covered by other tests but explicitly stated here)
-        sample_uid = DashboardPath40UID.generate("test", "sample")
+        sample_uid = DashboardPath40UID.generate("some-charm", "dashboard.json")
         self.assertTrue(DashboardPath40UID.is_valid(sample_uid))
