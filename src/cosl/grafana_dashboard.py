@@ -78,8 +78,8 @@ class DashboardPath40UID:
     def generate(cls, *args: str) -> str:
         """Generate a dashboard uid from any number of string components.
 
-        The combination of all provided string components is guaranteed to be unique across
-        the ecosystem. By design, this intentionally does not take into account instances of the same charm with
+        The combination of all provided args must guarantee uniqueness across
+        the ecosystem. In general, charm name and dashboard path (relative to the charm root) is guaranteed to be unique across the ecosystem. By design, this intentionally does not take into account instances of the same charm with
         different charm revisions, which could have different dashboard versions.
         Ref: https://github.com/canonical/observability/pull/206
 
