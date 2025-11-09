@@ -105,7 +105,7 @@ _generic_alert_rules: Final = SimpleNamespace(
         "labels": {"severity": "critical"},
         "annotations": {
             "summary": "Host '{{ $labels.instance }}' is down.",
-            "description": """Juju application '{{ $labels.juju_application }}' of type '{{ $labels.juju_charm }}' in model '{{ $labels.juju_model }}' is down.
+            "description": """Juju application '{{ $labels.juju_application }}' in model '{{ $labels.juju_model }}' is down.
             Prometheus has been unable to scrape it during at least the past five minutes.""",
         },
     },
@@ -119,7 +119,7 @@ _generic_alert_rules: Final = SimpleNamespace(
         "annotations": {
             "summary": "Metrics not received from charm '{{ $labels.juju_application }}'. Remote writing of metrics has failed.",
             "description": """
-                Juju application '{{ $labels.juju_application }}' of type '{{ $labels.juju_charm }}' in model '{{ $labels.juju_model }}'
+                Juju application '{{ $labels.juju_application }}' in model '{{ $labels.juju_model }}'
                 has failed to remote write metrics into Prometheus since at least the past 5 minutes.
             """,
         },
