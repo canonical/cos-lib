@@ -12,7 +12,7 @@ from deepdiff import DeepDiff
 from fs.tempfs import TempFS
 
 from cosl.juju_topology import JujuTopology
-from cosl.rules import AlertRules
+from cosl.rules import AlertRules, generic_alert_groups
 
 
 class TestEndpointProvider(unittest.TestCase):
@@ -239,6 +239,20 @@ class TestFromDictGroupName(unittest.TestCase):
             self.assertIn("SomeGroupName", group["name"])
             # AND group name is prefixed with custom value
             self.assertTrue(group["name"].startswith("foo"))
+
+    def test_conditionally_injecting_juju_unit_label(self):
+        # GIVEN an alert rule in official-rule format
+        topology = JujuTopology(
+            "MyModel", "12de4fae-06cc-4ceb-9089-567be09fec78", "MyApp", "MyUnit", "MyCharm"
+        )
+        rules = AlertRules(query_type="promql", topology=topology)
+        # WHEN processed as string and provided custom group name prefix
+        for group in rules._from_dict(self.official_rule):
+            # THEN group name includes the original group name
+            self.assertFalse(any("juju_unit" in r["labels"] for r in group["rules"]))
+        for group in rules._from_dict(generic_alert_groups.aggregator_rules):
+            # THEN group name includes the original group name
+            self.assertTrue(all("juju_unit" in r["labels"] for r in group["rules"]))
 
     def test_raises_value_error_empty_dict(self):
         rules = AlertRules(query_type="promql")

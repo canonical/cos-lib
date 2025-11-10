@@ -382,6 +382,7 @@ class Rules(ABC):
         # update rules with additional metadata
         groups = cast(List[OfficialRuleFileItem], groups)
         for group in groups:
+            aggregator_group_names = {group["name"] for group in generic_alert_groups.aggregator_rules["groups"]}
             if not self._is_already_modified(group["name"]):
                 # update group name with topology and sub-path
                 group["name"] = "_".join(
@@ -390,6 +391,10 @@ class Rules(ABC):
             # after sanitizing we should not modify group["name"] anymore
             group["name"] = self._sanitize_metric_name(group["name"])
 
+            label_matchers = {"juju_model", "juju_model_uuid", "juju_application"}
+            if any(name in group["name"] for name in aggregator_group_names):
+                label_matchers.add("juju_unit")
+
             # add "juju_" topology labels
             for rule in group["rules"]:
                 if "labels" not in rule:
@@ -397,6 +402,7 @@ class Rules(ABC):
 
                 if self.topology:
                     # only insert labels that do not already exist
+                    # TODO: We need to update self.topology.label_matcher_dict to allow custom exclusions, but this would break a public property
                     for label, val in self.topology.label_matcher_dict.items():
                         if label not in rule["labels"]:
                             rule["labels"][label] = val
@@ -407,7 +413,7 @@ class Rules(ABC):
                         expression=re.sub(r"%%juju_topology%%,?", repl, rule["expr"]),
                         topology={
                             k: rule["labels"][k]
-                            for k in ("juju_model", "juju_model_uuid", "juju_application")
+                            for k in label_matchers
                             if rule["labels"].get(k) is not None
                         },
                         query_type=self.query_type,
