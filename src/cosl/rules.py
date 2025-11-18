@@ -105,9 +105,7 @@ _generic_alert_rules: Final = SimpleNamespace(
         "labels": {"severity": "critical"},
         "annotations": {
             "summary": "Host '{{ $labels.instance }}' is down.",
-            "description": """Host '{{ $labels.instance }}' is down, failed to scrape.
-                            VALUE = {{ $value }}
-                            LABELS = {{ $labels }}""",
+            "description": "Juju application '{{ $labels.juju_application }}' in model '{{ $labels.juju_model }}' is down. Prometheus has been unable to scrape it during at least the past five minutes.",
         },
     },
     host_metrics_missing={
@@ -118,10 +116,8 @@ _generic_alert_rules: Final = SimpleNamespace(
         "for": "5m",
         "labels": {"severity": "critical"},
         "annotations": {
-            "summary": "Metrics not received from host '{{ $labels.instance }}', failed to remote write.",
-            "description": """Metrics not received from host '{{ $labels.instance }}', failed to remote write.
-                            VALUE = {{ $value }}
-                            LABELS = {{ $labels }}""",
+            "summary": "Metrics not received from application '{{ $labels.juju_application }}'. Remote writing of metrics has failed.",
+            "description": "`Up` missing for application {{ $labels.juju_application }} in model {{ $labels.juju_model }}.  This can mean that the collector scraping metrics from this charm has been unable to remote write its collected metrics into Prometheus. Oftentimes, when the collector is failing to remote write the collected metrics, the HostMetricsMissing alert for it will also be triggered. Please check the collector's logs and ensure it is able to successfully hit the Prometheus remote write endpoint.",
         },
     },
 )
