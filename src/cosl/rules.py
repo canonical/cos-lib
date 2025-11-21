@@ -110,14 +110,24 @@ _generic_alert_rules: Final = SimpleNamespace(
     },
     host_metrics_missing={
         "alert": "HostMetricsMissing",
-        # We use "absent(up)" with "for: 5m" because the alert transitions from "Pending" to "Firing".
-        # If query portability is desired, "absent_over_time(up[5m])" is an alternative.
         "expr": "absent(up)",
         "for": "5m",
-        "labels": {"severity": "critical"},
+        "labels": {
+            "severity": "critical"
+        },  # The remote writer will set this to critical for machine charms when initializing PrometheusRemoteWriteConsumer.
         "annotations": {
-            "summary": "Metrics not received from application '{{ $labels.juju_application }}'. Remote writing of metrics has failed.",
-            "description": "`Up` missing for application {{ $labels.juju_application }} in model {{ $labels.juju_model }}.  This can mean that the collector scraping metrics from this charm has been unable to remote write its collected metrics into Prometheus. Oftentimes, when the collector is failing to remote write the collected metrics, the HostMetricsMissing alert for it will also be triggered. Please check the collector's logs and ensure it is able to successfully hit the Prometheus remote write endpoint.",
+            "summary": "Unit '{{ $labels.juju_unit }}' of application '{{ $labels.juju_application }}' is down or failing to remote write.",
+            "description": "`Up` missing for unit '{{ $labels.juju_unit }}' of application {{ $labels.juju_application }} in model {{ $labels.juju_model }}. Please ensure the unit or the collector scraping it is up and is able to successfully reach the metrics backend.",
+        },
+    },
+    aggregator_metrics_missing={
+        "alert": "AggregatorMetricsMissing",
+        "expr": "absent(up)",
+        "for": "5m",
+        "labels": {"severity": "warning"},
+        "annotations": {
+            "summary": "Metrics not received from application '{{ $labels.juju_application }}'. All units are down or failing to remote write.",
+            "description": "`Up` missing for ALL units of application {{ $labels.juju_application }} in model {{ $labels.juju_model }}. This can also mean the units or the collector scraping them are unable to reach the remote write endpoint of the metrics backend. Please ensure the correct firewall rules are applied.",
         },
     },
 )
@@ -147,6 +157,7 @@ generic_alert_groups: Final = SimpleNamespace(
                 "name": "AggregatorHostHealth",
                 "rules": [
                     _generic_alert_rules.host_metrics_missing,
+                    _generic_alert_rules.aggregator_metrics_missing,
                 ],
             },
         ]
