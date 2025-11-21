@@ -113,7 +113,7 @@ _generic_alert_rules: Final = SimpleNamespace(
         "expr": "absent(up)",
         "for": "5m",
         "labels": {
-            "severity": "critical"
+            "severity": "warning"
         },  # The remote writer will set this to critical for machine charms when initializing PrometheusRemoteWriteConsumer.
         "annotations": {
             "summary": "Unit '{{ $labels.juju_unit }}' of application '{{ $labels.juju_application }}' is down or failing to remote write.",
@@ -124,7 +124,7 @@ _generic_alert_rules: Final = SimpleNamespace(
         "alert": "AggregatorMetricsMissing",
         "expr": "absent(up)",
         "for": "5m",
-        "labels": {"severity": "warning"},
+        "labels": {"severity": "critical"},
         "annotations": {
             "summary": "Metrics not received from application '{{ $labels.juju_application }}'. All units are down or failing to remote write.",
             "description": "`Up` missing for ALL units of application {{ $labels.juju_application }} in model {{ $labels.juju_model }}. This can also mean the units or the collector scraping them are unable to reach the remote write endpoint of the metrics backend. Please ensure the correct firewall rules are applied.",
