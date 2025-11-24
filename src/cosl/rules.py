@@ -94,6 +94,7 @@ from .types import (
 
 logger = logging.getLogger(__name__)
 
+AGGREGATOR_METRICS_MISSING_RULE_NAME="AggregatorMetricsMissing"
 
 _generic_alert_rules: Final = SimpleNamespace(
     # We use "5m" to avoid false positives on expected temporary "down", e.g. during intentional (re)start.
@@ -121,7 +122,7 @@ _generic_alert_rules: Final = SimpleNamespace(
         },
     },
     aggregator_metrics_missing={
-        "alert": "AggregatorMetricsMissing",
+        "alert": AGGREGATOR_METRICS_MISSING_RULE_NAME,
         "expr": "absent(up)",
         "for": "5m",
         "labels": {"severity": "critical"},
