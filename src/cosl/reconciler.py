@@ -51,6 +51,7 @@ all_events: Final[Set[Type[ops.EventBase]]] = {
     ops.charm.StopEvent,
     ops.charm.UpgradeCharmEvent,
     ops.charm.PebbleCustomNoticeEvent,
+    ops.charm.ActionEvent,
 }
 
 # reconcilable_events_k8s is a list of all_events EXCEPT those listed below.
