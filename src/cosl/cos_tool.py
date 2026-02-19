@@ -92,7 +92,6 @@ class CosTool:
                 rule["expr"] = self.inject_label_matchers(rule["expr"], topology, query_type)  # type: ignore
         return rules
 
-    @ensure_querytype
     def validate_alert_rules(
         self, rules: Dict[str, Any], query_type: Optional[QueryType] = None
     ) -> Tuple[bool, str]:
@@ -118,7 +117,7 @@ class CosTool:
             if query_type == "logql":
                 transformed_rules = {"groups": []}  # type: Dict[str, Any]
                 for rule in rules["groups"]:
-                    transformed = {"name": str(uuid.uuid4()), "rules": [rule]}
+                    transformed = {"name": str(uuid.uuid4()), "rules": rule["rules"]}
                     transformed_rules["groups"].append(transformed)
 
                 rules = transformed_rules

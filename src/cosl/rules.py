@@ -167,6 +167,7 @@ generic_alert_groups: Final = SimpleNamespace(
 )
 
 
+# TODO: These are not used in this lib, but used in otlp lib. Should we keep this here? Its a large refactor to make cosl use these
 class RuleTypes(BaseModel):
     """A pydantic model for all rule types."""
 
@@ -183,8 +184,8 @@ class RulesModel(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    logql: Optional[RuleTypes] = None
-    promql: Optional[RuleTypes] = None
+    logql: RuleTypes
+    promql: RuleTypes
 
 
 class InvalidRulePathError(Exception):
@@ -302,6 +303,23 @@ class Rules(ABC):
         """
         all_files_in_dir = dir_path.glob("**/*" if recursive else "*")
         return list(filter(lambda f: f.is_file() and f.suffix in suffixes, all_files_in_dir))
+
+    @classmethod
+    def _resolve_dir_against_charm_path(cls, *path_elements: str, charm_dir: Path) -> str:
+        """Resolve the provided path items against the directory of the main file.
+
+        Look up the directory of the main .py file being executed. This is normally
+        going to be the charm.py file of the charm including this library. Then, resolve
+        the provided path elements and, if the result path exists and is a directory,
+        return its absolute path; otherwise, return `None`.
+        """
+        alerts_dir_path = charm_dir.absolute().joinpath(*path_elements)
+        if not alerts_dir_path.exists():
+            raise InvalidRulePathError(alerts_dir_path, "directory does not exist")
+        if not alerts_dir_path.is_dir():
+            raise InvalidRulePathError(alerts_dir_path, "is not a directory")
+
+        return str(alerts_dir_path)
 
     def _from_dir(self, dir_path: Path, recursive: bool) -> List[OfficialRuleFileItem]:
         """Read all rule files in a directory.
@@ -455,6 +473,53 @@ class Rules(ABC):
         """Sanitize a metric name according to https://prometheus.io/docs/concepts/data_model/#metric-names-and-labels."""
         return "".join(char if re.match(r"[a-zA-Z0-9_:]", char) else "_" for char in metric_name)
 
+    # ---- END STATIC HELPER METHODS --- #
+
+    def add(
+        self,
+        rule_dict: Dict[str, Any],
+        group_name: Optional[str] = None,
+        group_name_prefix: Optional[str] = None,
+    ) -> None:
+        """Add rules from dict to the existing ruleset.
+
+        Args:
+            rule_dict: a single-rule or official-rule YAML dict
+            group_name: a custom group name, used only if the new rule is of single-rule format
+            group_name_prefix: a custom group name prefix, used only if the new rule is of single-rule format
+        """
+        self.groups.extend(
+            self._from_dict(rule_dict, group_name=group_name, group_name_prefix=group_name_prefix)
+        )
+
+    def add_path(self, dir_path: Union[str, Path], *, recursive: bool = False) -> None:
+        """Add rules from a dir path.
+
+        All rules from files are aggregated into a data structure representing a single rule file.
+        All group names are augmented with juju topology.
+
+        Args:
+            dir_path: either a rules file or a dir of rules files.
+            recursive: whether to read files recursively or not (no impact if `path` is a file).
+        """
+        path = Path(dir_path) if isinstance(dir_path, str) else dir_path
+        if path.is_dir():
+            self.groups.extend(self._from_dir(path, recursive))
+        elif path.is_file():
+            self.groups.extend(self._from_file(path.parent, path))  # type: ignore
+        else:
+            logger.debug("%s rules path does not exist: %s", self.rule_type.capitalize(), path)
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Return standard rules file in dict representation.
+
+        Returns:
+            a dictionary containing a single list of rule groups.
+            The list of rule groups is provided as value of the
+            "groups" dictionary key.
+        """
+        return {"groups": self.groups} if self.groups else {}
+
     def get_identifier_by_alert_rules(
         self, rules: Dict[str, Any]
     ) -> Tuple[Union[str, None], Union[JujuTopology, None]]:
@@ -547,52 +612,17 @@ class Rules(ABC):
         rules["groups"] = modified_groups
         return rules
 
-    # ---- END STATIC HELPER METHODS --- #
-
-    def add(
-        self,
-        rule_dict: Dict[str, Any],
-        group_name: Optional[str] = None,
-        group_name_prefix: Optional[str] = None,
-    ) -> None:
-        """Add rules from dict to the existing ruleset.
-
-        Args:
-            rule_dict: a single-rule or official-rule YAML dict
-            group_name: a custom group name, used only if the new rule is of single-rule format
-            group_name_prefix: a custom group name prefix, used only if the new rule is of single-rule format
-        """
-        self.groups.extend(
-            self._from_dict(rule_dict, group_name=group_name, group_name_prefix=group_name_prefix)
-        )
-
-    def add_path(self, dir_path: Union[str, Path], *, recursive: bool = False) -> None:
-        """Add rules from a dir path.
-
-        All rules from files are aggregated into a data structure representing a single rule file.
-        All group names are augmented with juju topology.
-
-        Args:
-            dir_path: either a rules file or a dir of rules files.
-            recursive: whether to read files recursively or not (no impact if `path` is a file).
-        """
-        path = Path(dir_path) if isinstance(dir_path, str) else dir_path
-        if path.is_dir():
-            self.groups.extend(self._from_dir(path, recursive))
-        elif path.is_file():
-            self.groups.extend(self._from_file(path.parent, path))  # type: ignore
-        else:
-            logger.debug("%s rules path does not exist: %s", self.rule_type.capitalize(), path)
-
-    def as_dict(self) -> Dict[str, Any]:
-        """Return standard rules file in dict representation.
-
-        Returns:
-            a dictionary containing a single list of rule groups.
-            The list of rule groups is provided as value of the
-            "groups" dictionary key.
-        """
-        return {"groups": self.groups} if self.groups else {}
+    @classmethod
+    def validate_rules_path(cls, rules_path: str, charm_dir: Path) -> str:
+        try:
+            rules_path = cls._resolve_dir_against_charm_path(rules_path, charm_dir=charm_dir)
+        except InvalidRulePathError as e:
+            logger.debug(
+                "Invalid Prometheus alert rules folder at %s: %s",
+                e.rules_absolute_path,
+                e.message,
+            )
+        return rules_path
 
 
 class AlertRules(Rules):
