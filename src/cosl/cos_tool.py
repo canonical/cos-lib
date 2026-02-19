@@ -139,7 +139,6 @@ class CosTool:
                     ]
                 )
 
-    @ensure_querytype
     def inject_label_matchers(
         self,
         expression: str,

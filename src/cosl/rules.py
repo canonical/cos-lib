@@ -167,7 +167,6 @@ generic_alert_groups: Final = SimpleNamespace(
 )
 
 
-# TODO: These are not used in this lib, but used in otlp lib. Should we keep this here? Its a large refactor to make cosl use these
 class RuleTypes(BaseModel):
     """A pydantic model for all rule types."""
 
@@ -179,8 +178,6 @@ class RuleTypes(BaseModel):
 
 class RulesModel(BaseModel):
     """A pydantic model for all formats."""
-
-    RULES: ClassVar[str] = "rules"
 
     model_config = ConfigDict(extra="forbid")
 
@@ -457,7 +454,7 @@ class Rules(ABC):
                             for k in ("juju_model", "juju_model_uuid", "juju_application")
                             if rule["labels"].get(k) is not None
                         },
-                        query_type=self.query_type,
+                        query_type=cast(QueryType, self.query_type),
                     )
 
         return groups
@@ -577,7 +574,7 @@ class Rules(ABC):
         if "groups" not in rules:
             return rules
 
-        modified_groups = []
+        modified_groups: List[OfficialRuleFileItem] = []
         for group in rules["groups"]:
             # Copy off rules, so we don't modify an object we're iterating over
             rules_copy = group["rules"]
