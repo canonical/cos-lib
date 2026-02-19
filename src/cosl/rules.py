@@ -299,7 +299,8 @@ class Rules(ABC):
             List of files in `dir_path` that have one of the suffixes specified in `suffixes`.
         """
         all_files_in_dir = dir_path.glob("**/*" if recursive else "*")
-        return list(filter(lambda f: f.is_file() and f.suffix in suffixes, all_files_in_dir))
+        matched = filter(lambda f: f.is_file() and f.suffix in suffixes, all_files_in_dir)
+        return sorted(matched)
 
     @classmethod
     def _resolve_dir_against_charm_path(cls, *path_elements: str, charm_dir: Path) -> str:
