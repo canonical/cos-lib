@@ -172,8 +172,8 @@ class RuleTypes(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    alert_rules: Optional[Dict[str, Any]] = None
-    recording_rules: Optional[Dict[str, Any]] = None
+    alerting: Optional[Dict[str, Any]] = None
+    recording: Optional[Dict[str, Any]] = None
 
 
 class RulesModel(BaseModel):
