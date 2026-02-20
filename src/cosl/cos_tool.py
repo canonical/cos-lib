@@ -8,7 +8,6 @@ import platform
 import re
 import subprocess
 import tempfile
-import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -118,8 +117,7 @@ class CosTool:
             if query_type == "logql":
                 transformed_rules = {"groups": []}  # type: Dict[str, Any]
                 for rule in rules["groups"]:
-                    transformed = {"name": str(uuid.uuid4()), "rules": [rule]}
-                    transformed_rules["groups"].append(transformed)
+                    transformed_rules["groups"].append(rule)
 
                 rules = transformed_rules
 

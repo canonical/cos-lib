@@ -448,6 +448,7 @@ class TestAlertRulesWithOneRulePerFile(unittest.TestCase):
 
 class TestAlertRulesWithMultipleRulesPerFile(unittest.TestCase):
     def setUp(self) -> None:
+        self.maxDiff = None
         self.topology = JujuTopology(
             "MyModel", "12de4fae-06cc-4ceb-9089-567be09fec78", "MyApp", "MyCharm"
         )
@@ -568,16 +569,16 @@ class TestAlertRulesWithMultipleRulesPerFile(unittest.TestCase):
         expected_rules_file = {
             "groups": [
                 {
-                    "name": f"{self.topology.identifier}_file_alerts",
-                    "rules": [self.gen_rule(0, labels=self.topology.label_matcher_dict)],
+                    "name": f"{self.topology.identifier}_a_b_file_alerts",
+                    "rules": [self.gen_rule(2, labels=self.topology.label_matcher_dict)],
                 },
                 {
                     "name": f"{self.topology.identifier}_a_file_alerts",
                     "rules": [self.gen_rule(1, labels=self.topology.label_matcher_dict)],
                 },
                 {
-                    "name": f"{self.topology.identifier}_a_b_file_alerts",
-                    "rules": [self.gen_rule(2, labels=self.topology.label_matcher_dict)],
+                    "name": f"{self.topology.identifier}_file_alerts",
+                    "rules": [self.gen_rule(0, labels=self.topology.label_matcher_dict)],
                 },
             ]
         }
