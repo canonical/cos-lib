@@ -1,4 +1,4 @@
-# Copyright 2023 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """COS Tool."""
@@ -118,7 +118,7 @@ class CosTool:
             if query_type == "logql":
                 transformed_rules = {"groups": []}  # type: Dict[str, Any]
                 for rule in rules["groups"]:
-                    transformed = {"name": str(uuid.uuid4()), "rules": rule["rules"]}
+                    transformed = {"name": str(uuid.uuid4()), "rules": [rule]}
                     transformed_rules["groups"].append(transformed)
 
                 rules = transformed_rules
