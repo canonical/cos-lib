@@ -75,13 +75,15 @@ The following labels are automatically included with each rule:
 - `juju_application`
 """  # noqa: W505
 
+import base64
 import hashlib
 import logging
+import lzma
 import re
 from abc import ABC, abstractmethod
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, ClassVar, Dict, Final, List, Optional, Tuple, Union, cast
+from typing import Any, Dict, Final, List, Optional, Tuple, Union, cast
 
 import yaml
 from pydantic import BaseModel, ConfigDict
@@ -289,6 +291,8 @@ class Rules(ABC):
         dir_path: Path, suffixes: List[str], recursive: bool = True
     ) -> List[Path]:
         """Helper function for getting all files in a directory that have a matching suffix.
+
+        The result is sorted to avoid unnecessary relation-get calls.
 
         Args:
             dir_path: path to the directory to glob from.
@@ -595,9 +599,11 @@ class Rules(ABC):
                         )
 
                         # Inject topology and put it back in the list
-                        rule["expr"] = self.tool.inject_label_matchers(
-                            re.sub(r"%%juju_topology%%,?", "", rule["expr"]),
-                            topology.label_matcher_dict,
+                        rule["expr"] = (
+                            self.tool.inject_label_matchers(  # pyright: ignore[reportCallIssue]
+                                re.sub(r"%%juju_topology%%,?", "", rule["expr"]),
+                                topology.label_matcher_dict,
+                            )
                         )
                     except KeyError:
                         # Some required JujuTopology key is missing. Just move on.
@@ -612,6 +618,10 @@ class Rules(ABC):
 
     @classmethod
     def validate_rules_path(cls, rules_path: str, charm_dir: Path) -> str:
+        """Validate that a rules path is valid and can be read from.
+
+        This is used to validate config options that specify paths to rule files or directories.
+        """
         try:
             rules_path = cls._resolve_dir_against_charm_path(rules_path, charm_dir=charm_dir)
         except InvalidRulePathError as e:
@@ -655,3 +665,23 @@ class RecordingRules(Rules):
     def rule_type(self) -> RuleType:
         """Return the rule type being used for interpolation in messages."""
         return self._rule_type
+
+
+# TODO: This duplicates the one in grafana_dashboard.py, consider movig to types.py?
+class LZMABase64:
+    """A helper class for LZMA-compressed-base64-encoded strings.
+
+    This is useful for transferring over juju relation data, which can only have keys of type string.
+    """
+
+    @classmethod
+    def compress(cls, raw_json: Union[str, bytes]) -> str:
+        """LZMA-compress and base64-encode into a string."""
+        if not isinstance(raw_json, bytes):
+            raw_json = raw_json.encode("utf-8")
+        return base64.b64encode(lzma.compress(raw_json)).decode("utf-8")
+
+    @classmethod
+    def decompress(cls, compressed: str) -> str:
+        """Decompress from base64-encoded-lzma-compressed string."""
+        return lzma.decompress(base64.b64decode(compressed.encode("utf-8"))).decode()

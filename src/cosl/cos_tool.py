@@ -92,6 +92,7 @@ class CosTool:
                 rule["expr"] = self.inject_label_matchers(rule["expr"], topology, query_type)  # type: ignore
         return rules
 
+    @ensure_querytype
     def validate_alert_rules(
         self, rules: Dict[str, Any], query_type: Optional[QueryType] = None
     ) -> Tuple[bool, str]:
@@ -139,6 +140,7 @@ class CosTool:
                     ]
                 )
 
+    @ensure_querytype
     def inject_label_matchers(
         self,
         expression: str,
