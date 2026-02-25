@@ -79,9 +79,10 @@ import hashlib
 import logging
 import re
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, Final, List, Optional, Tuple, Union, cast
+from typing import Any, Dict, Final, List, Optional, OrderedDict, Tuple, Union, cast
 
 import yaml
 
@@ -178,6 +179,21 @@ class InvalidRulePathError(Exception):
         self.message = message
 
         super().__init__(self.message)
+
+
+@dataclass
+class InjectResult:
+    """Typed result for rule injection and validation.
+
+    Attributes:
+        rules: The (possibly injected) rules dictionary.
+        identifier: The topology/group identifier discovered for these rules.
+        errmsg: Optional error message produced during validation.
+    """
+
+    rules: Dict[str, Any]
+    identifier: Optional[str]
+    errmsg: Optional[str]
 
 
 class Rules(ABC):
@@ -501,7 +517,7 @@ class Rules(ABC):
         """
         return {"groups": self.groups} if self.groups else {}
 
-    def inject_rule_labels(
+    def _inject_rule_labels(
         self, rules: Dict[str, Any], metadata: Optional[JujuTopology] = None
     ) -> Tuple[Dict[str, Any], Optional[str]]:
         """Iterate through alert rules and inject topology into expressions.
@@ -558,11 +574,9 @@ class Rules(ABC):
                     )
 
                     # Inject topology and put it back in the list
-                    rule["expr"] = (
-                        self.tool.inject_label_matchers(  # pyright: ignore[reportCallIssue]
-                            re.sub(r"%%juju_topology%%,?", "", rule["expr"]),
-                            topology.label_matcher_dict,
-                        )
+                    rule["expr"] = self.tool.inject_label_matchers(  # pyright: ignore[reportCallIssue]
+                        re.sub(r"%%juju_topology%%,?", "", rule["expr"]),
+                        topology.label_matcher_dict,
                     )
                 except KeyError:
                     # Some required JujuTopology key is missing. Just move on.
@@ -575,6 +589,40 @@ class Rules(ABC):
         if topology is not None:
             return rules, topology.identifier
         return rules, None
+
+    def inject_and_validate_rules(
+        self, rules: Dict[str, Any], metadata: Dict[str, str]
+    ) -> InjectResult:
+        """Injects Juju topology labels and validate rules using CosTool.
+
+        Returns an InjectResult with the possibly-injected rules, the
+        discovered identifier (or None), and an optional error message if
+        validation failed.
+
+        Args:
+            rules: a dict of alert or recording rules
+            metadata: Juju topology metadata to inject into the rules, if
+                labels are not already present
+        """
+        try:
+            metadata = JujuTopology.from_dict(metadata)
+        except KeyError:
+            logger.warning("The metadata for rules is missing required Juju topology fields.")
+            metadata = None
+
+        rules_data, identifier = self._inject_rule_labels(rules, metadata)
+        if not identifier:
+            return InjectResult(
+                rules=rules_data,
+                identifier=identifier,
+                errmsg=f"{self.query_type} rules were found, but an identifier was not available from rule labels or metadata.",
+            )
+
+        _, errmsg = self.tool.validate_alert_rules(rules_data)  # type: ignore[reportCallIssue]
+        if errmsg:
+            return InjectResult(rules=rules_data, identifier=identifier, errmsg=errmsg)
+
+        return InjectResult(rules=rules_data, identifier=identifier, errmsg=errmsg)
 
     @classmethod
     def validate_rules_path(cls, rules_path: str, charm_dir: Path) -> str:
