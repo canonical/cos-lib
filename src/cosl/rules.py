@@ -82,7 +82,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, Final, List, Optional, OrderedDict, Tuple, Union, cast
+from typing import Any, Dict, Final, List, Optional, Tuple, Union, cast
 
 import yaml
 
@@ -193,7 +193,7 @@ class InjectResult:
 
     rules: Dict[str, Any]
     identifier: Optional[str]
-    errmsg: Optional[str]
+    errmsg: str
 
 
 class Rules(ABC):
@@ -470,53 +470,6 @@ class Rules(ABC):
         """Sanitize a metric name according to https://prometheus.io/docs/concepts/data_model/#metric-names-and-labels."""
         return "".join(char if re.match(r"[a-zA-Z0-9_:]", char) else "_" for char in metric_name)
 
-    # ---- END STATIC HELPER METHODS --- #
-
-    def add(
-        self,
-        rule_dict: Dict[str, Any],
-        group_name: Optional[str] = None,
-        group_name_prefix: Optional[str] = None,
-    ) -> None:
-        """Add rules from dict to the existing ruleset.
-
-        Args:
-            rule_dict: a single-rule or official-rule YAML dict
-            group_name: a custom group name, used only if the new rule is of single-rule format
-            group_name_prefix: a custom group name prefix, used only if the new rule is of single-rule format
-        """
-        self.groups.extend(
-            self._from_dict(rule_dict, group_name=group_name, group_name_prefix=group_name_prefix)
-        )
-
-    def add_path(self, dir_path: Union[str, Path], *, recursive: bool = False) -> None:
-        """Add rules from a dir path.
-
-        All rules from files are aggregated into a data structure representing a single rule file.
-        All group names are augmented with juju topology.
-
-        Args:
-            dir_path: either a rules file or a dir of rules files.
-            recursive: whether to read files recursively or not (no impact if `path` is a file).
-        """
-        path = Path(dir_path) if isinstance(dir_path, str) else dir_path
-        if path.is_dir():
-            self.groups.extend(self._from_dir(path, recursive))
-        elif path.is_file():
-            self.groups.extend(self._from_file(path.parent, path))  # type: ignore
-        else:
-            logger.debug("%s rules path does not exist: %s", self.rule_type.capitalize(), path)
-
-    def as_dict(self) -> Dict[str, Any]:
-        """Return standard rules file in dict representation.
-
-        Returns:
-            a dictionary containing a single list of rule groups.
-            The list of rule groups is provided as value of the
-            "groups" dictionary key.
-        """
-        return {"groups": self.groups} if self.groups else {}
-
     def _inject_rule_labels(
         self, rules: Dict[str, Any], metadata: Optional[JujuTopology] = None
     ) -> Tuple[Dict[str, Any], Optional[str]]:
@@ -574,9 +527,11 @@ class Rules(ABC):
                     )
 
                     # Inject topology and put it back in the list
-                    rule["expr"] = self.tool.inject_label_matchers(  # pyright: ignore[reportCallIssue]
-                        re.sub(r"%%juju_topology%%,?", "", rule["expr"]),
-                        topology.label_matcher_dict,
+                    rule["expr"] = (
+                        self.tool.inject_label_matchers(  # pyright: ignore[reportCallIssue]
+                            re.sub(r"%%juju_topology%%,?", "", rule["expr"]),
+                            topology.label_matcher_dict,
+                        )
                     )
                 except KeyError:
                     # Some required JujuTopology key is missing. Just move on.
@@ -589,6 +544,53 @@ class Rules(ABC):
         if topology is not None:
             return rules, topology.identifier
         return rules, None
+
+    # ---- END STATIC HELPER METHODS --- #
+
+    def add(
+        self,
+        rule_dict: Dict[str, Any],
+        group_name: Optional[str] = None,
+        group_name_prefix: Optional[str] = None,
+    ) -> None:
+        """Add rules from dict to the existing ruleset.
+
+        Args:
+            rule_dict: a single-rule or official-rule YAML dict
+            group_name: a custom group name, used only if the new rule is of single-rule format
+            group_name_prefix: a custom group name prefix, used only if the new rule is of single-rule format
+        """
+        self.groups.extend(
+            self._from_dict(rule_dict, group_name=group_name, group_name_prefix=group_name_prefix)
+        )
+
+    def add_path(self, dir_path: Union[str, Path], *, recursive: bool = False) -> None:
+        """Add rules from a dir path.
+
+        All rules from files are aggregated into a data structure representing a single rule file.
+        All group names are augmented with juju topology.
+
+        Args:
+            dir_path: either a rules file or a dir of rules files.
+            recursive: whether to read files recursively or not (no impact if `path` is a file).
+        """
+        path = Path(dir_path) if isinstance(dir_path, str) else dir_path
+        if path.is_dir():
+            self.groups.extend(self._from_dir(path, recursive))
+        elif path.is_file():
+            self.groups.extend(self._from_file(path.parent, path))  # type: ignore
+        else:
+            logger.debug("%s rules path does not exist: %s", self.rule_type.capitalize(), path)
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Return standard rules file in dict representation.
+
+        Returns:
+            a dictionary containing a single list of rule groups.
+            The list of rule groups is provided as value of the
+            "groups" dictionary key.
+        """
+        return {"groups": self.groups} if self.groups else {}
 
     def inject_and_validate_rules(
         self, rules: Dict[str, Any], metadata: Dict[str, str]
@@ -605,12 +607,12 @@ class Rules(ABC):
                 labels are not already present
         """
         try:
-            metadata = JujuTopology.from_dict(metadata)
+            topology = JujuTopology.from_dict(metadata)
         except KeyError:
             logger.warning("The metadata for rules is missing required Juju topology fields.")
-            metadata = None
+            topology = None
 
-        rules_data, identifier = self._inject_rule_labels(rules, metadata)
+        rules_data, identifier = self._inject_rule_labels(rules, topology)
         if not identifier:
             return InjectResult(
                 rules=rules_data,
@@ -618,8 +620,9 @@ class Rules(ABC):
                 errmsg=f"{self.query_type} rules were found, but an identifier was not available from rule labels or metadata.",
             )
 
-        _, errmsg = self.tool.validate_alert_rules(rules_data)  # type: ignore[reportCallIssue]
-        if errmsg:
+        _, _errmsg = self.tool.validate_alert_rules(rules_data)  # type: ignore[reportCallIssue]
+        errmsg = cast(str, _errmsg)
+        if _errmsg:
             return InjectResult(rules=rules_data, identifier=identifier, errmsg=errmsg)
 
         return InjectResult(rules=rules_data, identifier=identifier, errmsg=errmsg)
