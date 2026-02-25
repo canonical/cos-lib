@@ -84,7 +84,6 @@ from types import SimpleNamespace
 from typing import Any, Dict, Final, List, Optional, Tuple, Union, cast
 
 import yaml
-from pydantic import BaseModel, ConfigDict
 
 from . import CosTool, JujuTopology
 from .types import (
@@ -165,24 +164,6 @@ generic_alert_groups: Final = SimpleNamespace(
         ]
     },
 )
-
-
-class RuleTypes(BaseModel):
-    """A pydantic model for all rule types."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    alerting: Optional[Dict[str, Any]] = None
-    recording: Optional[Dict[str, Any]] = None
-
-
-class RulesModel(BaseModel):
-    """A pydantic model for all formats."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    logql: RuleTypes
-    promql: RuleTypes
 
 
 class InvalidRulePathError(Exception):
@@ -520,99 +501,80 @@ class Rules(ABC):
         """
         return {"groups": self.groups} if self.groups else {}
 
-    def get_identifier_by_alert_rules(
-        self, rules: Dict[str, Any]
-    ) -> Tuple[Union[str, None], Union[JujuTopology, None]]:
-        """Determine an appropriate dict key for alert rules.
-
-        The key is used as the filename when writing alerts to disk, so the structure
-        and uniqueness is important.
-
-        Args:
-            rules: a dict of alert rules
-        Returns:
-            A tuple containing an identifier, if found, and a JujuTopology, if it could
-            be constructed.
-        """
-        if "groups" not in rules:
-            logger.debug("No alert groups were found in relation data")
-            return None, None
-
-        # Construct an ID based on what's in the alert rules if they have labels
-        for group in rules["groups"]:
-            try:
-                labels = group["rules"][0]["labels"]
-                topology = JujuTopology(
-                    # Don't try to safely get required constructor fields. There's already
-                    # a handler for KeyErrors
-                    model_uuid=labels["juju_model_uuid"],
-                    model=labels["juju_model"],
-                    application=labels["juju_application"],
-                    unit=labels.get("juju_unit", ""),
-                    charm_name=labels.get("juju_charm", ""),
-                )
-                return topology.identifier, topology
-            except KeyError:
-                logger.debug("Alert rules were found but no usable labels were present")
-                continue
-
-        logger.warning(
-            "No labeled alert rules were found, and no 'scrape_metadata' "
-            "was available. Using the alert group name as filename."
-        )
-        try:
-            for group in rules["groups"]:
-                return group["name"], None
-        except KeyError:
-            logger.debug("No group name was found to use as identifier")
-
-        return None, None
-
-    def inject_alert_expr_labels(self, rules: Dict[str, Any]) -> Dict[str, Any]:
+    def inject_rule_labels(
+        self, rules: Dict[str, Any], metadata: Optional[JujuTopology] = None
+    ) -> Tuple[Dict[str, Any], Optional[str]]:
         """Iterate through alert rules and inject topology into expressions.
 
+        If the rules have the expected juju topology labels, inject the
+        topology into the alert rule expressions. If there are no labels, then
+        try to use the provided metadata. If no metadata is provided, then
+        no topology can be injected, and the original rules are returned. If a
+        rule identifier can be generated from the topology, return it as well
+        to be used for rule organization.
+
         Args:
             rules: a dict of alert rules
+            metadata: optional Juju topology for labeling the rules
         """
         if "groups" not in rules:
-            return rules
+            return rules, None
 
+        label_map = {
+            "model": "juju_model",
+            "model_uuid": "juju_model_uuid",
+            "application": "juju_application",
+            "charm_name": "juju_charm",
+            "unit": "juju_unit",
+        }
+
+        topology = None
         modified_groups: List[OfficialRuleFileItem] = []
         for group in rules["groups"]:
             # Copy off rules, so we don't modify an object we're iterating over
             rules_copy = group["rules"]
             for idx, rule in enumerate(rules_copy):
-                labels = rule.get("labels")
+                labels = rule.get("labels", {})
 
-                if labels:
-                    try:
-                        topology = JujuTopology(
-                            # Don't try to safely get required constructor fields. There's already
-                            # a handler for KeyErrors
-                            model_uuid=labels["juju_model_uuid"],
-                            model=labels["juju_model"],
-                            application=labels["juju_application"],
-                            unit=labels.get("juju_unit", ""),
-                            charm_name=labels.get("juju_charm", ""),
+                # try to relabel the rules with metadata if labels are not present
+                for label in label_map.values():
+                    if labels.get(label) is not None:
+                        # the label already exists, do not override it
+                        continue
+                    if metadata:
+                        metadata_dict = metadata.as_dict(remapped_keys=label_map)
+                        if label in metadata_dict:
+                            labels[label] = metadata_dict[label]
+
+                try:
+                    topology = JujuTopology(
+                        # Don't try to safely get required constructor fields. There's already
+                        # a handler for KeyErrors
+                        model_uuid=labels["juju_model_uuid"],
+                        model=labels["juju_model"],
+                        application=labels["juju_application"],
+                        unit=labels.get("juju_unit", ""),
+                        charm_name=labels.get("juju_charm", ""),
+                    )
+
+                    # Inject topology and put it back in the list
+                    rule["expr"] = (
+                        self.tool.inject_label_matchers(  # pyright: ignore[reportCallIssue]
+                            re.sub(r"%%juju_topology%%,?", "", rule["expr"]),
+                            topology.label_matcher_dict,
                         )
+                    )
+                except KeyError:
+                    # Some required JujuTopology key is missing. Just move on.
+                    pass
 
-                        # Inject topology and put it back in the list
-                        rule["expr"] = (
-                            self.tool.inject_label_matchers(  # pyright: ignore[reportCallIssue]
-                                re.sub(r"%%juju_topology%%,?", "", rule["expr"]),
-                                topology.label_matcher_dict,
-                            )
-                        )
-                    except KeyError:
-                        # Some required JujuTopology key is missing. Just move on.
-                        pass
-
-                    group["rules"][idx] = rule
-
+                group["rules"][idx] = rule
             modified_groups.append(group)
-
         rules["groups"] = modified_groups
-        return rules
+
+        if topology is not None:
+            return rules, topology.identifier
+        return rules, None
 
     @classmethod
     def validate_rules_path(cls, rules_path: str, charm_dir: Path) -> str:
