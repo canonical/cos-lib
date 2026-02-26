@@ -1,6 +1,7 @@
 # Copyright 2020 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import copy
 import json
 import re
 import unittest
@@ -15,7 +16,7 @@ from cosl.juju_topology import JujuTopology
 from cosl.rules import AlertRules
 
 
-class TestEndpointProvider(unittest.TestCase):
+class TestAddRulesFromPath(unittest.TestCase):
     def test_each_alert_rule_is_topology_labeled(self):
         ri = AlertRules(
             query_type="promql",
@@ -26,6 +27,7 @@ class TestEndpointProvider(unittest.TestCase):
                 application="tester",
             ),
         )
+        # TODO: I can add a .add assertion here if I think its not tested
         ri.add_path(Path(__file__).resolve().parent / "promql_rules" / "prometheus_alert_rules")
 
         alerts = ri.as_dict()
@@ -613,3 +615,168 @@ class TestAlertRulesContainingUnitTopology(unittest.TestCase):
             for rule in group["rules"]:
                 self.assertIn("juju_unit", rule["labels"])
                 self.assertIn("juju_unit=", rule["expr"])
+
+
+class TestInjectAndValidateRules(unittest.TestCase):
+    def setUp(self) -> None:
+        self.logql_alert = {
+            "name": "model_f4d59020_charm_x_foo_alerts",
+            "rules": [
+                {
+                    "alert": "HighLogVolume",
+                    "expr": 'count_over_time({job=~".+"}[30s]) > 100',
+                    "labels": {},
+                },
+            ],
+        }
+        self.logql_record = {
+            "name": "model_f4d59020_charm_x_foobar_alerts",
+            "rules": [
+                {
+                    "record": "log:error_rate:rate5m",
+                    "expr": 'sum by (service) (rate({job=~".+"} | json | level="error" [5m]))',
+                    "labels": {},
+                }
+            ],
+        }
+        self.promql_alert = {
+            "name": "model_f4d59020_charm_x_bar_alerts",
+            "rules": [
+                {
+                    "alert": "Workload Missing",
+                    "expr": 'up{job=~".+"} == 0',
+                    "for": "0m",
+                    "labels": {},
+                },
+            ],
+        }
+        self.promql_record = {
+            "name": "model_f4d59020_charm_x_barfoo_alerts",
+            "rules": [
+                {
+                    "record": "code:prometheus_http_requests_total:sum",
+                    "expr": 'sum by (code) (prometheus_http_requests_total{job=~".+"})',
+                    "labels": {},
+                }
+            ],
+        }
+        self.metadata_assertions = [
+            {
+                # Minimal metadata
+                "metadata": {
+                    "model": "otelcol",
+                    "model_uuid": "f4d59020-c8e7-4053-8044-a2c1e5591c7f",
+                    "application": "foo",
+                },
+                "labels": {
+                    "juju_model": "otelcol",
+                    "juju_model_uuid": "f4d59020-c8e7-4053-8044-a2c1e5591c7f",
+                    "juju_application": "foo",
+                    "juju_unit": "",
+                    "juju_charm": "",
+                },
+            },
+            {
+                # All metadata fields
+                "metadata": {
+                    "model": "otelcol",
+                    "model_uuid": "f4d59020-c8e7-4053-8044-a2c1e5591c7f",
+                    "application": "foo",
+                    "unit": "0",
+                    "charm_name": "foo",
+                },
+                "labels": {
+                    "juju_model": "otelcol",
+                    "juju_model_uuid": "f4d59020-c8e7-4053-8044-a2c1e5591c7f",
+                    "juju_application": "foo",
+                    "juju_unit": "0",
+                    "juju_charm": "foo",
+                },
+            },
+            {
+                # Invalid metadata field
+                "metadata": {
+                    "model": "otelcol",
+                    "model_uuid": "f4d59020-c8e7-4053-8044-a2c1e5591c7f",
+                    "application": "foo",
+                    "does_not_exist": "foo",
+                },
+                "labels": {
+                    "juju_model": "otelcol",
+                    "juju_model_uuid": "f4d59020-c8e7-4053-8044-a2c1e5591c7f",
+                    "juju_application": "foo",
+                    "juju_unit": "",
+                    "juju_charm": "",
+                },
+            },
+            {
+                # No metadata
+                "metadata": {},
+                "labels": {},
+            },
+            {
+                # Missing mandatory "application" metadata field
+                "metadata": {
+                    "model": "otelcol",
+                    "model_uuid": "f4d59020-c8e7-4053-8044-a2c1e5591c7f",
+                    # "application": "intentionally commented out",
+                },
+                "labels": {},
+            },
+        ]
+
+    def test_each_alert_rule_is_topology_labeled(self):
+        ri = AlertRules(
+            query_type="promql",
+            topology=JujuTopology(
+                model="unittest",
+                model_uuid=str(uuid.uuid4()),
+                unit="tester/0",
+                application="tester",
+            ),
+        )
+        for assertion in self.metadata_assertions:
+            metadata = assertion["metadata"]
+            labels = assertion["labels"]
+            result = ri.inject_and_validate_rules(
+                rules={
+                    "groups": [
+                        copy.deepcopy(self.logql_alert),
+                        copy.deepcopy(self.logql_record),
+                        copy.deepcopy(self.promql_alert),
+                        copy.deepcopy(self.promql_record),
+                    ]
+                },
+                metadata=metadata,
+            )
+            self.assertIn("groups", result.rules)
+            self.assertEqual(len(result.rules["groups"]), 4)
+            for group in result.rules["groups"]:
+                for rule in group["rules"]:
+                    self.assertIn("labels", rule)
+                    for key, value in labels.items():
+                        self.assertEqual(rule["labels"].get(key), value)
+
+    # TODO: Assert expr labels
+    def test_each_alert_expression_is_topology_labeled(self):
+        ri = AlertRules(
+            query_type="promql",
+            topology=JujuTopology(
+                model="unittest",
+                model_uuid=str(uuid.uuid4()),
+                unit="tester/0",
+                application="tester",
+            ),
+        )
+        ri.add_path(Path(__file__).resolve().parent / "promql_rules" / "prometheus_alert_rules")
+
+        alerts = ri.as_dict()
+        self.assertIn("groups", alerts)
+        self.assertEqual(len(alerts["groups"]), 5)
+        group = alerts["groups"][0]
+        for rule in group["rules"]:
+            self.assertIn("expr", rule)
+            for labels in expression_labels(rule["expr"]):
+                self.assertIn("juju_model", labels)
+                self.assertIn("juju_model_uuid", labels)
+                self.assertIn("juju_application", labels)

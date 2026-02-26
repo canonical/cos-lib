@@ -301,23 +301,6 @@ class Rules(ABC):
         matched = filter(lambda f: f.is_file() and f.suffix in suffixes, all_files_in_dir)
         return sorted(matched)
 
-    @classmethod
-    def _resolve_dir_against_charm_path(cls, *path_elements: str, charm_dir: Path) -> str:
-        """Resolve the provided path items against the directory of the main file.
-
-        Look up the directory of the main .py file being executed. This is normally
-        going to be the charm.py file of the charm including this library. Then, resolve
-        the provided path elements and, if the result path exists and is a directory,
-        return its absolute path; otherwise, return `None`.
-        """
-        alerts_dir_path = charm_dir.absolute().joinpath(*path_elements)
-        if not alerts_dir_path.exists():
-            raise InvalidRulePathError(alerts_dir_path, "directory does not exist")
-        if not alerts_dir_path.is_dir():
-            raise InvalidRulePathError(alerts_dir_path, "is not a directory")
-
-        return str(alerts_dir_path)
-
     def _from_dir(self, dir_path: Path, recursive: bool) -> List[OfficialRuleFileItem]:
         """Read all rule files in a directory.
 
@@ -628,20 +611,21 @@ class Rules(ABC):
         return InjectResult(rules=rules_data, identifier=identifier, errmsg=errmsg)
 
     @classmethod
-    def validate_rules_path(cls, rules_path: str, charm_dir: Path) -> str:
-        """Validate that a rules path is valid and can be read from.
+    def resolve_dir_against_charm_path(cls, *path_elements: str, charm_dir: Path) -> str:
+        """Resolve the provided path items against the directory of the main file.
 
-        This is used to validate config options that specify paths to rule files or directories.
+        Look up the directory of the main .py file being executed. This is normally
+        going to be the charm.py file of the charm including this library. Then, resolve
+        the provided path elements and, if the result path exists and is a directory,
+        return its absolute path; otherwise, raise an InvalidRulePathError.
         """
-        try:
-            rules_path = cls._resolve_dir_against_charm_path(rules_path, charm_dir=charm_dir)
-        except InvalidRulePathError as e:
-            logger.debug(
-                "Invalid Prometheus alert rules folder at %s: %s",
-                e.rules_absolute_path,
-                e.message,
-            )
-        return rules_path
+        rule_dir_path = charm_dir.absolute().joinpath(*path_elements)
+        if not rule_dir_path.exists():
+            raise InvalidRulePathError(rule_dir_path, "directory does not exist")
+        if not rule_dir_path.is_dir():
+            raise InvalidRulePathError(rule_dir_path, "is not a directory")
+
+        return str(rule_dir_path)
 
 
 class AlertRules(Rules):
