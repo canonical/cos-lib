@@ -660,123 +660,132 @@ class TestInjectAndValidateRules(unittest.TestCase):
                 }
             ],
         }
+        self.topology = JujuTopology(
+            model="this_model",
+            model_uuid="a2c1e559-c8e7-4053-8044-a2c1e5591c7f",
+            unit="this-app/0",
+            application="this-app",
+        )
         self.metadata_assertions = [
             {
                 # Minimal metadata
                 "metadata": {
-                    "model": "otelcol",
+                    "model": "upstream_model",
                     "model_uuid": "f4d59020-c8e7-4053-8044-a2c1e5591c7f",
-                    "application": "foo",
+                    "application": "upstream_app",
                 },
                 "labels": {
-                    "juju_model": "otelcol",
+                    "juju_model": "upstream_model",
                     "juju_model_uuid": "f4d59020-c8e7-4053-8044-a2c1e5591c7f",
-                    "juju_application": "foo",
-                    "juju_unit": "",
-                    "juju_charm": "",
+                    "juju_application": "upstream_app",
                 },
             },
             {
                 # All metadata fields
                 "metadata": {
-                    "model": "otelcol",
+                    "model": "upstream_model",
                     "model_uuid": "f4d59020-c8e7-4053-8044-a2c1e5591c7f",
-                    "application": "foo",
+                    "application": "upstream_app",
                     "unit": "0",
                     "charm_name": "foo",
                 },
                 "labels": {
-                    "juju_model": "otelcol",
+                    "juju_model": "upstream_model",
                     "juju_model_uuid": "f4d59020-c8e7-4053-8044-a2c1e5591c7f",
-                    "juju_application": "foo",
-                    "juju_unit": "0",
+                    "juju_application": "upstream_app",
                     "juju_charm": "foo",
                 },
             },
             {
                 # Invalid metadata field
                 "metadata": {
-                    "model": "otelcol",
+                    "model": "upstream_model",
                     "model_uuid": "f4d59020-c8e7-4053-8044-a2c1e5591c7f",
-                    "application": "foo",
+                    "application": "upstream_app",
                     "does_not_exist": "foo",
                 },
                 "labels": {
-                    "juju_model": "otelcol",
+                    "juju_model": "upstream_model",
                     "juju_model_uuid": "f4d59020-c8e7-4053-8044-a2c1e5591c7f",
-                    "juju_application": "foo",
-                    "juju_unit": "",
-                    "juju_charm": "",
+                    "juju_application": "upstream_app",
                 },
             },
             {
                 # No metadata
                 "metadata": {},
-                "labels": {},
+                "labels": {
+                    "juju_model": "this_model",
+                    "juju_model_uuid": "a2c1e559-c8e7-4053-8044-a2c1e5591c7f",
+                    "juju_application": "this-app",
+                },
             },
             {
                 # Missing mandatory "application" metadata field
                 "metadata": {
                     "model": "otelcol",
-                    "model_uuid": "f4d59020-c8e7-4053-8044-a2c1e5591c7f",
+                    "model_uuid": "a2c1e559-c8e7-4053-8044-a2c1e5591c7f",
                     # "application": "intentionally commented out",
                 },
-                "labels": {},
+                "labels": {
+                    "juju_model": "this_model",
+                    "juju_model_uuid": "a2c1e559-c8e7-4053-8044-a2c1e5591c7f",
+                    "juju_application": "this-app",
+                },
             },
         ]
 
-    def test_each_alert_rule_is_topology_labeled(self):
-        ri = AlertRules(
-            query_type="promql",
-            topology=JujuTopology(
-                model="unittest",
-                model_uuid=str(uuid.uuid4()),
-                unit="tester/0",
-                application="tester",
-            ),
-        )
+    def test_each_promql_rule_is_topology_labeled(self):
+        # GIVEN a PromQL Rules class with default and metadata topology
+        ri = AlertRules(query_type="promql", topology=self.topology)
         for assertion in self.metadata_assertions:
             metadata = assertion["metadata"]
             labels = assertion["labels"]
+            # WHEN rules are injected with metadata
             result = ri.inject_and_validate_rules(
                 rules={
-                    "groups": [
-                        copy.deepcopy(self.logql_alert),
-                        copy.deepcopy(self.logql_record),
-                        copy.deepcopy(self.promql_alert),
-                        copy.deepcopy(self.promql_record),
-                    ]
+                    "groups": [copy.deepcopy(self.promql_alert), copy.deepcopy(self.promql_record)]
                 },
                 metadata=metadata,
             )
             self.assertIn("groups", result.rules)
-            self.assertEqual(len(result.rules["groups"]), 4)
+            self.assertEqual(len(result.rules["groups"]), 2)
             for group in result.rules["groups"]:
+                # THEN rule labels have topology
                 for rule in group["rules"]:
                     self.assertIn("labels", rule)
                     for key, value in labels.items():
                         self.assertEqual(rule["labels"].get(key), value)
+                # THEN expressions have topology labels injected
+                self.assertIn("expr", rule)
+                for k, v in labels.items():
+                    if k not in {"juju_model", "juju_model_uuid", "juju_application"}:
+                        continue
+                    self.assertIn(f'{k}="{v}"', rule["expr"])
 
-    # TODO: Assert expr labels
-    def test_each_alert_expression_is_topology_labeled(self):
-        ri = AlertRules(
-            query_type="promql",
-            topology=JujuTopology(
-                model="unittest",
-                model_uuid=str(uuid.uuid4()),
-                unit="tester/0",
-                application="tester",
-            ),
-        )
-        ri.add_path(Path(__file__).resolve().parent / "promql_rules" / "prometheus_alert_rules")
-
-        alerts = ri.as_dict()
-        self.assertIn("groups", alerts)
-        self.assertEqual(len(alerts["groups"]), 5)
-        group = alerts["groups"][0]
-        for rule in group["rules"]:
-            self.assertIn("expr", rule)
-            for labels in expression_labels(rule["expr"]):
-                self.assertIn("juju_model", labels)
-                self.assertIn("juju_model_uuid", labels)
-                self.assertIn("juju_application", labels)
+    def test_each_logql_rule_is_topology_labeled(self):
+        # GIVEN a LogQL Rules class with default and metadata topology
+        ri = AlertRules(query_type="logql", topology=self.topology)
+        for assertion in self.metadata_assertions:
+            metadata = assertion["metadata"]
+            labels = assertion["labels"]
+            # WHEN rules are injected with metadata
+            result = ri.inject_and_validate_rules(
+                rules={
+                    "groups": [copy.deepcopy(self.logql_alert), copy.deepcopy(self.logql_record)]
+                },
+                metadata=metadata,
+            )
+            self.assertIn("groups", result.rules)
+            self.assertEqual(len(result.rules["groups"]), 2)
+            for group in result.rules["groups"]:
+                # THEN rule labels have topology
+                for rule in group["rules"]:
+                    self.assertIn("labels", rule)
+                    for key, value in labels.items():
+                        self.assertEqual(rule["labels"].get(key), value)
+                # THEN expressions have topology labels injected
+                self.assertIn("expr", rule)
+                for k, v in labels.items():
+                    if k not in {"juju_model", "juju_model_uuid", "juju_application"}:
+                        continue
+                    self.assertIn(f'{k}="{v}"', rule["expr"])

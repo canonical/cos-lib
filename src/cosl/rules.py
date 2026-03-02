@@ -75,6 +75,7 @@ The following labels are automatically included with each rule:
 - `juju_application`
 """  # noqa: W505
 
+import contextlib
 import hashlib
 import logging
 import re
@@ -82,7 +83,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, Final, List, Optional, Tuple, Union, cast
+from typing import Any, Dict, Final, List, Optional, Union, cast
 
 import yaml
 
@@ -376,6 +377,7 @@ class Rules(ABC):
         *,
         group_name: Optional[str] = None,
         group_name_prefix: Optional[str] = None,
+        metadata: Optional[JujuTopology] = None,
     ) -> List[OfficialRuleFileItem]:
         """Process rules from dict, injecting juju topology. If a single-rule format is provided, a hash of the yaml file is injected into the group name to ensure uniqueness.
 
@@ -383,7 +385,7 @@ class Rules(ABC):
             rule_dict: rules content in single-rule or official-rule format as a YAML dict
             group_name: a custom identifier for the rule name to include in the group name
             group_name_prefix: a custom group identifier to prefix the resulting group name, likely Juju topology and relative path context
-
+            metadata: optional JujuTopology metadata to inject into the rules, useful if an upstream charm is providing topology
         Raises:
             ValueError, when invalid rule format given.
         """
@@ -422,9 +424,10 @@ class Rules(ABC):
                 if "labels" not in rule:
                     rule["labels"] = {}
 
-                if self.topology:
+                topology_ctx = metadata or self.topology
+                if topology_ctx:
                     # only insert labels that do not already exist
-                    for label, val in self.topology.label_matcher_dict.items():
+                    for label, val in topology_ctx.label_matcher_dict.items():
                         if label not in rule["labels"]:
                             rule["labels"][label] = val
 
@@ -452,81 +455,6 @@ class Rules(ABC):
     def _sanitize_metric_name(self, metric_name: str) -> str:
         """Sanitize a metric name according to https://prometheus.io/docs/concepts/data_model/#metric-names-and-labels."""
         return "".join(char if re.match(r"[a-zA-Z0-9_:]", char) else "_" for char in metric_name)
-
-    def _inject_rule_labels(
-        self, rules: Dict[str, Any], metadata: Optional[JujuTopology] = None
-    ) -> Tuple[Dict[str, Any], Optional[str]]:
-        """Iterate through alert rules and inject topology into expressions.
-
-        If the rules have the expected juju topology labels, inject the
-        topology into the alert rule expressions. If there are no labels, then
-        try to use the provided metadata. If no metadata is provided, then
-        no topology can be injected, and the original rules are returned. If a
-        rule identifier can be generated from the topology, return it as well
-        to be used for rule organization.
-
-        Args:
-            rules: a dict of alert rules
-            metadata: optional Juju topology for labeling the rules
-        """
-        if "groups" not in rules:
-            return rules, None
-
-        label_map = {
-            "model": "juju_model",
-            "model_uuid": "juju_model_uuid",
-            "application": "juju_application",
-            "charm_name": "juju_charm",
-            "unit": "juju_unit",
-        }
-
-        topology = None
-        modified_groups: List[OfficialRuleFileItem] = []
-        for group in rules["groups"]:
-            # Copy off rules, so we don't modify an object we're iterating over
-            rules_copy = group["rules"]
-            for idx, rule in enumerate(rules_copy):
-                labels = rule.get("labels", {})
-
-                # try to relabel the rules with metadata if labels are not present
-                for label in label_map.values():
-                    if labels.get(label) is not None:
-                        # the label already exists, do not override it
-                        continue
-                    if metadata:
-                        metadata_dict = metadata.as_dict(remapped_keys=label_map)
-                        if label in metadata_dict:
-                            labels[label] = metadata_dict[label]
-
-                try:
-                    topology = JujuTopology(
-                        # Don't try to safely get required constructor fields. There's already
-                        # a handler for KeyErrors
-                        model_uuid=labels["juju_model_uuid"],
-                        model=labels["juju_model"],
-                        application=labels["juju_application"],
-                        unit=labels.get("juju_unit", ""),
-                        charm_name=labels.get("juju_charm", ""),
-                    )
-
-                    # Inject topology and put it back in the list
-                    rule["expr"] = (
-                        self.tool.inject_label_matchers(  # pyright: ignore[reportCallIssue]
-                            re.sub(r"%%juju_topology%%,?", "", rule["expr"]),
-                            topology.label_matcher_dict,
-                        )
-                    )
-                except KeyError:
-                    # Some required JujuTopology key is missing. Just move on.
-                    pass
-
-                group["rules"][idx] = rule
-            modified_groups.append(group)
-        rules["groups"] = modified_groups
-
-        if topology is not None:
-            return rules, topology.identifier
-        return rules, None
 
     # ---- END STATIC HELPER METHODS --- #
 
@@ -589,13 +517,14 @@ class Rules(ABC):
             metadata: Juju topology metadata to inject into the rules, if
                 labels are not already present
         """
-        try:
+        topology = None
+        with contextlib.suppress(KeyError):
             topology = JujuTopology.from_dict(metadata)
-        except KeyError:
-            logger.warning("The metadata for rules is missing required Juju topology fields.")
-            topology = None
 
-        rules_data, identifier = self._inject_rule_labels(rules, topology)
+        # Inject juju topology labels and sanitize rules
+        rules_data = {"groups": self._from_dict(rules, metadata=topology)}
+        topology_ctx = topology or self.topology
+        identifier = topology_ctx.identifier if topology_ctx else None
         if not identifier:
             return InjectResult(
                 rules=rules_data,
