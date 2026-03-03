@@ -19,6 +19,7 @@ dependencies = [
     "PyYAML",
     "typing-extensions",
 ]
+
 classifiers = [
     "Programming Language :: Python :: 3.8",
     "License :: OSI Approved :: Apache Software License",
@@ -30,6 +31,25 @@ classifiers = [
     "Typing :: Typed",
 ]
 
+[project.optional-dependencies]
+dev = [
+    # Lint
+    "black",
+    "ruff",
+    "codespell",
+    # Static
+    "pyright",
+    # Unit
+    "ops[testing]",
+    # https://github.com/pypa/setuptools/issues/5174
+    "setuptools<82",
+    "pytest",
+    "pytest-cov",
+    "deepdiff",
+    "fs",
+    "orderly-set==5.3.0",
+]
+
 [project.urls]
 "Homepage" = "https://github.com/canonical/cos-lib"
 "Bug Tracker" = "https://github.com/canonical/cos-lib/issues"
@@ -37,7 +57,6 @@ classifiers = [
 [package]
 include = ["py.typed"]
 
-# Testing tools configuration
 [tool.coverage.run]
 branch = true
 parallel = true
