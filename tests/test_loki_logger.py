@@ -9,7 +9,7 @@ from urllib.error import HTTPError
 
 import pytest
 
-from src.cosl.loki_logger import LokiHandler
+from cosl.loki_logger import LokiHandler
 
 
 def _get_loki_http_post_payload(call: _Call):
@@ -31,7 +31,7 @@ def _get_loki_urls(calls: List[_Call]):
 
 @pytest.mark.parametrize("n_lokis", (1, 2, 5))
 @pytest.mark.parametrize("loglevel_info", (True, False))
-@patch("src.cosl.loki_logger.LokiEmitter._send_request")
+@patch("cosl.loki_logger.LokiEmitter._send_request")
 def test_root_logging(send_request, n_lokis, loglevel_info):
     root_logger = logging.getLogger()
 
@@ -75,7 +75,7 @@ def test_root_logging(send_request, n_lokis, loglevel_info):
     )
 
 
-@patch("src.cosl.loki_logger.LokiEmitter._send_request")
+@patch("cosl.loki_logger.LokiEmitter._send_request")
 def test_logging_fail_send(send_request_mock):
     # GIVEN urllib fails submitting the logs with any httperror
     send_request_mock.side_effect = HTTPError(
