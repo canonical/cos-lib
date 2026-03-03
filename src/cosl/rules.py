@@ -1,4 +1,4 @@
-# Copyright 2023 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 """Alerting and Recording Rules.
 
@@ -75,10 +75,12 @@ The following labels are automatically included with each rule:
 - `juju_application`
 """  # noqa: W505
 
+import contextlib
 import hashlib
 import logging
 import re
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, Final, List, Optional, Union, cast
@@ -180,6 +182,21 @@ class InvalidRulePathError(Exception):
         super().__init__(self.message)
 
 
+@dataclass
+class InjectResult:
+    """Typed result for rule injection and validation.
+
+    Attributes:
+        rules: The (possibly injected) rules dictionary.
+        identifier: The topology/group identifier discovered for these rules.
+        errmsg: Optional error message produced during validation.
+    """
+
+    rules: Dict[str, Any]
+    identifier: Optional[str]
+    errmsg: str
+
+
 class Rules(ABC):
     """Utility class for amalgamating alerting/recording rule  files and injecting juju topology.
 
@@ -271,6 +288,8 @@ class Rules(ABC):
     ) -> List[Path]:
         """Helper function for getting all files in a directory that have a matching suffix.
 
+        The result is sorted to avoid unnecessary relation-get calls.
+
         Args:
             dir_path: path to the directory to glob from.
             suffixes: list of suffixes to include in the glob (items should begin with a period).
@@ -280,7 +299,8 @@ class Rules(ABC):
             List of files in `dir_path` that have one of the suffixes specified in `suffixes`.
         """
         all_files_in_dir = dir_path.glob("**/*" if recursive else "*")
-        return list(filter(lambda f: f.is_file() and f.suffix in suffixes, all_files_in_dir))
+        matched = filter(lambda f: f.is_file() and f.suffix in suffixes, all_files_in_dir)
+        return sorted(matched)
 
     def _from_dir(self, dir_path: Path, recursive: bool) -> List[OfficialRuleFileItem]:
         """Read all rule files in a directory.
@@ -357,6 +377,7 @@ class Rules(ABC):
         *,
         group_name: Optional[str] = None,
         group_name_prefix: Optional[str] = None,
+        metadata: Optional[JujuTopology] = None,
     ) -> List[OfficialRuleFileItem]:
         """Process rules from dict, injecting juju topology. If a single-rule format is provided, a hash of the yaml file is injected into the group name to ensure uniqueness.
 
@@ -364,7 +385,7 @@ class Rules(ABC):
             rule_dict: rules content in single-rule or official-rule format as a YAML dict
             group_name: a custom identifier for the rule name to include in the group name
             group_name_prefix: a custom group identifier to prefix the resulting group name, likely Juju topology and relative path context
-
+            metadata: optional JujuTopology metadata to inject into the rules, useful if an upstream charm is providing topology
         Raises:
             ValueError, when invalid rule format given.
         """
@@ -403,9 +424,10 @@ class Rules(ABC):
                 if "labels" not in rule:
                     rule["labels"] = {}
 
-                if self.topology:
+                topology_ctx = metadata or self.topology
+                if topology_ctx:
                     # only insert labels that do not already exist
-                    for label, val in self.topology.label_matcher_dict.items():
+                    for label, val in topology_ctx.label_matcher_dict.items():
                         if label not in rule["labels"]:
                             rule["labels"][label] = val
 
@@ -418,7 +440,7 @@ class Rules(ABC):
                             for k in ("juju_model", "juju_model_uuid", "juju_application")
                             if rule["labels"].get(k) is not None
                         },
-                        query_type=self.query_type,
+                        query_type=cast(QueryType, self.query_type),
                     )
 
         return groups
@@ -480,6 +502,61 @@ class Rules(ABC):
             "groups" dictionary key.
         """
         return {"groups": self.groups} if self.groups else {}
+
+    def inject_and_validate_rules(
+        self, rules: Dict[str, Any], metadata: Dict[str, str]
+    ) -> InjectResult:
+        """Inject Juju topology labels and validate rules using CosTool.
+
+        The returned identifier is useful for grouping rules by topology on disk.
+
+        Args:
+            rules: a dict of alert or recording rules
+            metadata: Juju topology metadata to inject into the rules, if
+                labels are not already present
+        Returns:
+            An InjectResult with the possibly-injected rules, the
+            discovered identifier (or None), and an optional error message if
+            validation failed.
+        """
+        topology = None
+        with contextlib.suppress(KeyError):
+            topology = JujuTopology.from_dict(metadata)
+
+        # Inject juju topology labels and sanitize rules
+        rules_data = {"groups": self._from_dict(rules, metadata=topology)}
+        topology_ctx = topology or self.topology
+        identifier = topology_ctx.identifier if topology_ctx else None
+        if not identifier:
+            return InjectResult(
+                rules=rules_data,
+                identifier=identifier,
+                errmsg=f"{self.query_type} rules were found, but an identifier was not available from rule labels or metadata.",
+            )
+
+        _, _errmsg = self.tool.validate_alert_rules(rules_data)  # type: ignore[reportCallIssue]
+        errmsg = cast(str, _errmsg)
+        if _errmsg:
+            return InjectResult(rules=rules_data, identifier=identifier, errmsg=errmsg)
+
+        return InjectResult(rules=rules_data, identifier=identifier, errmsg=errmsg)
+
+    @classmethod
+    def resolve_dir_against_charm_path(cls, *path_elements: str, charm_dir: Path) -> str:
+        """Resolve the provided path items against the directory of the main file.
+
+        Look up the directory of the main .py file being executed. This is normally
+        going to be the charm.py file of the charm including this library. Then, resolve
+        the provided path elements and, if the result path exists and is a directory,
+        return its absolute path; otherwise, raise an InvalidRulePathError.
+        """
+        rule_dir_path = charm_dir.absolute().joinpath(*path_elements)
+        if not rule_dir_path.exists():
+            raise InvalidRulePathError(rule_dir_path, "directory does not exist")
+        if not rule_dir_path.is_dir():
+            raise InvalidRulePathError(rule_dir_path, "is not a directory")
+
+        return str(rule_dir_path)
 
 
 class AlertRules(Rules):

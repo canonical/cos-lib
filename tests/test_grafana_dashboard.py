@@ -1,10 +1,10 @@
-# Copyright 2023 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 import json
 import unittest
 
-from cosl import DashboardPath40UID, GrafanaDashboard, LZMABase64
+from cosl import DashboardPath40UID, GrafanaDashboard
 
 
 class TestRoundTripEncDec(unittest.TestCase):
@@ -17,14 +17,6 @@ class TestRoundTripEncDec(unittest.TestCase):
             "even": [{"nested": "types", "and_integers": [42, 42]}],
         }
         self.assertDictEqual(d, GrafanaDashboard._serialize(json.dumps(d))._deserialize())
-
-
-class TestLZMABase64(unittest.TestCase):
-    """Tests the round-trip encoding/decoding of the GrafanaDashboard class."""
-
-    def test_round_trip(self):
-        s = "starting point"
-        self.assertEqual(s, LZMABase64.decompress(LZMABase64.compress(s)))
 
 
 class TestGenerateUID(unittest.TestCase):
