@@ -534,7 +534,7 @@ class Rules(ABC):
                 errmsg=f"{self.query_type} rules were found, but an identifier was not available from rule labels or metadata.",
             )
 
-        _, _errmsg = self.tool.validate_alert_rules(rules_data)
+        _, _errmsg = self.tool.validate_alert_rules(rules_data)  # type: ignore[reportCallIssue]
         errmsg = cast(str, _errmsg)
         if _errmsg:
             return InjectResult(rules=rules_data, identifier=identifier, errmsg=errmsg)
