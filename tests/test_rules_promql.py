@@ -27,7 +27,7 @@ class TestAddRulesFromPath(unittest.TestCase):
                 application="tester",
             ),
         )
-        # TODO: I can add a .add assertion here if I think its not tested
+
         ri.add_path(Path(__file__).resolve().parent / "promql_rules" / "prometheus_alert_rules")
 
         alerts = ri.as_dict()
@@ -449,8 +449,7 @@ class TestAlertRulesWithOneRulePerFile(unittest.TestCase):
 
 
 class TestAlertRulesWithMultipleRulesPerFile(unittest.TestCase):
-    def setUp(self) -> None:
-        self.maxDiff = None
+    def setUp(self):
         self.topology = JujuTopology(
             "MyModel", "12de4fae-06cc-4ceb-9089-567be09fec78", "MyApp", "MyCharm"
         )

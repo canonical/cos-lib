@@ -506,16 +506,18 @@ class Rules(ABC):
     def inject_and_validate_rules(
         self, rules: Dict[str, Any], metadata: Dict[str, str]
     ) -> InjectResult:
-        """Injects Juju topology labels and validate rules using CosTool.
+        """Inject Juju topology labels and validate rules using CosTool.
 
-        Returns an InjectResult with the possibly-injected rules, the
-        discovered identifier (or None), and an optional error message if
-        validation failed.
+        The returned identifier is useful for grouping rules by topology on disk.
 
         Args:
             rules: a dict of alert or recording rules
             metadata: Juju topology metadata to inject into the rules, if
                 labels are not already present
+        Returns:
+            An InjectResult with the possibly-injected rules, the
+            discovered identifier (or None), and an optional error message if
+            validation failed.
         """
         topology = None
         with contextlib.suppress(KeyError):
@@ -532,7 +534,7 @@ class Rules(ABC):
                 errmsg=f"{self.query_type} rules were found, but an identifier was not available from rule labels or metadata.",
             )
 
-        _, _errmsg = self.tool.validate_alert_rules(rules_data)  # type: ignore[reportCallIssue]
+        _, _errmsg = self.tool.validate_alert_rules(rules_data)
         errmsg = cast(str, _errmsg)
         if _errmsg:
             return InjectResult(rules=rules_data, identifier=identifier, errmsg=errmsg)
