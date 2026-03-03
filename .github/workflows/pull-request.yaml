@@ -30,6 +30,7 @@ jobs:
           python-version: 3.8
       - name: Install dependencies
         run: |
+          sudo snap install --classic astral-uv
           python3 -m pip install tox
       - name: Run static analysis
         run: tox -vve static
@@ -47,6 +48,7 @@ jobs:
           python-version: 3.8
       - name: Install dependencies
         run: |
+          sudo snap install --classic astral-uv
           python3 -m pip install tox
       - name: Run linters
         run: tox -vve lint
@@ -64,6 +66,7 @@ jobs:
           python-version: 3.8
       - name: Install dependencies
         run: |
+          sudo snap install --classic astral-uv
           python -m pip install tox
       - name: Run tests
         run: tox -e unit
