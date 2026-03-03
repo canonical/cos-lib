@@ -41,6 +41,7 @@ dev = [
     "pyright",
     # Unit
     "ops[testing]",
+    # https://github.com/pypa/setuptools/issues/5174
     "setuptools<82",
     "pytest",
     "pytest-cov",
