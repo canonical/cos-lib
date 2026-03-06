@@ -541,23 +541,6 @@ class Rules(ABC):
 
         return InjectResult(rules=rules_data, identifier=identifier, errmsg=errmsg)
 
-    @classmethod
-    def resolve_dir_against_charm_path(cls, *path_elements: str, charm_dir: Path) -> str:
-        """Resolve the provided path items against the directory of the main file.
-
-        Look up the directory of the main .py file being executed. This is normally
-        going to be the charm.py file of the charm including this library. Then, resolve
-        the provided path elements and, if the result path exists and is a directory,
-        return its absolute path; otherwise, raise an InvalidRulePathError.
-        """
-        rule_dir_path = charm_dir.absolute().joinpath(*path_elements)
-        if not rule_dir_path.exists():
-            raise InvalidRulePathError(rule_dir_path, "directory does not exist")
-        if not rule_dir_path.is_dir():
-            raise InvalidRulePathError(rule_dir_path, "is not a directory")
-
-        return str(rule_dir_path)
-
 
 class AlertRules(Rules):
     """Utility class for amalgamating alerting files and injecting juju topology.
