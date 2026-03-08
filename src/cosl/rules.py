@@ -83,9 +83,10 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, Final, List, Optional, Union, cast
+from typing import Any, Dict, Final, List, Optional, Union, cast, get_args
 
 import yaml
+from typing_extensions import Self
 
 from . import CosTool, JujuTopology
 from .types import (
@@ -574,3 +575,354 @@ class RecordingRules(Rules):
     def rule_type(self) -> RuleType:
         """Return the rule type being used for interpolation in messages."""
         return self._rule_type
+
+
+# ---------------------------------------------------------------------------
+# MyRules — multi-query-type rules builder with deferred expression injection
+# ---------------------------------------------------------------------------
+
+
+class MyRules:
+    """Multi-query-type rules aggregator with deferred expression injection.
+
+    Unlike the legacy `Rules` ABC, `MyRules`:
+    * is **not** tied to a single ``QueryType`` — PromQL, LogQL (and future
+      query languages) can coexist in the same instance;
+    * **defers** ``CosTool`` expression injection until ``as_dict()`` or
+      ``inject_and_validate()`` is called, so adding rules is a pure-data
+      operation;
+    * exposes a **fluent builder API** — every ``add_*`` method returns
+      ``self``.
+
+    Terminology (same as ``Rules``):
+        * *rules file* — the entire ``{"groups": [...]}`` structure.
+        * *group*      — one ``{"name": …, "rules": […]}`` dict.
+        * *rule*       — one ``{"alert"|"record": …, "expr": …}`` dict.
+
+    Example::
+
+        rules = (
+            MyRules(topology=topology)
+            .add_promql_path("./src/prometheus_alert_rules", recursive=True)
+            .add_logql_path("./src/loki_alert_rules")
+            .add_promql_dict({"alert": "HighCPU", "expr": "cpu > 0.9"})
+        )
+        output = rules.as_dict()          # expression injection happens here
+    """
+
+    # File extensions accepted when reading rule files from directories.
+    _RULE_SUFFIXES: Final = [".rule", ".rules", ".yml", ".yaml"]
+
+    def __init__(self, topology: Optional[JujuTopology] = None):
+        self.topology = topology
+
+        # Groups partitioned by query type — expression injection is applied
+        # per-partition using the matching CosTool.
+        self._groups: Dict[QueryType, List[OfficialRuleFileItem]] = {}
+
+        # One CosTool per query type, lazily created.
+        self._tools: Dict[QueryType, CosTool] = {}
+
+    # -- tool registry ------------------------------------------------------
+
+    def _ensure_tool(self, query_type: QueryType) -> CosTool:
+        """Return (and lazily create) the ``CosTool`` for *query_type*."""
+        if query_type not in self._tools:
+            self._tools[query_type] = CosTool(default_query_type=query_type)
+        return self._tools[query_type]
+
+    # -- fluent builder: PromQL ---------------------------------------------
+
+    def add_promql_dict(
+        self,
+        rule_dict: Dict[str, Any],
+        *,
+        group_name: Optional[str] = None,
+        group_name_prefix: Optional[str] = None,
+    ) -> Self:
+        """Add PromQL rules (alert or recording) from a dictionary."""
+        self._add_dict(
+            "promql", rule_dict, group_name=group_name, group_name_prefix=group_name_prefix
+        )
+        return self
+
+    def add_promql_path(
+        self,
+        dir_path: Union[str, Path],
+        *,
+        recursive: bool = False,
+    ) -> Self:
+        """Add PromQL rules (alert or recording) read from *dir_path*."""
+        self._add_path("promql", dir_path, recursive=recursive)
+        return self
+
+    # -- fluent builder: LogQL ----------------------------------------------
+
+    def add_logql_dict(
+        self,
+        rule_dict: Dict[str, Any],
+        *,
+        group_name: Optional[str] = None,
+        group_name_prefix: Optional[str] = None,
+    ) -> Self:
+        """Add LogQL rules (alert or recording) from a dictionary."""
+        self._add_dict(
+            "logql", rule_dict, group_name=group_name, group_name_prefix=group_name_prefix
+        )
+        return self
+
+    def add_logql_path(
+        self,
+        dir_path: Union[str, Path],
+        *,
+        recursive: bool = False,
+    ) -> Self:
+        """Add LogQL rules (alert or recording) read from *dir_path*."""
+        self._add_path("logql", dir_path, recursive=recursive)
+        return self
+
+    # -- output -------------------------------------------------------------
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Return the standard ``{"groups": [...]}`` dict with expressions injected.
+
+        Expression label-matchers are injected **here**, not during ``add_*``.
+        """
+        all_groups: List[OfficialRuleFileItem] = []
+        for query_type, groups in self._groups.items():
+            tool = self._ensure_tool(query_type)
+            injected = self._inject_expressions(groups, tool, query_type)
+            all_groups.extend(injected)
+        return {"groups": all_groups} if all_groups else {}
+
+    def as_dict_by_query_type(self) -> Dict[QueryType, Dict[str, Any]]:
+        """Return one ``{"groups": [...]}`` dict per query type, with expressions injected."""
+        result: Dict[QueryType, Dict[str, Any]] = {}
+        for query_type, groups in self._groups.items():
+            tool = self._ensure_tool(query_type)
+            injected = self._inject_expressions(groups, tool, query_type)
+            if injected:
+                result[query_type] = {"groups": injected}
+        return result
+
+    def inject_and_validate(
+        self,
+        rules: Dict[str, Any],
+        metadata: Dict[str, str],
+        query_type: QueryType,
+    ) -> InjectResult:
+        """Inject topology labels, inject expressions, and validate *rules*.
+
+        This mirrors the legacy ``Rules.inject_and_validate_rules`` but
+        requires an explicit *query_type* so the correct ``CosTool`` is used.
+        """
+        topology: Optional[JujuTopology] = None
+        with contextlib.suppress(KeyError):
+            topology = JujuTopology.from_dict(metadata)
+
+        groups = self._parse_and_label(rules, metadata=topology)
+        injected = self._inject_expressions(groups, self._ensure_tool(query_type), query_type)
+        rules_data: Dict[str, Any] = {"groups": injected}
+
+        topo_ctx = topology or self.topology
+        identifier = topo_ctx.identifier if topo_ctx else None
+        if not identifier:
+            return InjectResult(
+                rules=rules_data,
+                identifier=identifier,
+                errmsg=(
+                    f"{query_type} rules were found, but an identifier was not "
+                    "available from rule labels or metadata."
+                ),
+            )
+
+        tool = self._ensure_tool(query_type)
+        _, _errmsg = tool.validate_alert_rules(rules_data)  # type: ignore[reportCallIssue]
+        errmsg = cast(str, _errmsg)
+        return InjectResult(rules=rules_data, identifier=identifier, errmsg=errmsg)
+
+    # -- internals: add helpers ---------------------------------------------
+
+    def _add_dict(
+        self,
+        query_type: QueryType,
+        rule_dict: Dict[str, Any],
+        *,
+        group_name: Optional[str] = None,
+        group_name_prefix: Optional[str] = None,
+    ) -> None:
+        """Parse *rule_dict*, inject topology labels, and store under *query_type*."""
+        self._ensure_tool(query_type)
+        groups = self._parse_and_label(
+            rule_dict, group_name=group_name, group_name_prefix=group_name_prefix
+        )
+        self._groups.setdefault(query_type, []).extend(groups)
+
+    def _add_path(
+        self,
+        query_type: QueryType,
+        dir_path: Union[str, Path],
+        *,
+        recursive: bool = False,
+    ) -> None:
+        """Read rule files from *dir_path*, inject topology labels, store under *query_type*."""
+        self._ensure_tool(query_type)
+        path = Path(dir_path) if isinstance(dir_path, str) else dir_path
+        if path.is_dir():
+            groups = self._groups_from_dir(path, recursive)
+        elif path.is_file():
+            groups = self._groups_from_file(path.parent, path)
+        else:
+            logger.debug("Rules path does not exist: %s", path)
+            return
+        self._groups.setdefault(query_type, []).extend(groups)
+
+    # -- internals: file reading --------------------------------------------
+
+    @staticmethod
+    def _multi_suffix_glob(
+        dir_path: Path, suffixes: List[str], recursive: bool = True
+    ) -> List[Path]:
+        """Return sorted list of files under *dir_path* matching *suffixes*."""
+        pattern = "**/*" if recursive else "*"
+        return sorted(f for f in dir_path.glob(pattern) if f.is_file() and f.suffix in suffixes)
+
+    def _groups_from_dir(self, dir_path: Path, recursive: bool) -> List[OfficialRuleFileItem]:
+        """Read all matching rule files in *dir_path*."""
+        groups: List[OfficialRuleFileItem] = []
+        for file_path in self._multi_suffix_glob(dir_path, self._RULE_SUFFIXES, recursive):
+            file_groups = self._groups_from_file(dir_path, file_path)
+            if file_groups:
+                logger.debug("Reading rule from %s", file_path)
+                groups.extend(file_groups)
+        return groups
+
+    def _groups_from_file(self, root_path: Path, file_path: Path) -> List[OfficialRuleFileItem]:
+        """Read and parse a single rule file."""
+        with file_path.open() as fh:
+            try:
+                rule_file = yaml.safe_load(fh)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Failed to read rules from %s: %s", file_path.name, exc)
+                return []
+
+        rel_path = file_path.parent.relative_to(root_path)
+        rel_str = "" if rel_path == Path(".") else str(rel_path)
+        prefix_parts: List[str] = []
+        if self.topology:
+            prefix_parts.append(self.topology.identifier)
+        prefix_parts.append(rel_str)
+        group_name_prefix = "_".join(filter(None, prefix_parts))
+
+        try:
+            return self._parse_and_label(
+                rule_file,
+                group_name=file_path.stem,
+                group_name_prefix=group_name_prefix,
+            )
+        except ValueError as exc:
+            logger.error("Invalid rules file: %s (%s)", file_path.name, exc)
+            return []
+
+    # -- internals: parsing + topology label injection ----------------------
+
+    def _parse_and_label(
+        self,
+        rule_dict: Dict[str, Any],
+        *,
+        group_name: Optional[str] = None,
+        group_name_prefix: Optional[str] = None,
+        metadata: Optional[JujuTopology] = None,
+    ) -> List[OfficialRuleFileItem]:
+        """Normalize *rule_dict* into groups and inject topology **labels** (not expressions).
+
+        This is the equivalent of the old ``Rules._from_dict`` but it does
+        **not** call ``CosTool.inject_label_matchers`` — that step is deferred
+        to ``_inject_expressions``.
+        """
+        if not rule_dict:
+            raise ValueError("Empty")
+
+        if self._is_official_rule_format(rule_dict):
+            groups = rule_dict["groups"]
+        elif self._is_single_rule_format(rule_dict):
+            if not group_name:
+                group_name = hashlib.shake_256(str(rule_dict).encode("utf-8")).hexdigest(10)
+            groups = [{"name": group_name, "rules": [rule_dict]}]
+        else:
+            raise ValueError("Invalid rule format")
+
+        groups = cast(List[OfficialRuleFileItem], groups)
+        for group in groups:
+            # Augment group name with topology and sub-path.
+            if not self._is_already_modified(group["name"]):
+                group["name"] = "_".join(filter(None, [group_name_prefix, group["name"], "rules"]))
+            group["name"] = self._sanitize_metric_name(group["name"])
+
+            # Inject topology labels into rule["labels"].
+            for rule in group["rules"]:
+                if "labels" not in rule:
+                    rule["labels"] = {}
+                topo_ctx = metadata or self.topology
+                if topo_ctx:
+                    for label, val in topo_ctx.label_matcher_dict.items():
+                        if label not in rule["labels"]:
+                            rule["labels"][label] = val
+
+        return groups
+
+    # -- internals: deferred expression injection ---------------------------
+
+    @staticmethod
+    def _inject_expressions(
+        groups: List[OfficialRuleFileItem],
+        tool: CosTool,
+        query_type: QueryType,
+    ) -> List[OfficialRuleFileItem]:
+        """Inject label matchers into ``rule["expr"]`` using *tool*.
+
+        This is the step that was previously embedded inside
+        ``Rules._from_dict``.  It is now a separate, static method so that
+        it can be called lazily and with the *correct* tool for the query
+        language of the rules.
+        """
+        repl = r'job=~".+"' if query_type == "logql" else ""
+        for group in groups:
+            for rule in group["rules"]:
+                labels = rule.get("labels", {})
+                topo_for_expr = {
+                    k: labels[k]
+                    for k in ("juju_model", "juju_model_uuid", "juju_application")
+                    if labels.get(k) is not None
+                }
+                if topo_for_expr:
+                    rule["expr"] = tool.inject_label_matchers(  # type: ignore
+                        expression=re.sub(r"%%juju_topology%%,?", repl, rule["expr"]),
+                        topology=topo_for_expr,
+                        query_type=query_type,
+                    )
+        return groups
+
+    # -- internals: format detection (static) -------------------------------
+
+    @staticmethod
+    def _is_official_rule_format(rules_dict: Dict[str, Any]) -> bool:
+        """Return True if *rules_dict* uses the upstream ``{"groups": [...]}`` format."""
+        return "groups" in rules_dict
+
+    @staticmethod
+    def _is_single_rule_format(rules_dict: Dict[str, Any]) -> bool:
+        """Return True if *rules_dict* is a single rule (custom format)."""
+        return "expr" in rules_dict and any(
+            rule_type in rules_dict for rule_type in get_args(RuleType)
+        )
+
+    @staticmethod
+    def _is_already_modified(name: str) -> bool:
+        """Detect whether a group name has already been modified with juju topology."""
+        return re.compile(r"^.*?_[\da-f]{8}_.*?alerts$").match(name) is not None
+
+    @staticmethod
+    def _sanitize_metric_name(metric_name: str) -> str:
+        """Sanitize *metric_name* per Prometheus data model rules."""
+        return "".join(c if re.match(r"[a-zA-Z0-9_:]", c) else "_" for c in metric_name)
