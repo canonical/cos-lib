@@ -1,11 +1,11 @@
-# Copyright 2021 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 """Types used by cos-lib."""
 
-from typing import Any, Dict, List, Literal, Optional, TypedDict, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from ops.framework import StoredDict, StoredList
-from typing_extensions import Required
+from typing_extensions import Required, TypedDict
 
 QueryType = Literal["logql", "promql"]
 RuleType = Literal["alert", "record"]
@@ -17,7 +17,9 @@ class _RecordingRuleFormat(TypedDict):
     labels: Dict[str, str]
 
 
-class _AlertingRuleFormat(TypedDict):
+class _AlertingRuleFormat(
+    TypedDict,
+):
     alert: Required[str]
     expr: Required[str]
     duration: Optional[str]
