@@ -72,12 +72,14 @@ class CosTool:
         query_type = query_type or self.query_type
         if not self.path:
             return rules
-        for group in rules["groups"]:
+        groups = rules.get("groups", [])
+        for group in groups:
             rules_in_group = group.get("rules", [])
             for rule in rules_in_group:
                 topology = {}
                 # if the user for some reason has provided juju_unit, we'll need to honor it
                 # in most cases, however, this will be empty
+                labels = rule.get("labels", {})
                 for label in [
                     "juju_model",
                     "juju_model_uuid",
@@ -85,8 +87,8 @@ class CosTool:
                     "juju_charm",
                     "juju_unit",
                 ]:
-                    if label in rule["labels"]:
-                        topology[label] = rule["labels"][label]
+                    if label in labels:
+                        topology[label] = labels[label]
 
                 rule["expr"] = self.inject_label_matchers(rule["expr"], topology, query_type)  # type: ignore
         return rules
