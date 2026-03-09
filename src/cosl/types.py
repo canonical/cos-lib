@@ -2,7 +2,7 @@
 # See LICENSE file for licensing details.
 """Types used by cos-lib."""
 
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Union
 
 from ops.framework import StoredDict, StoredList
 from typing_extensions import NotRequired, Required, TypedDict
@@ -20,10 +20,10 @@ class _RecordingRuleFormat(TypedDict):
 class _AlertingRuleFormat(TypedDict):
     alert: Required[str]
     expr: Required[str]
-    duration: NotRequired[Optional[str]]
-    keep_firing_for: NotRequired[Optional[str]]
+    duration: NotRequired[str]
+    keep_firing_for: NotRequired[str]
     labels: NotRequired[Dict[str, str]]
-    annotations: NotRequired[Optional[Dict[str, str]]]
+    annotations: NotRequired[Dict[str, str]]
 
 
 SingleRuleFormat = Union[_AlertingRuleFormat, _RecordingRuleFormat]

@@ -72,8 +72,7 @@ class CosTool:
         query_type = query_type or self.query_type
         if not self.path:
             return rules
-        groups = rules.get("groups", [])
-        for group in groups:
+        for group in rules.get("groups", []):
             rules_in_group = group.get("rules", [])
             for rule in rules_in_group:
                 topology = {}
