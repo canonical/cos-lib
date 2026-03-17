@@ -684,17 +684,19 @@ class MyRules:
     # -- output -------------------------------------------------------------
 
     def as_dict(self) -> Dict[str, Any]:
-        """Return rules grouped by query type with expressions injected.
-
-        Output format::
-
-            {
-                "promql": {"groups": [...]},
-                "logql": {"groups": [...]},
-            }
+        """Return the standard ``{"groups": [...]}`` dict with expressions injected.
 
         Expression label-matchers are injected **here**, not during ``add_*``.
         """
+        all_groups: List[OfficialRuleFileItem] = []
+        for query_type, groups in self._groups.items():
+            tool = self._ensure_tool(query_type)
+            injected = self._inject_expressions(groups, tool, query_type)
+            all_groups.extend(injected)
+        return {"groups": all_groups} if all_groups else {}
+
+    def as_dict_by_query_type(self) -> Dict[QueryType, Dict[str, Any]]:
+        """Return one ``{"groups": [...]}`` dict per query type, with expressions injected."""
         result: Dict[QueryType, Dict[str, Any]] = {}
         for query_type, groups in self._groups.items():
             tool = self._ensure_tool(query_type)
