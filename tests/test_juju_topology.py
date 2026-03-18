@@ -65,6 +65,29 @@ class TestJujuTopology(unittest.TestCase):
         expected = 'juju_model="some-model", juju_model_uuid="00000000-0000-4000-8000-000000000000", juju_application="test-application", juju_charm="test-application"'
         self.assertEqual(expected, self.topology.label_matchers)
 
+    def test_to_baggage(self):
+        expected = (
+            "juju_model=some-model,"
+            "juju_model_uuid=00000000-0000-4000-8000-000000000000,"
+            "juju_application=test-application,"
+            "juju_unit=test-application/0,"
+            "juju_charm=test-application"
+        )
+        self.assertEqual(expected, self.topology.to_baggage())
+
+    def test_to_baggage_without_optional_fields(self):
+        topology = JujuTopology(
+            model="some-model",
+            model_uuid="00000000-0000-4000-8000-000000000000",
+            application="test-application",
+        )
+        expected = (
+            "juju_model=some-model,"
+            "juju_model_uuid=00000000-0000-4000-8000-000000000000,"
+            "juju_application=test-application"
+        )
+        self.assertEqual(expected, topology.to_baggage())
+
     def test_from_dict(self):
         topology = JujuTopology.from_dict(self.input)
         self.assertEqual(topology.as_dict(), self.input)
