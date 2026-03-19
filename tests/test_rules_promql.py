@@ -109,11 +109,8 @@ class TestAddRuleFromStr(unittest.TestCase):
         }
         expected_rules = {
             "groups": [
-                {
-                    "name": "initial_alerts",
-                    "rules": [self.rule],
-                },
-                {"name": "SomeGroupName_alerts", "rules": official_rule["groups"][0]["rules"]},
+                {"name": "initial_rules", "rules": [self.rule]},
+                {"name": "SomeGroupName_rules", "rules": official_rule["groups"][0]["rules"]},
             ]
         }
         # GIVEN an alert rule
@@ -133,11 +130,8 @@ class TestAddRuleFromStr(unittest.TestCase):
         }
         expected_rules = {
             "groups": [
-                {
-                    "name": "initial_alerts",
-                    "rules": [self.rule],
-                },
-                {"name": "some_new_alerts", "rules": [single_rule]},
+                {"name": "initial_rules", "rules": [self.rule]},
+                {"name": "some_new_rules", "rules": [single_rule]},
             ]
         }
         # GIVEN an alert rule
@@ -188,7 +182,7 @@ class TestFromDictGroupName(unittest.TestCase):
             # THEN the group name only contains characters in [a-zA-Z0-9_:]
             # AND special characters are replaced with "_"
             self.assertEqual(
-                group["name"], "Foo_123_Hello:World_go_od_bye______________:_________alerts"
+                group["name"], "Foo_123_Hello:World_go_od_bye______________:_________rules"
             )
 
     def test_single_rule_from_dict(self):
@@ -356,7 +350,7 @@ class TestAlertRulesWithOneRulePerFile(unittest.TestCase):
         expected_rules_file = {
             "groups": [
                 {
-                    "name": f"{sorted_matchers(self.topology.identifier)}_free_standing_rule_alerts",
+                    "name": f"{sorted_matchers(self.topology.identifier)}_free_standing_rule_rules",
                     "rules": [expected_freestanding_rule],
                 },
             ]
@@ -378,7 +372,7 @@ class TestAlertRulesWithOneRulePerFile(unittest.TestCase):
         expected_rules_file = {
             "groups": [
                 {
-                    "name": f"{self.topology.identifier}_group1_alerts",
+                    "name": f"{self.topology.identifier}_group1_rules",
                     "rules": [expected_alert_rule],
                 },
             ]
@@ -411,19 +405,19 @@ class TestAlertRulesWithOneRulePerFile(unittest.TestCase):
         expected_rules_file = {
             "groups": [
                 {
-                    "name": f"{self.topology.identifier}_mixed_format_group1_alerts",
+                    "name": f"{self.topology.identifier}_mixed_format_group1_rules",
                     "rules": [expected_alert_rule],
                 },
                 {
-                    "name": f"{self.topology.identifier}_mixed_format_lma_rule_alerts",
+                    "name": f"{self.topology.identifier}_mixed_format_lma_rule_rules",
                     "rules": [expected_alert_rule],
                 },
                 {
-                    "name": f"{self.topology.identifier}_lma_format_free_standing_rule_alerts",
+                    "name": f"{self.topology.identifier}_lma_format_free_standing_rule_rules",
                     "rules": [expected_freestanding_rule],
                 },
                 {
-                    "name": f"{self.topology.identifier}_prom_format_group1_alerts",
+                    "name": f"{self.topology.identifier}_prom_format_group1_rules",
                     "rules": [expected_alert_rule],
                 },
             ]
@@ -478,14 +472,14 @@ class TestAlertRulesWithMultipleRulesPerFile(unittest.TestCase):
         expected_rules_file = {
             "groups": [
                 {
-                    "name": f"{self.topology.identifier}_group_1_alerts",
+                    "name": f"{self.topology.identifier}_group_1_rules",
                     "rules": [
                         self.gen_rule(1, labels=self.topology.label_matcher_dict),
                         self.gen_rule(2, labels=self.topology.label_matcher_dict),
                     ],
                 },
                 {
-                    "name": f"{self.topology.identifier}_group_2_alerts",
+                    "name": f"{self.topology.identifier}_group_2_rules",
                     "rules": [
                         self.gen_rule(1, labels=self.topology.label_matcher_dict),
                         self.gen_rule(2, labels=self.topology.label_matcher_dict),
@@ -516,7 +510,7 @@ class TestAlertRulesWithMultipleRulesPerFile(unittest.TestCase):
         expected_rules_file = {
             "groups": [
                 {
-                    "name": f"{self.topology.identifier}_my_group_alerts",
+                    "name": f"{self.topology.identifier}_my_group_rules",
                     "rules": [
                         self.gen_rule("same", labels=self.topology.label_matcher_dict),
                         self.gen_rule("same", labels=self.topology.label_matcher_dict),
@@ -539,14 +533,14 @@ class TestAlertRulesWithMultipleRulesPerFile(unittest.TestCase):
         expected_rules_file = {
             "groups": [
                 {
-                    "name": f"{self.topology.identifier}_group_same_alerts",
+                    "name": f"{self.topology.identifier}_group_same_rules",
                     "rules": [
                         self.gen_rule(1, labels=self.topology.label_matcher_dict),
                         self.gen_rule(2, labels=self.topology.label_matcher_dict),
                     ],
                 },
                 {
-                    "name": f"{self.topology.identifier}_group_same_alerts",
+                    "name": f"{self.topology.identifier}_group_same_rules",
                     "rules": [
                         self.gen_rule(1, labels=self.topology.label_matcher_dict),
                         self.gen_rule(2, labels=self.topology.label_matcher_dict),
@@ -570,15 +564,15 @@ class TestAlertRulesWithMultipleRulesPerFile(unittest.TestCase):
         expected_rules_file = {
             "groups": [
                 {
-                    "name": f"{self.topology.identifier}_a_b_file_alerts",
+                    "name": f"{self.topology.identifier}_a_b_file_rules",
                     "rules": [self.gen_rule(2, labels=self.topology.label_matcher_dict)],
                 },
                 {
-                    "name": f"{self.topology.identifier}_a_file_alerts",
+                    "name": f"{self.topology.identifier}_a_file_rules",
                     "rules": [self.gen_rule(1, labels=self.topology.label_matcher_dict)],
                 },
                 {
-                    "name": f"{self.topology.identifier}_file_alerts",
+                    "name": f"{self.topology.identifier}_file_rules",
                     "rules": [self.gen_rule(0, labels=self.topology.label_matcher_dict)],
                 },
             ]

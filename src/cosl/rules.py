@@ -413,7 +413,7 @@ class Rules(ABC):
         for group in groups:
             if not self._is_already_modified(group["name"]):
                 # update group name with topology and sub-path
-                group["name"] = "_".join(filter(None, [group_name_prefix, group["name"]]))
+                group["name"] = "_".join(filter(None, [group_name_prefix, group["name"], 'rules']))
             # after sanitizing we should not modify group["name"] anymore
             group["name"] = self._sanitize_metric_name(group["name"])
 
