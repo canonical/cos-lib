@@ -79,7 +79,7 @@ import contextlib
 import hashlib
 import logging
 import re
-from abc import ABC, abstractmethod
+from abc import ABC
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -89,6 +89,8 @@ import yaml
 
 from . import CosTool, JujuTopology
 from .types import (
+    RULE_TYPES,
+    OfficialRuleFileFormat,
     OfficialRuleFileItem,
     QueryType,
     RuleType,
@@ -191,8 +193,8 @@ class InjectResult:
         identifier: The topology/group identifier discovered for these rules.
         errmsg: Optional error message produced during validation.
     """
-
-    rules: Dict[str, Any]
+    # TODO: once PR is merged we should return our decision in `OtlpProvider.rules`
+    rules: OfficialRuleFileFormat
     identifier: Optional[str]
     errmsg: str
 
@@ -220,10 +222,9 @@ class Rules(ABC):
     # - groups (plural): the list of groups[] (a list, i.e. no "groups:" key) - it is a list
     #   of dictionaries that have the "name" and "rules" keys.
     # - group (singular): a single dictionary that has the "name" and "rules" keys.
-    # - rules (plural): all the rules in a given group - a list of dictionaries with
-    #   the `self.rule_type` (either "alert" or "record") and "expr" keys.
-    # - rule (singular): a single dictionary that has the `self.rule_type` (either "alert" or
-    #   "record") and "expr" keys.
+    # - rules (plural): all the rules in a given group - a list of dictionaries of type
+    #   "alert" (or "record") and "expr" keys.
+    # - rule (singular): a single dictionary of type "alert" (or "record") and "expr" keys.
 
     def __init__(self, query_type: QueryType, topology: Optional[JujuTopology] = None):
         """Build a rule object.
@@ -239,7 +240,6 @@ class Rules(ABC):
         self.groups: List[OfficialRuleFileItem] = []
 
     @property
-    @abstractmethod
     def rule_type(self) -> RuleType:
         """Return the rule type being used for interpolation in messages."""
         pass
@@ -263,7 +263,7 @@ class Rules(ABC):
         return "groups" in rules_dict
 
     @staticmethod
-    def _is_single_rule_format(rules_dict: Dict[str, Any], rule_type: RuleType) -> bool:
+    def _is_single_rule_format(rules_dict: Dict[str, Any]) -> bool:
         """Are alert rules in single rule format.
 
         This library supports reading of rules in a custom format that
@@ -274,13 +274,13 @@ class Rules(ABC):
 
         Rules in dictionary form are considered to be in single rule
         format if in the least it contains two keys corresponding to the
-        rule name and expression.
+        rule type and expression.
 
         Returns:
             True if rule is in single rule file format.
         """
         # one rule per file
-        return set(rules_dict) >= {rule_type, "expr"}
+        return "expr" in rules_dict and bool(set(rules_dict) & RULE_TYPES)
 
     @staticmethod
     def _multi_suffix_glob(
@@ -325,7 +325,7 @@ class Rules(ABC):
         ):
             groups_from_file = self._from_file(dir_path, file_path)
             if groups_from_file:
-                logger.debug("Reading %s rule from %s", self.rule_type, file_path)
+                logger.debug("Reading rule from %s", file_path)
                 groups.extend(groups_from_file)  # type: ignore
 
         return groups
@@ -394,7 +394,7 @@ class Rules(ABC):
 
         if self._is_official_rule_format(rule_dict):
             groups = rule_dict["groups"]
-        elif self._is_single_rule_format(rule_dict, self.rule_type):
+        elif self._is_single_rule_format(rule_dict):
             if not group_name:
                 # Note: the caller of this function should ensure this never happens:
                 # Either we use the standard format, or we'd pass a group_name.
@@ -413,9 +413,7 @@ class Rules(ABC):
         for group in groups:
             if not self._is_already_modified(group["name"]):
                 # update group name with topology and sub-path
-                group["name"] = "_".join(
-                    filter(None, [group_name_prefix, group["name"], f"{self.rule_type}s"])
-                )
+                group["name"] = "_".join(filter(None, [group_name_prefix, group["name"]]))
             # after sanitizing we should not modify group["name"] anymore
             group["name"] = self._sanitize_metric_name(group["name"])
 
@@ -491,7 +489,7 @@ class Rules(ABC):
         elif path.is_file():
             self.groups.extend(self._from_file(path.parent, path))  # type: ignore
         else:
-            logger.debug("%s rules path does not exist: %s", self.rule_type.capitalize(), path)
+            logger.debug("Rules path does not exist: %s", path)
 
     def as_dict(self) -> Dict[str, Any]:
         """Return standard rules file in dict representation.
@@ -574,3 +572,7 @@ class RecordingRules(Rules):
     def rule_type(self) -> RuleType:
         """Return the rule type being used for interpolation in messages."""
         return self._rule_type
+
+
+class CompositeRules(Rules):
+    pass
