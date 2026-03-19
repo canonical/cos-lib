@@ -193,7 +193,7 @@ class InjectResult:
         identifier: The topology/group identifier discovered for these rules.
         errmsg: Optional error message produced during validation.
     """
-    # TODO: once PR is merged we should return our decision in `OtlpProvider.rules`
+
     rules: OfficialRuleFileFormat
     identifier: Optional[str]
     errmsg: str
@@ -240,9 +240,9 @@ class Rules(ABC):
         self.groups: List[OfficialRuleFileItem] = []
 
     @property
-    def rule_type(self) -> RuleType:
+    def rule_type(self) -> Optional[RuleType]:
         """Return the rule type being used for interpolation in messages."""
-        pass
+        return None
 
     # --- HELPER METHODS FOR READING FILES, SHOULD BE STATIC --- #
 
@@ -522,7 +522,7 @@ class Rules(ABC):
             topology = JujuTopology.from_dict(metadata)
 
         # Inject juju topology labels and sanitize rules
-        rules_data = {"groups": self._from_dict(rules, metadata=topology)}
+        rules_data: OfficialRuleFileFormat = {"groups": self._from_dict(rules, metadata=topology)}
         topology_ctx = topology or self.topology
         identifier = topology_ctx.identifier if topology_ctx else None
         if not identifier:
@@ -575,4 +575,14 @@ class RecordingRules(Rules):
 
 
 class CompositeRules(Rules):
+    """Utility class for amalgamating rules of different types, e.g. alerting and recording.
+
+    The official format is a YAML file conforming to the Prometheus/Cortex documentation:
+    - (https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/) or
+    - (https://prometheus.io/docs/prometheus/latest/configuration/recording_rules/)
+
+    The custom single rule format is a subsection of the official YAML, having a single alert or
+    recording rule, effectively "one rule per file".
+    """
+
     pass
