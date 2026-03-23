@@ -13,7 +13,7 @@ from deepdiff import DeepDiff
 from fs.tempfs import TempFS
 
 from cosl.juju_topology import JujuTopology
-from cosl.rules import AlertRules
+from cosl.rules import AlertRules, Rules
 
 
 class TestAddRulesFromPath(unittest.TestCase):
@@ -782,3 +782,57 @@ class TestInjectAndValidateRules(unittest.TestCase):
                     if k not in {"juju_model", "juju_model_uuid", "juju_application"}:
                         continue
                     self.assertIn(f'{k}="{v}"', rule["expr"])
+
+
+class TestGroupNameSuffix(unittest.TestCase):
+    def setUp(self):
+        self.suffix = "_rules"
+        self.single_rule = {
+            "alert": "SomeRuleName",
+            "expr": "up < 1",
+            "labels": {"severity": "critical"},
+        }
+
+    def test_single_rule_without_rules_suffix(self):
+        # GIVEN an alert rule in single-rule format
+        rules = Rules(query_type="promql")
+        # WHEN added to the rules object without a "_rules" suffix in the group name
+        rules.groups = rules._from_dict(self.single_rule, group_name="single")
+        rules_dict = rules.as_dict()
+        # THEN the rule group name only has one "_rules" suffix and is not duplicated
+        self.assertEqual("single_rules", rules_dict.get("groups", [])[0].get("name", ""))
+
+    def test_single_rule_with_rules_suffix(self):
+        # GIVEN an alert rule in single-rule format
+        rules = Rules(query_type="promql")
+        # WHEN added to the rules object with a "_rules" suffix in the group name
+        rules.groups = rules._from_dict(self.single_rule, group_name="single_rules")
+        rules_dict = rules.as_dict()
+        # THEN the rule group name only has one "_rules" suffix and is not duplicated
+        self.assertEqual("single_rules", rules_dict.get("groups", [])[0].get("name", ""))
+
+    def test_official_rule_without_rules_suffix(self):
+        # GIVEN an alert rule in official-rule format without a "_rules" suffix in the group name
+        official_rule = {"groups": [{"name": "SomeGroupName", "rules": [self.single_rule]}]}
+        rules = Rules(query_type="promql")
+        # WHEN added to the rules object
+        rules.groups = rules._from_dict(official_rule)
+        rules_dict = rules.as_dict()
+        # THEN the rule group name only has one "_rules" suffix and is not duplicated
+        self.assertEqual(
+            f"SomeGroupName{self.suffix}", rules_dict.get("groups", [])[0].get("name", "")
+        )
+
+    def test_official_rule_with_rules_suffix(self):
+        # GIVEN an alert rule in official-rule format with a "_rules" suffix in the group name
+        official_rule = {
+            "groups": [{"name": f"SomeGroupName{self.suffix}", "rules": [self.single_rule]}]
+        }
+        rules = Rules(query_type="promql")
+        # WHEN added to the rules object
+        rules.groups = rules._from_dict(official_rule)
+        rules_dict = rules.as_dict()
+        # THEN the rule group name only has one "_rules" suffix and is not duplicated
+        self.assertEqual(
+            f"SomeGroupName{self.suffix}", rules_dict.get("groups", [])[0].get("name", "")
+        )

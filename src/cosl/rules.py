@@ -413,7 +413,10 @@ class Rules:
         for group in groups:
             if not self._is_already_modified(group["name"]):
                 # update group name with topology and sub-path
-                group["name"] = "_".join(filter(None, [group_name_prefix, group["name"], "rules"]))
+                new_name = "_".join(filter(None, [group_name_prefix, group["name"]]))
+                if not new_name.endswith("_rules"):
+                    new_name += "_rules"
+                group["name"] = new_name
             # after sanitizing we should not modify group["name"] anymore
             group["name"] = self._sanitize_metric_name(group["name"])
 
@@ -445,7 +448,7 @@ class Rules:
 
     def _is_already_modified(self, name: str) -> bool:
         """Detect whether a group name has already been modified with juju topology."""
-        modified_matcher = re.compile(r"^.*?_[\da-f]{8}_.*?alerts$")
+        modified_matcher = re.compile(r"^.*?_[\da-f]{8}_.*?rules$")
         if modified_matcher.match(name) is None:
             return False
         return True
