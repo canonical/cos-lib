@@ -79,7 +79,6 @@ import contextlib
 import hashlib
 import logging
 import re
-import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -555,14 +554,7 @@ class AlertRules(Rules):
     rule, effectively "one alert per file".
     """
 
-    def __init__(self, *args: Any, **kwargs: Any):
-        warnings.warn(
-            "AlertRules is deprecated and will be removed in a future release. "
-            "Use Rules directly.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(*args, **kwargs)
+    pass
 
 
 class RecordingRules(Rules):
@@ -577,11 +569,4 @@ class RecordingRules(Rules):
     rule, effectively "one record per file".
     """
 
-    def __init__(self, *args: Any, **kwargs: Any):
-        warnings.warn(
-            "RecordingRules is deprecated and will be removed in a future release. "
-            "Use Rules directly.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(*args, **kwargs)
+    pass
