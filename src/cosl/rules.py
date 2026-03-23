@@ -79,7 +79,7 @@ import contextlib
 import hashlib
 import logging
 import re
-from abc import ABC
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -199,7 +199,7 @@ class InjectResult:
     errmsg: str
 
 
-class Rules(ABC):
+class Rules:
     """Utility class for amalgamating alerting/recording rule  files and injecting juju topology.
 
     A `Rules` object supports aggregating rules from files and directories in both
@@ -280,7 +280,7 @@ class Rules(ABC):
             True if rule is in single rule file format.
         """
         # one rule per file
-        return "expr" in rules_dict and bool(set(rules_dict) & RULE_TYPES)
+        return "expr" in rules_dict and not RULE_TYPES.isdisjoint(rules_dict)
 
     @staticmethod
     def _multi_suffix_glob(
@@ -543,22 +543,30 @@ class Rules(ABC):
 class AlertRules(Rules):
     """Utility class for amalgamating alerting files and injecting juju topology.
 
+    .. deprecated::
+        Use :class:`Rules` directly. This class will be removed in a future release.
+
     The official format is a YAML file conforming to the Prometheus/Cortex documentation
     (https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/).
     The custom single rule format is a subsection of the official YAML, having a single alert
     rule, effectively "one alert per file".
     """
 
-    _rule_type = "alert"  # type: RuleType
-
-    @property
-    def rule_type(self) -> RuleType:
-        """Return the rule type being used for interpolation in messages."""
-        return self._rule_type
+    def __init__(self, *args: Any, **kwargs: Any):
+        warnings.warn(
+            "AlertRules is deprecated and will be removed in a future release. "
+            "Use Rules directly.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        super().__init__(*args, **kwargs)
 
 
 class RecordingRules(Rules):
     """Utility class for amalgamating recording files and injecting juju topology.
+
+    .. deprecated::
+        Use :class:`Rules` directly. This class will be removed in a future release.
 
     The official format is a YAML file conforming to the Prometheus/Cortex documentation
     (https://prometheus.io/docs/prometheus/latest/configuration/recording_rules/).
@@ -566,23 +574,11 @@ class RecordingRules(Rules):
     rule, effectively "one record per file".
     """
 
-    _rule_type = "record"  # type: RuleType
-
-    @property
-    def rule_type(self) -> RuleType:
-        """Return the rule type being used for interpolation in messages."""
-        return self._rule_type
-
-
-class CompositeRules(Rules):
-    """Utility class for amalgamating rules of different types, e.g. alerting and recording.
-
-    The official format is a YAML file conforming to the Prometheus/Cortex documentation:
-    - (https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/) or
-    - (https://prometheus.io/docs/prometheus/latest/configuration/recording_rules/)
-
-    The custom single rule format is a subsection of the official YAML, having a single alert or
-    recording rule, effectively "one rule per file".
-    """
-
-    pass
+    def __init__(self, *args: Any, **kwargs: Any):
+        warnings.warn(
+            "RecordingRules is deprecated and will be removed in a future release. "
+            "Use Rules directly.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        super().__init__(*args, **kwargs)
