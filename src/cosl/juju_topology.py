@@ -310,9 +310,7 @@ class JujuTopology:
         'juju_model=a-model,juju_model_uuid=00000000-0000-4000-8000-000000000000,juju_application=some-app,juju_unit=some-app/1,juju_charm=some-charm'
         """
         items = self.as_dict(remapped_keys={"charm_name": "charm"}).items()
-        return ",".join(
-            ["juju_{}={}".format(key, value) for key, value in items if value]
-        )
+        return ",".join(["juju_{}={}".format(key, value) for key, value in items if value])
 
     @property
     def model(self) -> str:
