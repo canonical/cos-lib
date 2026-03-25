@@ -2,13 +2,14 @@
 # See LICENSE file for licensing details.
 """Types used by cos-lib."""
 
-from typing import Any, Dict, List, Literal, Union
+from typing import Any, Dict, Final, List, Literal, Union
 
 from ops.framework import StoredDict, StoredList
 from typing_extensions import NotRequired, Required, TypedDict
 
 QueryType = Literal["logql", "promql"]
 RuleType = Literal["alert", "record"]
+RULE_TYPES: Final = frozenset({"alert", "record"})
 
 
 class _RecordingRuleFormat(TypedDict):
