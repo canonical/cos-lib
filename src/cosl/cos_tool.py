@@ -12,28 +12,27 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import yaml
-from typing_extensions import Concatenate, ParamSpec, TypeVar
+from typing_extensions import TypeVar
 
 from .types import OfficialRuleFileFormat, QueryType
 
 logger = logging.getLogger(__name__)
 
-_T = TypeVar("_T")
-_P = ParamSpec("_P")
+_F = TypeVar("_F", bound=Callable[..., Any])
 
 
-def ensure_querytype(func: Callable[_P, _T]) -> Callable[Concatenate["CosTool", _P], _T]:
+def ensure_querytype(func: _F) -> _F:
     """A small decorator to ensure that query type is specified."""
 
-    def wrapper(self: "CosTool", *args: _P.args, **kwargs: _P.kwargs) -> _T:
+    def wrapper(self: "CosTool", *args: Any, **kwargs: Any) -> Any:
         if not self.query_type and not kwargs.get("query_type", None):
             raise TypeError(
                 "Either a default query type or a per-method query type must be used for `CosTool`!"
             )
-        return func(self, *args, **kwargs)  # type: ignore
+        return func(self, *args, **kwargs)
 
     wrapper.__doc__ = func.__doc__
-    return wrapper
+    return wrapper  # type: ignore
 
 
 class CosTool:

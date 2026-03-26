@@ -76,13 +76,14 @@ The following labels are automatically included with each rule:
 """  # noqa: W505
 
 import contextlib
+import copy
 import hashlib
 import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, Final, List, Optional, Union, cast
+from typing import Any, ClassVar, Dict, Final, List, Optional, Union, cast
 
 import yaml
 
@@ -139,10 +140,10 @@ _generic_alert_rules: Final = SimpleNamespace(
 """
 Generic alert rules are in groups to ensure a predictable group name.
 """
-generic_alert_groups: Final = SimpleNamespace(
-    # Group names must be unique per alert rule file. The final group names may be adjusted by the
-    # providers of alert rules to include some topology information, to addresses deduplication.
-    application_rules={
+
+
+class _GenericAlertGroups:
+    _application_rules: ClassVar[OfficialRuleFileFormat] = {
         "groups": [
             {
                 "name": "HostHealth",
@@ -152,10 +153,8 @@ generic_alert_groups: Final = SimpleNamespace(
                 ],
             },
         ]
-    },
-    # If we push to Prometheus via remote-write with an aggregator, there are no UP metrics associated.
-    # Only a time series for the metrics we have pushed is available so omit the HostDown rule.
-    aggregator_rules={
+    }
+    _aggregator_rules: ClassVar[OfficialRuleFileFormat] = {
         "groups": [
             {
                 "name": "AggregatorHostHealth",
@@ -165,8 +164,23 @@ generic_alert_groups: Final = SimpleNamespace(
                 ],
             },
         ]
-    },
-)
+    }
+
+    @property
+    def application_rules(self) -> OfficialRuleFileFormat:
+        # Group names must be unique per alert rule file. The final group names may be adjusted by
+        # the providers of alert rules to include some topology information, to address deduplication.
+        return copy.deepcopy(self._application_rules)
+
+    @property
+    def aggregator_rules(self) -> OfficialRuleFileFormat:
+        # If we push to Prometheus via remote-write with an aggregator, there are no UP metrics
+        # associated. Only a time series for the metrics we have pushed is available so omit the
+        # HostDown rule.
+        return copy.deepcopy(self._aggregator_rules)
+
+
+generic_alert_groups: Final = _GenericAlertGroups()
 
 
 class InvalidRulePathError(Exception):
@@ -372,7 +386,7 @@ class Rules:
 
     def _from_dict(
         self,
-        rule_dict: Dict[str, Any],
+        rule_dict: OfficialRuleFileItem | OfficialRuleFileFormat | dict[str, Any],
         *,
         group_name: Optional[str] = None,
         group_name_prefix: Optional[str] = None,
@@ -460,7 +474,7 @@ class Rules:
 
     def add(
         self,
-        rule_dict: Dict[str, Any],
+        rule_dict: OfficialRuleFileItem | OfficialRuleFileFormat | dict[str, Any],
         group_name: Optional[str] = None,
         group_name_prefix: Optional[str] = None,
     ) -> None:
