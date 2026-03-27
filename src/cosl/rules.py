@@ -83,7 +83,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, ClassVar, Dict, Final, List, Optional, Union, cast
+from typing import Any, ClassVar, Dict, Final, List, Mapping, Optional, Union, cast
 
 import yaml
 
@@ -209,7 +209,7 @@ class InjectResult:
 
     rules: OfficialRuleFileFormat
     identifier: Optional[str]
-    errmsg: str
+    errmsg: Optional[str]
 
 
 class Rules:
@@ -260,7 +260,7 @@ class Rules:
     # --- HELPER METHODS FOR READING FILES, SHOULD BE STATIC --- #
 
     @staticmethod
-    def _is_official_rule_format(rules_dict: Dict[str, Any]) -> bool:
+    def _is_official_rule_format(rules_dict: Mapping[str, Any]) -> bool:
         """Are rules in the upstream format as supported by Prometheus or Loki.
 
         Rules in dictionary format are in "official" form if they
@@ -276,7 +276,7 @@ class Rules:
         return "groups" in rules_dict
 
     @staticmethod
-    def _is_single_rule_format(rules_dict: Dict[str, Any]) -> bool:
+    def _is_single_rule_format(rules_dict: Mapping[str, Any]) -> bool:
         """Are alert rules in single rule format.
 
         This library supports reading of rules in a custom format that
@@ -386,7 +386,7 @@ class Rules:
 
     def _from_dict(
         self,
-        rule_dict: OfficialRuleFileItem | OfficialRuleFileFormat | dict[str, Any],
+        rule_dict: Mapping[str, Any],
         *,
         group_name: Optional[str] = None,
         group_name_prefix: Optional[str] = None,
@@ -406,7 +406,7 @@ class Rules:
             raise ValueError("Empty")
 
         if self._is_official_rule_format(rule_dict):
-            groups = rule_dict["groups"]
+            groups = rule_dict.get("groups", [])
         elif self._is_single_rule_format(rule_dict):
             if not group_name:
                 # Note: the caller of this function should ensure this never happens:
@@ -474,7 +474,7 @@ class Rules:
 
     def add(
         self,
-        rule_dict: OfficialRuleFileItem | OfficialRuleFileFormat | dict[str, Any],
+        rule_dict: Mapping[str, Any],
         group_name: Optional[str] = None,
         group_name_prefix: Optional[str] = None,
     ) -> None:
@@ -548,12 +548,11 @@ class Rules:
                 errmsg=f"{self.query_type} rules were found, but an identifier was not available from rule labels or metadata.",
             )
 
-        _, _errmsg = self.tool.validate_alert_rules(rules_data)  # type: ignore[reportCallIssue]
-        errmsg = cast(str, _errmsg)
-        if _errmsg:
+        valid_rules, errmsg = self.tool.validate_alert_rules(rules_data)  # type: ignore[reportCallIssue]
+        if not valid_rules:
             return InjectResult(rules=rules_data, identifier=identifier, errmsg=errmsg)
 
-        return InjectResult(rules=rules_data, identifier=identifier, errmsg=errmsg)
+        return InjectResult(rules=rules_data, identifier=identifier, errmsg=None)
 
 
 class AlertRules(Rules):
