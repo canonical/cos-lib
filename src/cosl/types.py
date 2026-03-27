@@ -20,6 +20,7 @@ class RecordingRuleFormat(TypedDict):
     The custom single rule format is a subsection of the official YAML, having a single recording
     rule, effectively "one record per file".
     """
+
     record: Required[str]
     expr: Required[str]
     labels: NotRequired[Dict[str, str]]
@@ -33,9 +34,11 @@ class AlertingRuleFormat(TypedDict):
     The custom single rule format is a subsection of the official YAML, having a single alert
     rule, effectively "one alert per file".
     """
+
     alert: Required[str]
     expr: Required[str]
     duration: NotRequired[str]
+    for_: NotRequired[str]
     keep_firing_for: NotRequired[str]
     labels: NotRequired[Dict[str, str]]
     annotations: NotRequired[Dict[str, str]]
