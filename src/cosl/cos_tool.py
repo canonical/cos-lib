@@ -117,7 +117,7 @@ class CosTool:
             if query_type == "logql":
                 transformed_rules = OfficialRuleFileFormat(groups=[])
                 for rule in rules.get("groups", []):
-                    transformed_rules["groups"].append(rule)
+                    transformed_rules.get("groups", []).append(rule)
 
                 rules = transformed_rules
 

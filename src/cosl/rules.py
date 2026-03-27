@@ -83,7 +83,17 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, ClassVar, Dict, Final, List, Mapping, Optional, Union, cast
+from typing import (
+    Any,
+    ClassVar,
+    Dict,
+    Final,
+    List,
+    Mapping,
+    Optional,
+    Union,
+    cast,
+)
 
 import yaml
 
@@ -409,15 +419,16 @@ class Rules:
         if self._is_official_rule_format(rule_dict):
             groups = [OfficialRuleFileItem(**g) for g in rule_dict.get("groups", [])]
         elif self._is_single_rule_format(rule_dict):
+            single_rule = cast(SingleRuleFormat, rule_dict)
             if not group_name:
                 # Note: the caller of this function should ensure this never happens:
                 # Either we use the standard format, or we'd pass a group_name.
                 # If/when we drop support for the single-rule-per-file format, this won't
                 # be needed anymore.
-                group_name = hashlib.shake_256(str(rule_dict).encode("utf-8")).hexdigest(10)
+                group_name = hashlib.shake_256(str(single_rule).encode("utf-8")).hexdigest(10)
 
             # convert to list of groups to match official rule format
-            groups = [OfficialRuleFileItem(name=group_name, rules=cast(List[SingleRuleFormat], [rule_dict]))]
+            groups = [OfficialRuleFileItem(name=group_name, rules=[single_rule])]
         else:
             # invalid/unsupported
             raise ValueError("Invalid rule format")
@@ -447,7 +458,7 @@ class Rules:
 
                     # insert juju topology filters into a prometheus rule
                     repl = r'job=~".+"' if self.query_type == "logql" else ""
-                    rule["expr"] = self.tool.inject_label_matchers(  # type: ignore
+                    rule["expr"] = self.tool.inject_label_matchers(
                         expression=re.sub(r"%%juju_topology%%,?", repl, rule["expr"]),
                         topology={
                             k: rule["labels"][k]
