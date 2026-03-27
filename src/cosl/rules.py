@@ -529,7 +529,7 @@ class Rules:
         return {"groups": self.groups} if self.groups else {}
 
     def inject_and_validate_rules(
-        self, rules: Union[OfficialRuleFileFormat, OfficialRuleFileItem], metadata: Dict[str, str]
+        self, rules: Union[OfficialRuleFileFormat, SingleRuleFormat], metadata: Dict[str, str]
     ) -> InjectResult:
         """Inject Juju topology labels and validate rules using CosTool.
 

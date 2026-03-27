@@ -12,13 +12,27 @@ RuleType = Literal["alert", "record"]
 RULE_TYPES: Final = frozenset({"alert", "record"})
 
 
-class _RecordingRuleFormat(TypedDict):
+class RecordingRuleFormat(TypedDict):
+    """A custom single rule format for recording rules.
+
+    The official format is a YAML file conforming to the Prometheus/Cortex documentation
+    (https://prometheus.io/docs/prometheus/latest/configuration/recording_rules/).
+    The custom single rule format is a subsection of the official YAML, having a single recording
+    rule, effectively "one record per file".
+    """
     record: Required[str]
     expr: Required[str]
     labels: NotRequired[Dict[str, str]]
 
 
-class _AlertingRuleFormat(TypedDict):
+class AlertingRuleFormat(TypedDict):
+    """A custom single rule format for alerting rules.
+
+    The official format is a YAML file conforming to the Prometheus/Cortex documentation
+    (https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/).
+    The custom single rule format is a subsection of the official YAML, having a single alert
+    rule, effectively "one alert per file".
+    """
     alert: Required[str]
     expr: Required[str]
     duration: NotRequired[str]
@@ -27,7 +41,7 @@ class _AlertingRuleFormat(TypedDict):
     annotations: NotRequired[Dict[str, str]]
 
 
-SingleRuleFormat = Union[_AlertingRuleFormat, _RecordingRuleFormat]
+SingleRuleFormat = Union[AlertingRuleFormat, RecordingRuleFormat]
 
 
 class OfficialRuleFileItem(TypedDict):
