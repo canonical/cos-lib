@@ -93,7 +93,7 @@ class CosTool:
 
     @ensure_querytype
     def validate_alert_rules(
-        self, rules: Dict[str, Any], query_type: Optional[QueryType] = None
+        self, rules: OfficialRuleFileFormat, query_type: Optional[QueryType] = None
     ) -> Tuple[bool, str]:
         """Will validate correctness of alert rules, returning a boolean and any errors."""
         query_type = query_type or self.query_type
@@ -115,8 +115,8 @@ class CosTool:
             #       - alert: OtherAlert
             #         expr: up
             if query_type == "logql":
-                transformed_rules = {"groups": []}  # type: Dict[str, Any]
-                for rule in rules["groups"]:
+                transformed_rules = OfficialRuleFileFormat(groups=[])
+                for rule in rules.get("groups", []):
                     transformed_rules["groups"].append(rule)
 
                 rules = transformed_rules

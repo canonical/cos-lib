@@ -94,6 +94,7 @@ from .types import (
     OfficialRuleFileItem,
     QueryType,
     RuleType,
+    SingleRuleFormat,
 )
 
 logger = logging.getLogger(__name__)
@@ -406,7 +407,7 @@ class Rules:
             raise ValueError("Empty")
 
         if self._is_official_rule_format(rule_dict):
-            groups = rule_dict.get("groups", [])
+            groups = [OfficialRuleFileItem(**g) for g in rule_dict.get("groups", [])]
         elif self._is_single_rule_format(rule_dict):
             if not group_name:
                 # Note: the caller of this function should ensure this never happens:
@@ -416,13 +417,12 @@ class Rules:
                 group_name = hashlib.shake_256(str(rule_dict).encode("utf-8")).hexdigest(10)
 
             # convert to list of groups to match official rule format
-            groups = [{"name": group_name, "rules": [rule_dict]}]
+            groups = [OfficialRuleFileItem(name=group_name, rules=cast(List[SingleRuleFormat], [rule_dict]))]
         else:
             # invalid/unsupported
             raise ValueError("Invalid rule format")
 
         # update rules with additional metadata
-        groups = cast(List[OfficialRuleFileItem], groups)
         for group in groups:
             if not self._is_already_modified(group["name"]):
                 # update group name with topology and sub-path
@@ -430,7 +430,7 @@ class Rules:
                 if not new_name.endswith("_rules"):
                     new_name += "_rules"
                 group["name"] = new_name
-            # after sanitizing we should not modify group["name"] anymore
+            # after sanitizing we should not modify group.name anymore
             group["name"] = self._sanitize_metric_name(group["name"])
 
             # add "juju_" topology labels
@@ -481,7 +481,7 @@ class Rules:
         """Add rules from dict to the existing ruleset.
 
         Args:
-            rule_dict: a single-rule or official-rule YAML dict
+            rule_dict: a single-rule or official-rule mapping
             group_name: a custom group name, used only if the new rule is of single-rule format
             group_name_prefix: a custom group name prefix, used only if the new rule is of single-rule format
         """
@@ -518,14 +518,14 @@ class Rules:
         return {"groups": self.groups} if self.groups else {}
 
     def inject_and_validate_rules(
-        self, rules: Dict[str, Any], metadata: Dict[str, str]
+        self, rules: Union[OfficialRuleFileFormat, OfficialRuleFileItem], metadata: Dict[str, str]
     ) -> InjectResult:
         """Inject Juju topology labels and validate rules using CosTool.
 
         The returned identifier is useful for grouping rules by topology on disk.
 
         Args:
-            rules: a dict of alert or recording rules
+            rules: a single-rule or official-rule mapping
             metadata: Juju topology metadata to inject into the rules, if
                 labels are not already present
         Returns:
@@ -538,7 +538,7 @@ class Rules:
             topology = JujuTopology.from_dict(metadata)
 
         # Inject juju topology labels and sanitize rules
-        rules_data: OfficialRuleFileFormat = {"groups": self._from_dict(rules, metadata=topology)}
+        rules_data = OfficialRuleFileFormat(groups=self._from_dict(rules, metadata=topology))
         topology_ctx = topology or self.topology
         identifier = topology_ctx.identifier if topology_ctx else None
         if not identifier:
@@ -548,7 +548,7 @@ class Rules:
                 errmsg=f"{self.query_type} rules were found, but an identifier was not available from rule labels or metadata.",
             )
 
-        valid_rules, errmsg = self.tool.validate_alert_rules(rules_data)  # type: ignore[reportCallIssue]
+        valid_rules, errmsg = self.tool.validate_alert_rules(rules_data)
         if not valid_rules:
             return InjectResult(rules=rules_data, identifier=identifier, errmsg=errmsg)
 
