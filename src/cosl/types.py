@@ -12,36 +12,42 @@ RuleType = Literal["alert", "record"]
 RULE_TYPES: Final = frozenset({"alert", "record"})
 
 
-class RecordingRuleFormat(TypedDict):
-    """A custom single rule format for recording rules.
+RecordingRuleFormat = TypedDict(
+    "RecordingRuleFormat",
+    {
+        "record": Required[str],
+        "expr": Required[str],
+        "labels": NotRequired[Dict[str, str]],
+    },
+)
+"""A custom single rule format for recording rules.
 
-    The official format is a YAML file conforming to the Prometheus/Cortex documentation
-    (https://prometheus.io/docs/prometheus/latest/configuration/recording_rules/).
-    The custom single rule format is a subsection of the official YAML, having a single recording
-    rule, effectively "one record per file".
-    """
-
-    record: Required[str]
-    expr: Required[str]
-    labels: NotRequired[Dict[str, str]]
+The official format is a YAML file conforming to the Prometheus/Cortex documentation
+(https://prometheus.io/docs/prometheus/latest/configuration/recording_rules/).
+The custom single rule format is a subsection of the official YAML, having a single recording
+rule, effectively "one record per file".
+"""
 
 
-class AlertingRuleFormat(TypedDict):
-    """A custom single rule format for alerting rules.
+AlertingRuleFormat = TypedDict(
+    "AlertingRuleFormat",
+    {
+        "alert": Required[str],
+        "expr": Required[str],
+        "duration": NotRequired[str],
+        "for": NotRequired[str],
+        "keep_firing_for": NotRequired[str],
+        "labels": NotRequired[Dict[str, str]],
+        "annotations": NotRequired[Dict[str, str]],
+    },
+)
+"""A custom single rule format for alerting rules.
 
-    The official format is a YAML file conforming to the Prometheus/Cortex documentation
-    (https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/).
-    The custom single rule format is a subsection of the official YAML, having a single alert
-    rule, effectively "one alert per file".
-    """
-
-    alert: Required[str]
-    expr: Required[str]
-    duration: NotRequired[str]
-    for_: NotRequired[str]
-    keep_firing_for: NotRequired[str]
-    labels: NotRequired[Dict[str, str]]
-    annotations: NotRequired[Dict[str, str]]
+The official format is a YAML file conforming to the Prometheus/Cortex documentation
+(https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/).
+The custom single rule format is a subsection of the official YAML, having a single alert
+rule, effectively "one alert per file".
+"""
 
 
 SingleRuleFormat = Union[AlertingRuleFormat, RecordingRuleFormat]
