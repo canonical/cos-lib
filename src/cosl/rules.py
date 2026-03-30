@@ -214,12 +214,10 @@ class InjectResult:
 
     Attributes:
         rules: The (possibly injected) rules dictionary.
-        identifier: The topology/group identifier discovered for these rules.
         errmsg: Optional error message produced during validation.
     """
 
     rules: OfficialRuleFileFormat
-    identifier: Optional[str]
     errmsg: Optional[str]
 
 
@@ -416,10 +414,11 @@ class Rules:
         if not rule_dict:
             raise ValueError("Empty")
 
-        if self._is_official_rule_format(rule_dict):
-            groups = [OfficialRuleFileItem(**g) for g in rule_dict.get("groups", [])]
-        elif self._is_single_rule_format(rule_dict):
-            single_rule = cast(SingleRuleFormat, rule_dict)
+        rule_copy = copy.deepcopy(rule_dict)
+        if self._is_official_rule_format(rule_copy):
+            groups = [OfficialRuleFileItem(**g) for g in rule_copy.get("groups", [])]
+        elif self._is_single_rule_format(rule_copy):
+            single_rule = cast(SingleRuleFormat, rule_copy)
             if not group_name:
                 # Note: the caller of this function should ensure this never happens:
                 # Either we use the standard format, or we'd pass a group_name.
@@ -533,37 +532,28 @@ class Rules:
     ) -> InjectResult:
         """Inject Juju topology labels and validate rules using CosTool.
 
-        The returned identifier is useful for grouping rules by topology on disk.
-
         Args:
             rules: a single-rule or official-rule mapping
             metadata: Juju topology metadata to inject into the rules, if
                 labels are not already present
         Returns:
-            An InjectResult with the possibly-injected rules, the
-            discovered identifier (or None), and an optional error message if
-            validation failed.
+            An InjectResult with the possibly-injected rules and an optional
+            error message if validation failed.
         """
+        if not rules:
+            return InjectResult(rules=OfficialRuleFileFormat(groups=[]), errmsg=None)
+
         topology = None
         with contextlib.suppress(KeyError):
             topology = JujuTopology.from_dict(metadata)
 
         # Inject juju topology labels and sanitize rules
         rules_data = OfficialRuleFileFormat(groups=self._from_dict(rules, metadata=topology))
-        topology_ctx = topology or self.topology
-        identifier = topology_ctx.identifier if topology_ctx else None
-        if not identifier:
-            return InjectResult(
-                rules=rules_data,
-                identifier=identifier,
-                errmsg=f"{self.query_type} rules were found, but an identifier was not available from rule labels or metadata.",
-            )
-
         valid_rules, errmsg = self.tool.validate_alert_rules(rules_data)
         if not valid_rules:
-            return InjectResult(rules=rules_data, identifier=identifier, errmsg=errmsg)
+            return InjectResult(rules=rules_data, errmsg=errmsg)
 
-        return InjectResult(rules=rules_data, identifier=identifier, errmsg=None)
+        return InjectResult(rules=rules_data, errmsg=None)
 
 
 class AlertRules(Rules):
