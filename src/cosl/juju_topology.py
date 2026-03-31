@@ -291,6 +291,27 @@ class JujuTopology:
         items = self.alert_expression_dict.items()
         return ", ".join(['{}="{}"'.format(key, value) for key, value in items if value])
 
+    def to_baggage(self) -> str:
+        """Format the topology information as a W3C baggage string.
+
+        Returns a comma-separated list of ``key=value`` pairs, where each key is
+        prefixed with ``juju_``.  The result is suitable for use as the value of
+        ``OTEL_RESOURCE_ATTRIBUTES``, ``JAEGER_TAGS``, or any other environment
+        variable that accepts the W3C baggage / OpenTelemetry resource-attributes
+        format.
+
+        >>> JujuTopology( \
+              model = "a-model", \
+              model_uuid = "00000000-0000-4000-8000-000000000000", \
+              application = "some-app", \
+              unit = "some-app/1", \
+              charm_name = "some-charm" \
+            ).to_baggage()
+        'juju_model=a-model,juju_model_uuid=00000000-0000-4000-8000-000000000000,juju_application=some-app,juju_unit=some-app/1,juju_charm=some-charm'
+        """
+        items = self.as_dict(remapped_keys={"charm_name": "charm"}).items()
+        return ",".join(["juju_{}={}".format(key, value) for key, value in items if value])
+
     @property
     def model(self) -> str:
         """Getter for the juju model value."""
