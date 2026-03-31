@@ -76,13 +76,24 @@ The following labels are automatically included with each rule:
 """  # noqa: W505
 
 import contextlib
+import copy
 import hashlib
 import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, Final, List, Optional, Union, cast
+from typing import (
+    Any,
+    ClassVar,
+    Dict,
+    Final,
+    List,
+    Mapping,
+    Optional,
+    Union,
+    cast,
+)
 
 import yaml
 
@@ -93,6 +104,7 @@ from .types import (
     OfficialRuleFileItem,
     QueryType,
     RuleType,
+    SingleRuleFormat,
 )
 
 logger = logging.getLogger(__name__)
@@ -139,10 +151,10 @@ _generic_alert_rules: Final = SimpleNamespace(
 """
 Generic alert rules are in groups to ensure a predictable group name.
 """
-generic_alert_groups: Final = SimpleNamespace(
-    # Group names must be unique per alert rule file. The final group names may be adjusted by the
-    # providers of alert rules to include some topology information, to addresses deduplication.
-    application_rules={
+
+
+class _GenericAlertGroups:
+    _application_rules: ClassVar[OfficialRuleFileFormat] = {
         "groups": [
             {
                 "name": "HostHealth",
@@ -152,10 +164,8 @@ generic_alert_groups: Final = SimpleNamespace(
                 ],
             },
         ]
-    },
-    # If we push to Prometheus via remote-write with an aggregator, there are no UP metrics associated.
-    # Only a time series for the metrics we have pushed is available so omit the HostDown rule.
-    aggregator_rules={
+    }
+    _aggregator_rules: ClassVar[OfficialRuleFileFormat] = {
         "groups": [
             {
                 "name": "AggregatorHostHealth",
@@ -165,8 +175,23 @@ generic_alert_groups: Final = SimpleNamespace(
                 ],
             },
         ]
-    },
-)
+    }
+
+    @property
+    def application_rules(self) -> OfficialRuleFileFormat:
+        # Group names must be unique per alert rule file. The final group names may be adjusted by
+        # the providers of alert rules to include some topology information, to address deduplication.
+        return copy.deepcopy(self._application_rules)
+
+    @property
+    def aggregator_rules(self) -> OfficialRuleFileFormat:
+        # If we push to Prometheus via remote-write with an aggregator, there are no UP metrics
+        # associated. Only a time series for the metrics we have pushed is available so omit the
+        # HostDown rule.
+        return copy.deepcopy(self._aggregator_rules)
+
+
+generic_alert_groups: Final = _GenericAlertGroups()
 
 
 class InvalidRulePathError(Exception):
@@ -189,13 +214,11 @@ class InjectResult:
 
     Attributes:
         rules: The (possibly injected) rules dictionary.
-        identifier: The topology/group identifier discovered for these rules.
         errmsg: Optional error message produced during validation.
     """
 
     rules: OfficialRuleFileFormat
-    identifier: Optional[str]
-    errmsg: str
+    errmsg: Optional[str]
 
 
 class Rules:
@@ -246,7 +269,7 @@ class Rules:
     # --- HELPER METHODS FOR READING FILES, SHOULD BE STATIC --- #
 
     @staticmethod
-    def _is_official_rule_format(rules_dict: Dict[str, Any]) -> bool:
+    def _is_official_rule_format(rules_dict: Mapping[str, Any]) -> bool:
         """Are rules in the upstream format as supported by Prometheus or Loki.
 
         Rules in dictionary format are in "official" form if they
@@ -262,7 +285,7 @@ class Rules:
         return "groups" in rules_dict
 
     @staticmethod
-    def _is_single_rule_format(rules_dict: Dict[str, Any]) -> bool:
+    def _is_single_rule_format(rules_dict: Mapping[str, Any]) -> bool:
         """Are alert rules in single rule format.
 
         This library supports reading of rules in a custom format that
@@ -372,7 +395,7 @@ class Rules:
 
     def _from_dict(
         self,
-        rule_dict: Dict[str, Any],
+        rule_dict: Mapping[str, Any],
         *,
         group_name: Optional[str] = None,
         group_name_prefix: Optional[str] = None,
@@ -391,24 +414,25 @@ class Rules:
         if not rule_dict:
             raise ValueError("Empty")
 
-        if self._is_official_rule_format(rule_dict):
-            groups = rule_dict["groups"]
-        elif self._is_single_rule_format(rule_dict):
+        rule_copy = copy.deepcopy(rule_dict)
+        if self._is_official_rule_format(rule_copy):
+            groups = [OfficialRuleFileItem(**g) for g in rule_copy.get("groups", [])]
+        elif self._is_single_rule_format(rule_copy):
+            single_rule = cast(SingleRuleFormat, rule_copy)
             if not group_name:
                 # Note: the caller of this function should ensure this never happens:
                 # Either we use the standard format, or we'd pass a group_name.
                 # If/when we drop support for the single-rule-per-file format, this won't
                 # be needed anymore.
-                group_name = hashlib.shake_256(str(rule_dict).encode("utf-8")).hexdigest(10)
+                group_name = hashlib.shake_256(str(single_rule).encode("utf-8")).hexdigest(10)
 
             # convert to list of groups to match official rule format
-            groups = [{"name": group_name, "rules": [rule_dict]}]
+            groups = [OfficialRuleFileItem(name=group_name, rules=[single_rule])]
         else:
             # invalid/unsupported
             raise ValueError("Invalid rule format")
 
         # update rules with additional metadata
-        groups = cast(List[OfficialRuleFileItem], groups)
         for group in groups:
             if not self._is_already_modified(group["name"]):
                 # update group name with topology and sub-path
@@ -416,7 +440,7 @@ class Rules:
                 if not new_name.endswith("_rules"):
                     new_name += "_rules"
                 group["name"] = new_name
-            # after sanitizing we should not modify group["name"] anymore
+            # after sanitizing we should not modify group.name anymore
             group["name"] = self._sanitize_metric_name(group["name"])
 
             # add "juju_" topology labels
@@ -433,7 +457,7 @@ class Rules:
 
                     # insert juju topology filters into a prometheus rule
                     repl = r'job=~".+"' if self.query_type == "logql" else ""
-                    rule["expr"] = self.tool.inject_label_matchers(  # type: ignore
+                    rule["expr"] = self.tool.inject_label_matchers(
                         expression=re.sub(r"%%juju_topology%%,?", repl, rule["expr"]),
                         topology={
                             k: rule["labels"][k]
@@ -460,14 +484,14 @@ class Rules:
 
     def add(
         self,
-        rule_dict: Dict[str, Any],
+        rule_dict: Mapping[str, Any],
         group_name: Optional[str] = None,
         group_name_prefix: Optional[str] = None,
     ) -> None:
         """Add rules from dict to the existing ruleset.
 
         Args:
-            rule_dict: a single-rule or official-rule YAML dict
+            rule_dict: a single-rule or official-rule mapping
             group_name: a custom group name, used only if the new rule is of single-rule format
             group_name_prefix: a custom group name prefix, used only if the new rule is of single-rule format
         """
@@ -504,42 +528,32 @@ class Rules:
         return {"groups": self.groups} if self.groups else {}
 
     def inject_and_validate_rules(
-        self, rules: Dict[str, Any], metadata: Dict[str, str]
+        self, rules: Union[OfficialRuleFileFormat, SingleRuleFormat], metadata: Dict[str, str]
     ) -> InjectResult:
         """Inject Juju topology labels and validate rules using CosTool.
 
-        The returned identifier is useful for grouping rules by topology on disk.
-
         Args:
-            rules: a dict of alert or recording rules
+            rules: a single-rule or official-rule mapping
             metadata: Juju topology metadata to inject into the rules, if
                 labels are not already present
         Returns:
-            An InjectResult with the possibly-injected rules, the
-            discovered identifier (or None), and an optional error message if
-            validation failed.
+            An InjectResult with the possibly-injected rules and an optional
+            error message if validation failed.
         """
+        if not rules:
+            return InjectResult(rules=OfficialRuleFileFormat(groups=[]), errmsg=None)
+
         topology = None
         with contextlib.suppress(KeyError):
             topology = JujuTopology.from_dict(metadata)
 
         # Inject juju topology labels and sanitize rules
-        rules_data: OfficialRuleFileFormat = {"groups": self._from_dict(rules, metadata=topology)}
-        topology_ctx = topology or self.topology
-        identifier = topology_ctx.identifier if topology_ctx else None
-        if not identifier:
-            return InjectResult(
-                rules=rules_data,
-                identifier=identifier,
-                errmsg=f"{self.query_type} rules were found, but an identifier was not available from rule labels or metadata.",
-            )
+        rules_data = OfficialRuleFileFormat(groups=self._from_dict(rules, metadata=topology))
+        valid_rules, errmsg = self.tool.validate_alert_rules(rules_data)
+        if not valid_rules:
+            return InjectResult(rules=rules_data, errmsg=errmsg)
 
-        _, _errmsg = self.tool.validate_alert_rules(rules_data)  # type: ignore[reportCallIssue]
-        errmsg = cast(str, _errmsg)
-        if _errmsg:
-            return InjectResult(rules=rules_data, identifier=identifier, errmsg=errmsg)
-
-        return InjectResult(rules=rules_data, identifier=identifier, errmsg=errmsg)
+        return InjectResult(rules=rules_data, errmsg=None)
 
 
 class AlertRules(Rules):
