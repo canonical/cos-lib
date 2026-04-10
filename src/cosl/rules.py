@@ -1,10 +1,10 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
-"""Alerting and Recording Rules.
+"""The rules module.
 
 ## Overview
 
-## Rules
+## Rules class (Legacy)
 
 This library also supports gathering alerting and recording rules from all
 related charms and enabling corresponding alerting/recording rules within the
@@ -73,24 +73,56 @@ The following labels are automatically included with each rule:
 - `juju_model`
 - `juju_model_uuid`
 - `juju_application`
-"""  # noqa: W505
+
+## Generic Rules (Latest)
+
+The ``GenericRules`` class is a format-agnostic aggregator that collects alerting,
+recording, or detection rules from files, directories and dicts.  All format-specific
+logic — parsing, topology injection, validation, and serialization — is
+delegated to a :class:`RuleBackend` implementation.
+
+Usage::
+
+    from cosl.juju_topology import JujuTopology
+    from cosl.prometheus import PrometheusRuleBackend
+    from cosl.loki import LokiRuleBackend
+    from cosl.sigma import SigmaRuleBackend
+
+    self._topology = JujuTopology.from_charm(charm)
+
+    # Prometheus
+    prom_rules = GenericRules(backend=PrometheusRuleBackend(), topology=self._topology)
+    prom_rules.add_path("src/prometheus_alert_rules")
+    print(prom_rules.as_dict())   # {"groups": [...]}
+
+    # Loki
+    loki_rules = GenericRules(backend=LokiRuleBackend(), topology=self._topology)
+    loki_rules.add_path("src/loki_alert_rules")
+    print(loki_rules.as_dict())   # {"groups": [...]}
+
+    # Sigma
+    sigma_rules = GenericRules(backend=SigmaRuleBackend(), topology=self._topology)
+    sigma_rules.add_path("src/sigma_rules")
+    print(sigma_rules.as_dict())   # {"rules": [...]}
+"""
 
 import contextlib
 import copy
 import hashlib
 import logging
 import re
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 from typing import (
     Any,
-    ClassVar,
     Dict,
-    Final,
+    Generic,
     List,
     Mapping,
     Optional,
+    Tuple,
+    TypeVar,
     Union,
     cast,
 )
@@ -109,89 +141,7 @@ from .types import (
 
 logger = logging.getLogger(__name__)
 
-HOST_METRICS_MISSING_RULE_NAME = "HostMetricsMissing"
-
-_generic_alert_rules: Final = SimpleNamespace(
-    # We use "5m" to avoid false positives on expected temporary "down", e.g. during intentional (re)start.
-    # Juju topology will be later injected by providers of alert rules.
-    host_down={
-        "alert": "HostDown",
-        "expr": "up < 1",
-        "for": "5m",
-        "labels": {"severity": "critical"},
-        "annotations": {
-            "summary": "Host '{{ $labels.instance }}' is down.",
-            "description": "Juju application '{{ $labels.juju_application }}' in model '{{ $labels.juju_model }}' is down. Prometheus has been unable to scrape it during at least the past five minutes.",
-        },
-    },
-    host_metrics_missing={
-        "alert": HOST_METRICS_MISSING_RULE_NAME,
-        "expr": "absent(up)",
-        "for": "5m",
-        "labels": {
-            "severity": "warning"
-        },  # The remote writer will set this to critical for machine charms when initializing PrometheusRemoteWriteConsumer.
-        "annotations": {
-            "summary": "Unit '{{ $labels.juju_unit }}' of application '{{ $labels.juju_application }}' is down or failing to remote write.",
-            "description": "`Up` missing for unit '{{ $labels.juju_unit }}' of application {{ $labels.juju_application }} in model {{ $labels.juju_model }}. Please ensure the unit or the collector scraping it is up and is able to successfully reach the metrics backend.",
-        },
-    },
-    aggregator_metrics_missing={
-        "alert": "AggregatorMetricsMissing",
-        "expr": "absent(up)",
-        "for": "5m",
-        "labels": {"severity": "critical"},
-        "annotations": {
-            "summary": "Metrics not received from application '{{ $labels.juju_application }}'. All units are down or failing to remote write.",
-            "description": "`Up` missing for ALL units of application {{ $labels.juju_application }} in model {{ $labels.juju_model }}. This can also mean the units or the collector scraping them are unable to reach the remote write endpoint of the metrics backend. Please ensure the correct firewall rules are applied.",
-        },
-    },
-)
-
-"""
-Generic alert rules are in groups to ensure a predictable group name.
-"""
-
-
-class _GenericAlertGroups:
-    _application_rules: ClassVar[OfficialRuleFileFormat] = {
-        "groups": [
-            {
-                "name": "HostHealth",
-                "rules": [
-                    _generic_alert_rules.host_down,
-                    _generic_alert_rules.host_metrics_missing,
-                ],
-            },
-        ]
-    }
-    _aggregator_rules: ClassVar[OfficialRuleFileFormat] = {
-        "groups": [
-            {
-                "name": "AggregatorHostHealth",
-                "rules": [
-                    _generic_alert_rules.host_metrics_missing,
-                    _generic_alert_rules.aggregator_metrics_missing,
-                ],
-            },
-        ]
-    }
-
-    @property
-    def application_rules(self) -> OfficialRuleFileFormat:
-        # Group names must be unique per alert rule file. The final group names may be adjusted by
-        # the providers of alert rules to include some topology information, to address deduplication.
-        return copy.deepcopy(self._application_rules)
-
-    @property
-    def aggregator_rules(self) -> OfficialRuleFileFormat:
-        # If we push to Prometheus via remote-write with an aggregator, there are no UP metrics
-        # associated. Only a time series for the metrics we have pushed is available so omit the
-        # HostDown rule.
-        return copy.deepcopy(self._aggregator_rules)
-
-
-generic_alert_groups: Final = _GenericAlertGroups()
+T = TypeVar("T")
 
 
 class InvalidRulePathError(Exception):
@@ -207,10 +157,237 @@ class InvalidRulePathError(Exception):
 
         super().__init__(self.message)
 
+@dataclass
+class Result(Generic[T]):
+    """Result of rule validation.
+
+    Attributes:
+        rules: The rules dictionary.
+        errmsg: Optional error message produced during validation.
+    """
+
+    rules: Dict[str, List[T]]
+    errmsg: Optional[str]
+
+class RuleBackend(ABC, Generic[T]):
+    """Abstract base for format-specific rule handling.
+
+    Type parameter *T* is the internal representation of a single rule item.
+
+    Subclasses must implement four methods:
+
+    * :meth:`file_suffixes` — which file extensions this backend reads.
+    * :meth:`from_dict` — parse a raw dict into normalised rule items,
+      injecting Juju topology where appropriate.
+    * :meth:`validate` — check the serialised output for correctness.
+    * :meth:`as_dict` — convert internal rule items into the backend's output format.
+    """
+
+    def __init__(self, topology: Optional[JujuTopology] = None) -> None:
+        self.topology = topology
+
+    @property
+    @abstractmethod
+    def file_suffixes(self) -> List[str]:
+        """File extensions this backend supports (e.g. ``['.rule', '.yml']``)."""
+        ...
+
+    @abstractmethod
+    def from_dict(
+        self,
+        rule_dict: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> List[T]:
+        """Parse a rule dict, normalise it, and inject topology.
+
+        Args:
+            rule_dict: Raw rule content as a YAML-loaded dict.
+            **kwargs: Backend-specific keyword arguments.
+
+        Returns:
+            A list of normalised rule items.
+
+        Raises:
+            ValueError: If *rule_dict* is empty or in an invalid format.
+        """
+        ...
+
+    def from_file(
+        self,
+        file_path: Path,
+        **kwargs: Any,
+    ) -> List[T]:
+        """Read a single rule file and parse it.
+
+        The default implementation loads YAML and delegates to :meth:`from_dict`.
+        Backends that need file-level context (e.g. Prometheus uses the file
+        stem as a group name) should override this method.
+
+        Args:
+            file_path: Absolute path to the rule file.
+            **kwargs: Backend-specific keyword arguments.
+
+        Returns:
+            A list of normalised rule items, or an empty list on error.
+        """
+
+        with file_path.open() as f:
+            try:
+                rule_file = yaml.safe_load(f)
+            except Exception as e:
+                logger.error("Failed to read rules from %s: %s", file_path.name, e)
+                return []
+
+        try:
+            return self.from_dict(rule_file)
+        except ValueError as e:
+            logger.error("Invalid rules file: %s (%s)", file_path.name, e)
+            return []
+
+    @abstractmethod
+    def validate(self, rules: Dict[str, List[T]]) -> Tuple[bool, str]:
+        """Validate rules in their serialised dict form.
+
+        Args:
+            rules: The output of :meth:`as_dict`.
+
+        Returns:
+            A ``(is_valid, error_message)`` tuple.
+        """
+        ...
+
+    @abstractmethod
+    def as_dict(self, items: List[T]) -> Dict[str, List[T]]:
+        """Serialise rule items into the backend's output format."""
+        ...
+
+
+class GenericRules(Generic[T]):
+    """Format-agnostic rule aggregator.
+
+    Collects rules from files and dicts, delegating format-specific parsing,
+    topology injection, and validation to a pluggable :class:`RuleBackend`.
+    """
+
+    def __init__(self, backend: RuleBackend[T], topology: Optional[JujuTopology] = None):
+        """Build a Rules instance.
+
+        Args:
+            backend: A :class:`RuleBackend` implementation that handles all
+                format-specific logic.
+            topology: An optional :class:`JujuTopology` instance used to
+                annotate all rules.  If provided, it is set on the backend,
+                overriding any topology already configured there.
+        """
+        self.backend = backend
+        if topology is not None:
+            self.backend.topology = topology
+        self._items: List[T] = []
+
+    def add(
+        self,
+        rule_dict: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> None:
+        """Add rules from a dict to the existing ruleset.
+
+        Args:
+            rule_dict: A rule mapping in whatever format the backend accepts.
+            **kwargs: Backend-specific keyword arguments forwarded to
+                :meth:`RuleBackend.from_dict`.  For example, Prometheus/Loki
+                backends accept ``group_name`` and ``group_name_prefix``.
+        """
+        self._items.extend(
+            self.backend.from_dict(
+                rule_dict,
+                **kwargs,
+            )
+        )
+
+    def add_path(self, dir_path: Union[str, Path], *, recursive: bool = False) -> None:
+        """Add rules from a file or directory.
+
+        All rules from files are aggregated into the internal ruleset.
+        Group names (where applicable) are augmented with Juju topology.
+
+        Args:
+            dir_path: A rules file or a directory of rule files.
+            recursive: Whether to read files recursively (no impact if
+                *dir_path* is a single file).
+        """
+        path = Path(dir_path) if isinstance(dir_path, str) else dir_path
+        if path.is_dir():
+            self._items.extend(self._from_dir(path, recursive))
+        elif path.is_file():
+            self._items.extend(
+                self.backend.from_file(path, root_path=path.parent)
+            )
+        else:
+            logger.debug("Rules path does not exist: %s", path)
+
+    def as_dict(self) -> Dict[str, List[T]]:
+        """Return the accumulated rules in the backend's output format.
+
+        Returns:
+            A dictionary whose structure depends on the backend
+            (e.g. ``{"groups": [...]}`` for Prometheus).
+        """
+        return self.backend.as_dict(self._items) if self._items else {}
+
+    def validate(
+        self,
+        rules: Mapping[str, List[T]],
+    ) -> Result[T]:
+        """Validate rules.
+
+        This is a **standalone** operation — it validates the given *rules*
+        without modifying the internal ruleset.
+
+        Args:
+            rules: A rule mapping in the backend's output format.
+
+        Returns:
+            A :class:`Result` with the rules and an optional
+            error message.
+        """
+        if not rules:
+            return Result(rules=self.backend.as_dict([]), errmsg=None)
+
+        output = dict(rules)
+        valid, errmsg = self.backend.validate(output)
+        if not valid:
+            return Result(rules=output, errmsg=errmsg)
+        return Result(rules=output, errmsg=None)
+
+    def _from_dir(self, dir_path: Path, recursive: bool) -> List[T]:
+        """Read all matching rule files in a directory."""
+        all_files = dir_path.glob("**/*" if recursive else "*")
+        matched = sorted(
+            f
+            for f in all_files
+            if f.is_file() and f.suffix in self.backend.file_suffixes
+        )
+        items: List[T] = []
+        for file_path in matched:
+            from_file = self.backend.from_file(
+                file_path, root_path=dir_path
+            )
+            if from_file:
+                logger.debug("Reading rule from %s", file_path)
+                items.extend(from_file)
+        return items
+    
+# ---------------------------------------------------------------------------
+# OLDER RULES CLASS
+# ---------------------------------------------------------------------------
 
 @dataclass
 class InjectResult:
     """Typed result for rule injection and validation.
+
+    .. deprecated::
+        Use :class:`Result` when switching over from Rules to GenericRules class. This class 
+        will be removed in a future release.
 
     Attributes:
         rules: The (possibly injected) rules dictionary.
@@ -223,6 +400,10 @@ class InjectResult:
 
 class Rules:
     """Utility class for amalgamating alerting/recording rule  files and injecting juju topology.
+
+    .. deprecated::
+        Use :class:`GenericRules` with Prometheus and Loki backends. This class will be 
+        removed in a future release.
 
     A `Rules` object supports aggregating rules from files and directories in both
     official and single rule file formats using the `add_path()` method. All the rules
@@ -560,7 +741,8 @@ class AlertRules(Rules):
     """Utility class for amalgamating alerting files and injecting juju topology.
 
     .. deprecated::
-        Use :class:`Rules` directly. This class will be removed in a future release.
+        Use :class:`GenericRules` with Prometheus and Loki backends. This class will be 
+        removed in a future release.
 
     The official format is a YAML file conforming to the Prometheus/Cortex documentation
     (https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/).
@@ -575,7 +757,8 @@ class RecordingRules(Rules):
     """Utility class for amalgamating recording files and injecting juju topology.
 
     .. deprecated::
-        Use :class:`Rules` directly. This class will be removed in a future release.
+        Use :class:`GenericRules` with Prometheus and Loki backends. This class will be 
+        removed in a future release.
 
     The official format is a YAML file conforming to the Prometheus/Cortex documentation
     (https://prometheus.io/docs/prometheus/latest/configuration/recording_rules/).
