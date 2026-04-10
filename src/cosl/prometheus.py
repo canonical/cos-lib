@@ -6,7 +6,7 @@ import copy
 from types import SimpleNamespace
 from typing import ClassVar, Final
 
-from .grouped_rules import _GroupedRuleBackend # type: ignore
+from .grouped_rules import _GroupedRuleBackend  # type: ignore
 from .types import OfficialRuleFileFormat, QueryType
 
 # ---------------------------------------------------------------------------

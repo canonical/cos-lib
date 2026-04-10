@@ -30,7 +30,7 @@ from .types import (
 logger = logging.getLogger(__name__)
 
 
-class _GroupedRuleBackend(RuleBackend[OfficialRuleFileItem]): # type: ignore
+class _GroupedRuleBackend(RuleBackend[OfficialRuleFileItem]):  # type: ignore
     """Shared base for Prometheus and Loki rule backends.
 
     Handles the groups-based rule format, topology injection into group names,
@@ -100,7 +100,7 @@ class _GroupedRuleBackend(RuleBackend[OfficialRuleFileItem]): # type: ignore
             for rule in group["rules"]:
                 if "labels" not in rule:
                     rule["labels"] = {}
-                
+
                 if self.topology:
                     # only insert labels that do not already exist
                     for label, val in self.topology.label_matcher_dict.items():
@@ -183,6 +183,4 @@ class _GroupedRuleBackend(RuleBackend[OfficialRuleFileItem]): # type: ignore
     @staticmethod
     def _sanitize_metric_name(metric_name: str) -> str:
         """Sanitize a metric name per the Prometheus data model."""
-        return "".join(
-            char if re.match(r"[a-zA-Z0-9_:]", char) else "_" for char in metric_name
-        )
+        return "".join(char if re.match(r"[a-zA-Z0-9_:]", char) else "_" for char in metric_name)

@@ -157,6 +157,7 @@ class InvalidRulePathError(Exception):
 
         super().__init__(self.message)
 
+
 @dataclass
 class Result(Generic[T]):
     """Result of rule validation.
@@ -168,6 +169,7 @@ class Result(Generic[T]):
 
     rules: Dict[str, List[T]]
     errmsg: Optional[str]
+
 
 class RuleBackend(ABC, Generic[T]):
     """Abstract base for format-specific rule handling.
@@ -230,7 +232,6 @@ class RuleBackend(ABC, Generic[T]):
         Returns:
             A list of normalised rule items, or an empty list on error.
         """
-
         with file_path.open() as f:
             try:
                 rule_file = yaml.safe_load(f)
@@ -319,11 +320,12 @@ class GenericRules(Generic[T]):
         if path.is_dir():
             self._items.extend(self._from_dir(path, recursive))
         elif path.is_file():
-            self._items.extend(
-                self.backend.from_file(path, root_path=path.parent)
-            )
+            self._items.extend(self.backend.from_file(path, root_path=path.parent))
         else:
-            logger.debug("Rules path does not exist: %s", path)
+            raise InvalidRulePathError(
+                rules_absolute_path=path,
+                message=f"Invalid rules path: {path}"
+            )
 
     def as_dict(self) -> Dict[str, List[T]]:
         """Return the accumulated rules in the backend's output format.
@@ -363,30 +365,28 @@ class GenericRules(Generic[T]):
         """Read all matching rule files in a directory."""
         all_files = dir_path.glob("**/*" if recursive else "*")
         matched = sorted(
-            f
-            for f in all_files
-            if f.is_file() and f.suffix in self.backend.file_suffixes
+            f for f in all_files if f.is_file() and f.suffix in self.backend.file_suffixes
         )
         items: List[T] = []
         for file_path in matched:
-            from_file = self.backend.from_file(
-                file_path, root_path=dir_path
-            )
+            from_file = self.backend.from_file(file_path, root_path=dir_path)
             if from_file:
                 logger.debug("Reading rule from %s", file_path)
                 items.extend(from_file)
         return items
-    
+
+
 # ---------------------------------------------------------------------------
 # OLDER RULES CLASS
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class InjectResult:
     """Typed result for rule injection and validation.
 
     .. deprecated::
-        Use :class:`Result` when switching over from Rules to GenericRules class. This class 
+        Use :class:`Result` when switching over from Rules to GenericRules class. This class
         will be removed in a future release.
 
     Attributes:
@@ -402,7 +402,7 @@ class Rules:
     """Utility class for amalgamating alerting/recording rule  files and injecting juju topology.
 
     .. deprecated::
-        Use :class:`GenericRules` with Prometheus and Loki backends. This class will be 
+        Use :class:`GenericRules` with Prometheus and Loki backends. This class will be
         removed in a future release.
 
     A `Rules` object supports aggregating rules from files and directories in both
@@ -741,7 +741,7 @@ class AlertRules(Rules):
     """Utility class for amalgamating alerting files and injecting juju topology.
 
     .. deprecated::
-        Use :class:`GenericRules` with Prometheus and Loki backends. This class will be 
+        Use :class:`GenericRules` with Prometheus and Loki backends. This class will be
         removed in a future release.
 
     The official format is a YAML file conforming to the Prometheus/Cortex documentation
@@ -757,7 +757,7 @@ class RecordingRules(Rules):
     """Utility class for amalgamating recording files and injecting juju topology.
 
     .. deprecated::
-        Use :class:`GenericRules` with Prometheus and Loki backends. This class will be 
+        Use :class:`GenericRules` with Prometheus and Loki backends. This class will be
         removed in a future release.
 
     The official format is a YAML file conforming to the Prometheus/Cortex documentation
