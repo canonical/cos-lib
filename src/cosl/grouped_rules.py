@@ -50,19 +50,20 @@ class _GroupedRuleBackend(RuleBackend[OfficialRuleFileItem]): # type: ignore
     def from_dict(
         self,
         rule_dict: Mapping[str, Any],
-        *,
-        group_name: Optional[str] = None,
-        group_name_prefix: Optional[str] = None,
         **kwargs: Any,
     ) -> List[OfficialRuleFileItem]:
         """Parse a Prometheus/Loki rule dict, normalise, and inject topology.
 
         Args:
             rule_dict: Raw rule content as a YAML-loaded dict.
-            group_name: An identifier for the group (typically the file stem).
-            group_name_prefix: A prefix for the group name (typically topology
+            **kwargs: Accepts ``group_name`` (str) — an identifier for the
+                group (typically the file stem), and ``group_name_prefix``
+                (str) — a prefix for the group name (typically topology
                 identifier + relative path).
         """
+        group_name: Optional[str] = kwargs.get("group_name")
+        group_name_prefix: Optional[str] = kwargs.get("group_name_prefix")
+
         if not rule_dict:
             raise ValueError("Empty")
 
@@ -123,17 +124,17 @@ class _GroupedRuleBackend(RuleBackend[OfficialRuleFileItem]): # type: ignore
     def from_file(
         self,
         file_path: Path,
-        root_path: Path,
         **kwargs: Any,
     ) -> List[OfficialRuleFileItem]:
         """Read a rule file, using file context for group naming.
 
         Args:
             file_path: Absolute path to the rule file.
-            topology: Juju topology to inject into the rules.
-            root_path: Root rules directory (used for computing relative
-                paths for group name prefixes).
+            **kwargs: Must include ``root_path`` (:class:`~pathlib.Path`) —
+                the root rules directory used for computing relative paths
+                for group name prefixes.
         """
+        root_path: Path = kwargs.get("root_path", file_path.parent)
         with file_path.open() as f:
             try:
                 rule_file = yaml.safe_load(f)

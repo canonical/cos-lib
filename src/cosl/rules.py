@@ -239,7 +239,7 @@ class RuleBackend(ABC, Generic[T]):
                 return []
 
         try:
-            return self.from_dict(rule_file)
+            return self.from_dict(rule_file, **kwargs)
         except ValueError as e:
             logger.error("Invalid rules file: %s (%s)", file_path.name, e)
             return []
