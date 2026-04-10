@@ -15,13 +15,13 @@ BAD_YAML_RULE_PATH = FIXTURE_DIR / "bad_alert_rules" / "bad_yaml.rule"
 
 
 def make_topology(**overrides):
-    defaults = dict(
-        model="mymodel",
-        model_uuid="12de4fae-06cc-4ceb-9089-567be09fec78",
-        application="myapp",
-        unit="myapp/0",
-        charm_name="mycharm",
-    )
+    defaults = {
+        "model": "mymodel",
+        "model_uuid": "12de4fae-06cc-4ceb-9089-567be09fec78",
+        "application": "myapp",
+        "unit": "myapp/0",
+        "charm_name": "mycharm",
+    }
     defaults.update(overrides)
     return JujuTopology(**defaults)
 

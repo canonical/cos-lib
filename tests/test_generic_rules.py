@@ -4,15 +4,12 @@
 """Tests for GenericRules (add, add_path, validate, backward compatibility)."""
 
 import unittest
-from pathlib import Path
 
 from deepdiff import DeepDiff
-
-from cosl.prometheus import PrometheusRuleBackend
-from cosl.rules import GenericRules, Result
-
 from helpers import OFFICIAL_RULE, PROMETHEUS_RULES_DIR, SINGLE_ALERT_RULE, make_topology
 
+from cosl.prometheus import PrometheusRuleBackend
+from cosl.rules import GenericRules
 
 # ===================================================================
 # GenericRules – add
@@ -67,6 +64,7 @@ class TestGenericRulesAdd(unittest.TestCase):
         GenericRules(backend=backend, topology=topo)
         self.assertEqual(backend.topology, topo)
 
+
 # ===================================================================
 # GenericRules – add_path
 # ===================================================================
@@ -93,7 +91,9 @@ class TestGenericRulesAddPath(unittest.TestCase):
         rules.add_path(self.rules_dir)
         result = rules.as_dict()
         # Should find top-level .rule files but not nested/
-        top_level_rules = [f for f in self.rules_dir.iterdir() if f.is_file() and f.suffix == ".rule"]
+        top_level_rules = [
+            f for f in self.rules_dir.iterdir() if f.is_file() and f.suffix == ".rule"
+        ]
         self.assertEqual(len(result["groups"]), len(top_level_rules))
 
     def test_add_path_directory_recursive(self):

@@ -323,8 +323,7 @@ class GenericRules(Generic[T]):
             self._items.extend(self.backend.from_file(path, root_path=path.parent))
         else:
             raise InvalidRulePathError(
-                rules_absolute_path=path,
-                message=f"Invalid rules path: {path}"
+                rules_absolute_path=path, message=f"Invalid rules path: {path}"
             )
 
     def as_dict(self) -> Dict[str, List[T]]:

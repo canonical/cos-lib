@@ -10,8 +10,6 @@ since _GroupedRuleBackend is private and requires a concrete query_type.
 import re
 import unittest
 
-from cosl.prometheus import PrometheusRuleBackend
-
 from helpers import (
     BAD_YAML_RULE_PATH,
     OFFICIAL_RULE,
@@ -21,6 +19,7 @@ from helpers import (
     make_topology,
 )
 
+from cosl.prometheus import PrometheusRuleBackend
 
 # ===================================================================
 # GroupedRules – from_dict
@@ -111,9 +110,7 @@ class TestGroupedRulesFromDict(unittest.TestCase):
     def test_group_name_sanitized(self):
         """Special characters in group names are sanitized to underscores."""
         backend = PrometheusRuleBackend()
-        groups = backend.from_dict(
-            SINGLE_ALERT_RULE, group_name="Foo$Bar/Baz"
-        )
+        groups = backend.from_dict(SINGLE_ALERT_RULE, group_name="Foo$Bar/Baz")
         name = groups[0]["name"]
         # Only [a-zA-Z0-9_:] should remain
         self.assertIsNotNone(re.match(r"^[a-zA-Z0-9_:]+$", name))
