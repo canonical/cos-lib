@@ -19,7 +19,7 @@ from helpers import (
     make_topology,
 )
 
-from cosl.prometheus import PrometheusRuleBackend
+from cosl.backends.prometheus import PrometheusRuleBackend
 
 # ===================================================================
 # GroupedRules – from_dict

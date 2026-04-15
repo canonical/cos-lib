@@ -84,24 +84,24 @@ delegated to a :class:`RuleBackend` implementation.
 Usage::
 
     from cosl.juju_topology import JujuTopology
-    from cosl.prometheus import PrometheusRuleBackend
-    from cosl.loki import LokiRuleBackend
+    from cosl.backends.prometheus import PrometheusRuleBackend
+    from cosl.backends.loki import LokiRuleBackend
     from cosl.sigma import SigmaRuleBackend
 
     self._topology = JujuTopology.from_charm(charm)
 
     # Prometheus
-    prom_rules = GenericRules(backend=PrometheusRuleBackend(), topology=self._topology)
+    prom_rules = GenericRules(backend=PrometheusRuleBackend(topology=self._topology))
     prom_rules.add_path("src/prometheus_alert_rules")
     print(prom_rules.as_dict())   # {"groups": [...]}
 
     # Loki
-    loki_rules = GenericRules(backend=LokiRuleBackend(), topology=self._topology)
+    loki_rules = GenericRules(backend=LokiRuleBackend(topology=self._topology))
     loki_rules.add_path("src/loki_alert_rules")
     print(loki_rules.as_dict())   # {"groups": [...]}
 
     # Sigma
-    sigma_rules = GenericRules(backend=SigmaRuleBackend(), topology=self._topology)
+    sigma_rules = GenericRules(backend=SigmaRuleBackend(topology=self._topology))
     sigma_rules.add_path("src/sigma_rules")
     print(sigma_rules.as_dict())   # {"rules": [...]}
 """
@@ -272,19 +272,15 @@ class GenericRules(Generic[T]):
     topology injection, and validation to a pluggable :class:`RuleBackend`.
     """
 
-    def __init__(self, backend: RuleBackend[T], topology: Optional[JujuTopology] = None):
+    def __init__(self, backend: RuleBackend[T]):
         """Build a Rules instance.
 
         Args:
             backend: A :class:`RuleBackend` implementation that handles all
-                format-specific logic.
-            topology: An optional :class:`JujuTopology` instance used to
-                annotate all rules. If provided, it is set on the backend,
-                overriding any topology already configured there.
+                format-specific logic.  Pass topology directly to the backend
+                constructor (e.g. ``PrometheusRuleBackend(topology=topo)``).
         """
         self.backend = backend
-        if topology is not None:
-            self.backend.topology = topology
         self._items: List[T] = []
 
     def add(

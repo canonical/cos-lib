@@ -3,7 +3,7 @@
 """Loki rule backend."""
 
 from .grouped_rules import _GroupedRuleBackend  # type: ignore
-from .types import QueryType
+from ..types import QueryType
 
 
 class LokiRuleBackend(_GroupedRuleBackend):

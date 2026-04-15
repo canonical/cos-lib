@@ -3,7 +3,7 @@
 """Prometheus rule backend and pre-built generic alert groups."""
 
 from .grouped_rules import _GroupedRuleBackend  # type: ignore
-from .types import QueryType
+from ..types import QueryType
 
 
 class PrometheusRuleBackend(_GroupedRuleBackend):

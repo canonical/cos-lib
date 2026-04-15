@@ -8,7 +8,7 @@ import unittest
 from deepdiff import DeepDiff
 from helpers import OFFICIAL_RULE, PROMETHEUS_RULES_DIR, SINGLE_ALERT_RULE, make_topology
 
-from cosl.prometheus import PrometheusRuleBackend
+from cosl.backends.prometheus import PrometheusRuleBackend
 from cosl.rules import GenericRules
 
 # ===================================================================
@@ -45,7 +45,7 @@ class TestGenericRulesAdd(unittest.TestCase):
     def test_add_with_topology(self):
         """Rules added with topology get juju labels injected."""
         topo = make_topology()
-        rules = GenericRules(backend=PrometheusRuleBackend(), topology=topo)
+        rules = GenericRules(backend=PrometheusRuleBackend(topology=topo))
         rules.add(SINGLE_ALERT_RULE, group_name="test")
         result = rules.as_dict()
         rule = result["groups"][0]["rules"][0]
@@ -56,13 +56,12 @@ class TestGenericRulesAdd(unittest.TestCase):
         rules = GenericRules(backend=PrometheusRuleBackend())
         self.assertEqual(rules.as_dict(), {})
 
-    def test_topology_set_on_backend_via_generic_rules(self):
-        """Passing topology to GenericRules sets it on the backend."""
+    def test_topology_set_on_backend(self):
+        """Topology passed to the backend is available on GenericRules.backend."""
         topo = make_topology()
-        backend = PrometheusRuleBackend()
-        self.assertIsNone(backend.topology)
-        GenericRules(backend=backend, topology=topo)
-        self.assertEqual(backend.topology, topo)
+        backend = PrometheusRuleBackend(topology=topo)
+        rules = GenericRules(backend=backend)
+        self.assertEqual(rules.backend.topology, topo)
 
 
 # ===================================================================
@@ -79,7 +78,7 @@ class TestGenericRulesAddPath(unittest.TestCase):
 
     def test_add_path_single_file(self):
         """Loading a single file creates one group."""
-        rules = GenericRules(backend=PrometheusRuleBackend(), topology=self.topology)
+        rules = GenericRules(backend=PrometheusRuleBackend(topology=self.topology))
         rules.add_path(self.rules_dir / "cpu_overuse.rule")
         result = rules.as_dict()
         self.assertIn("groups", result)
@@ -87,7 +86,7 @@ class TestGenericRulesAddPath(unittest.TestCase):
 
     def test_add_path_directory_non_recursive(self):
         """Non-recursive directory scan finds only top-level files."""
-        rules = GenericRules(backend=PrometheusRuleBackend(), topology=self.topology)
+        rules = GenericRules(backend=PrometheusRuleBackend(topology=self.topology))
         rules.add_path(self.rules_dir)
         result = rules.as_dict()
         # Should find top-level .rule files but not nested/
@@ -98,7 +97,7 @@ class TestGenericRulesAddPath(unittest.TestCase):
 
     def test_add_path_directory_recursive(self):
         """Recursive directory scan finds nested files."""
-        rules = GenericRules(backend=PrometheusRuleBackend(), topology=self.topology)
+        rules = GenericRules(backend=PrometheusRuleBackend(topology=self.topology))
         rules.add_path(self.rules_dir, recursive=True)
         result = rules.as_dict()
         all_rules = list(self.rules_dir.rglob("*.rule"))
@@ -114,7 +113,7 @@ class TestGenericRulesAddPath(unittest.TestCase):
 
     def test_add_path_topology_in_group_name(self):
         """Group names include topology identifier."""
-        rules = GenericRules(backend=PrometheusRuleBackend(), topology=self.topology)
+        rules = GenericRules(backend=PrometheusRuleBackend(topology=self.topology))
         rules.add_path(self.rules_dir / "cpu_overuse.rule")
         result = rules.as_dict()
         group_name = result["groups"][0]["name"]
@@ -122,7 +121,7 @@ class TestGenericRulesAddPath(unittest.TestCase):
 
     def test_add_path_nested_includes_relative_path(self):
         """Nested files include relative directory path in group name prefix."""
-        rules = GenericRules(backend=PrometheusRuleBackend(), topology=self.topology)
+        rules = GenericRules(backend=PrometheusRuleBackend(topology=self.topology))
         rules.add_path(self.rules_dir, recursive=True)
         result = rules.as_dict()
         nested_groups = [g for g in result["groups"] if "nested" in g["name"]]

@@ -16,10 +16,10 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple, cast
 
 import yaml
 
-from .cos_tool import CosTool
-from .juju_topology import JujuTopology
-from .rules import RuleBackend
-from .types import (
+from ..cos_tool import CosTool
+from ..juju_topology import JujuTopology
+from ..rules import RuleBackend
+from ..types import (
     RULE_TYPES,
     OfficialRuleFileFormat,
     OfficialRuleFileItem,
