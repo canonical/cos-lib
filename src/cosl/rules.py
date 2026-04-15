@@ -279,7 +279,7 @@ class GenericRules(Generic[T]):
             backend: A :class:`RuleBackend` implementation that handles all
                 format-specific logic.
             topology: An optional :class:`JujuTopology` instance used to
-                annotate all rules.  If provided, it is set on the backend,
+                annotate all rules. If provided, it is set on the backend,
                 overriding any topology already configured there.
         """
         self.backend = backend
