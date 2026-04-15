@@ -2,8 +2,8 @@
 # See LICENSE file for licensing details.
 """Prometheus rule backend and pre-built generic alert groups."""
 
-from .grouped_rules import _GroupedRuleBackend  # type: ignore
 from ..types import QueryType
+from .grouped_rules import _GroupedRuleBackend  # type: ignore
 
 
 class PrometheusRuleBackend(_GroupedRuleBackend):

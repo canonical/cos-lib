@@ -2,8 +2,8 @@
 # See LICENSE file for licensing details.
 """Loki rule backend."""
 
-from .grouped_rules import _GroupedRuleBackend  # type: ignore
 from ..types import QueryType
+from .grouped_rules import _GroupedRuleBackend  # type: ignore
 
 
 class LokiRuleBackend(_GroupedRuleBackend):
