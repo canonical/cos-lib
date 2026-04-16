@@ -131,12 +131,11 @@ import yaml
 
 from . import CosTool, JujuTopology
 
-# rules.py — backward-compat re-exports (deprecated, remove in next major)
+# backward-compat re-exports (deprecated, remove in next major)
 from .common_rules import (
-    generic_alert_groups, # pyright: ignore[reportUnusedImport]
-    HOST_METRICS_MISSING_RULE_NAME, # pyright: ignore[reportUnusedImport]
+    HOST_METRICS_MISSING_RULE_NAME,  # noqa: F401  # pyright: ignore[reportUnusedImport]
+    generic_alert_groups,  # noqa: F401  # pyright: ignore[reportUnusedImport]
 )
-
 from .types import (
     RULE_TYPES,
     OfficialRuleFileFormat,
