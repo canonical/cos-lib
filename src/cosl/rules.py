@@ -144,13 +144,11 @@ from .types import (
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Generic alert rules (pre-built)
-# ---------------------------------------------------------------------------
-
 HOST_METRICS_MISSING_RULE_NAME = "HostMetricsMissing"
 
 _generic_alert_rules: Final = SimpleNamespace(
+    # We use "5m" to avoid false positives on expected temporary "down", e.g. during intentional (re)start.
+    # Juju topology will be later injected by providers of alert rules.
     host_down={
         "alert": "HostDown",
         "expr": "up < 1",
@@ -158,29 +156,19 @@ _generic_alert_rules: Final = SimpleNamespace(
         "labels": {"severity": "critical"},
         "annotations": {
             "summary": "Host '{{ $labels.instance }}' is down.",
-            "description": (
-                "Juju application '{{ $labels.juju_application }}' in model "
-                "'{{ $labels.juju_model }}' is down. Prometheus has been unable "
-                "to scrape it during at least the past five minutes."
-            ),
+            "description": "Juju application '{{ $labels.juju_application }}' in model '{{ $labels.juju_model }}' is down. Prometheus has been unable to scrape it during at least the past five minutes.",
         },
     },
     host_metrics_missing={
         "alert": HOST_METRICS_MISSING_RULE_NAME,
         "expr": "absent(up)",
         "for": "5m",
-        "labels": {"severity": "warning"},
+        "labels": {
+            "severity": "warning"
+        },  # The remote writer will set this to critical for machine charms when initializing PrometheusRemoteWriteConsumer.
         "annotations": {
-            "summary": (
-                "Unit '{{ $labels.juju_unit }}' of application "
-                "'{{ $labels.juju_application }}' is down or failing to remote write."
-            ),
-            "description": (
-                "`Up` missing for unit '{{ $labels.juju_unit }}' of application "
-                "{{ $labels.juju_application }} in model {{ $labels.juju_model }}. "
-                "Please ensure the unit or the collector scraping it is up and is "
-                "able to successfully reach the metrics backend."
-            ),
+            "summary": "Unit '{{ $labels.juju_unit }}' of application '{{ $labels.juju_application }}' is down or failing to remote write.",
+            "description": "`Up` missing for unit '{{ $labels.juju_unit }}' of application {{ $labels.juju_application }} in model {{ $labels.juju_model }}. Please ensure the unit or the collector scraping it is up and is able to successfully reach the metrics backend.",
         },
     },
     aggregator_metrics_missing={
@@ -189,26 +177,18 @@ _generic_alert_rules: Final = SimpleNamespace(
         "for": "5m",
         "labels": {"severity": "critical"},
         "annotations": {
-            "summary": (
-                "Metrics not received from application "
-                "'{{ $labels.juju_application }}'. All units are down or failing "
-                "to remote write."
-            ),
-            "description": (
-                "`Up` missing for ALL units of application "
-                "{{ $labels.juju_application }} in model {{ $labels.juju_model }}. "
-                "This can also mean the units or the collector scraping them are "
-                "unable to reach the remote write endpoint of the metrics backend. "
-                "Please ensure the correct firewall rules are applied."
-            ),
+            "summary": "Metrics not received from application '{{ $labels.juju_application }}'. All units are down or failing to remote write.",
+            "description": "`Up` missing for ALL units of application {{ $labels.juju_application }} in model {{ $labels.juju_model }}. This can also mean the units or the collector scraping them are unable to reach the remote write endpoint of the metrics backend. Please ensure the correct firewall rules are applied.",
         },
     },
 )
 
+"""
+Generic alert rules are in groups to ensure a predictable group name.
+"""
+
 
 class _GenericAlertGroups:
-    """Pre-built alert groups for common health-check rules."""
-
     _application_rules: ClassVar[OfficialRuleFileFormat] = {
         "groups": [
             {
@@ -234,12 +214,15 @@ class _GenericAlertGroups:
 
     @property
     def application_rules(self) -> OfficialRuleFileFormat:
-        """Rules for application-level monitoring (scrape-based)."""
+        # Group names must be unique per alert rule file. The final group names may be adjusted by
+        # the providers of alert rules to include some topology information, to address deduplication.
         return copy.deepcopy(self._application_rules)
 
     @property
     def aggregator_rules(self) -> OfficialRuleFileFormat:
-        """Rules for remote-write aggregator monitoring (no ``up`` metric from scrape)."""
+        # If we push to Prometheus via remote-write with an aggregator, there are no UP metrics
+        # associated. Only a time series for the metrics we have pushed is available so omit the
+        # HostDown rule.
         return copy.deepcopy(self._aggregator_rules)
 
 
