@@ -1,7 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Shared test helpers and fixtures for GenericRules tests."""
+"""Shared test helpers and fixtures for AbstractRules tests."""
 
 from pathlib import Path
 

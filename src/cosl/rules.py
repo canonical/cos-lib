@@ -74,9 +74,9 @@ The following labels are automatically included with each rule:
 - `juju_model_uuid`
 - `juju_application`
 
-## Generic Rules (Latest)
+## AbstractRules (Latest)
 
-The ``GenericRules`` class is a format-agnostic aggregator that collects alerting,
+The ``AbstractRules`` class is a format-agnostic aggregator that collects alerting,
 recording, or detection rules from files, directories and dicts.  All format-specific
 logic — parsing, topology injection, validation, and serialization — is
 delegated to a :class:`RuleBackend` implementation.
@@ -91,17 +91,17 @@ Usage::
     self._topology = JujuTopology.from_charm(charm)
 
     # Prometheus
-    prom_rules = GenericRules(backend=PrometheusRuleBackend(topology=self._topology))
+    prom_rules = AbstractRules(backend=PrometheusRuleBackend(topology=self._topology))
     prom_rules.add_path("src/prometheus_alert_rules")
     print(prom_rules.as_dict())   # {"groups": [...]}
 
     # Loki
-    loki_rules = GenericRules(backend=LokiRuleBackend(topology=self._topology))
+    loki_rules = AbstractRules(backend=LokiRuleBackend(topology=self._topology))
     loki_rules.add_path("src/loki_alert_rules")
     print(loki_rules.as_dict())   # {"groups": [...]}
 
     # Sigma
-    sigma_rules = GenericRules(backend=SigmaRuleBackend(topology=self._topology))
+    sigma_rules = AbstractRules(backend=SigmaRuleBackend(topology=self._topology))
     sigma_rules.add_path("src/sigma_rules")
     print(sigma_rules.as_dict())   # {"rules": [...]}
 """
@@ -350,7 +350,7 @@ class RuleBackend(ABC, Generic[T]):
         ...
 
 
-class GenericRules(Generic[T]):
+class AbstractRules(Generic[T]):
     """Format-agnostic rule aggregator.
 
     Collects rules from files and dicts, delegating format-specific parsing,
@@ -468,7 +468,7 @@ class InjectResult:
     """Typed result for rule injection and validation.
 
     .. deprecated::
-        Use :class:`Result` when switching over from Rules to GenericRules class. This class
+        Use :class:`Result` when switching over from Rules to AbstractRules class. This class
         will be removed in a future release.
 
     Attributes:
@@ -484,7 +484,7 @@ class Rules:
     """Utility class for amalgamating alerting/recording rule  files and injecting juju topology.
 
     .. deprecated::
-        Use :class:`GenericRules` with Prometheus and Loki backends. This class will be
+        Use :class:`AbstractRules` with Prometheus and Loki backends. This class will be
         removed in a future release.
 
     A `Rules` object supports aggregating rules from files and directories in both
@@ -823,7 +823,7 @@ class AlertRules(Rules):
     """Utility class for amalgamating alerting files and injecting juju topology.
 
     .. deprecated::
-        Use :class:`GenericRules` with Prometheus and Loki backends. This class will be
+        Use :class:`AbstractRules` with Prometheus and Loki backends. This class will be
         removed in a future release.
 
     The official format is a YAML file conforming to the Prometheus/Cortex documentation
@@ -839,7 +839,7 @@ class RecordingRules(Rules):
     """Utility class for amalgamating recording files and injecting juju topology.
 
     .. deprecated::
-        Use :class:`GenericRules` with Prometheus and Loki backends. This class will be
+        Use :class:`AbstractRules` with Prometheus and Loki backends. This class will be
         removed in a future release.
 
     The official format is a YAML file conforming to the Prometheus/Cortex documentation
