@@ -54,14 +54,14 @@ SingleRuleFormat = Union[AlertingRuleFormat, RecordingRuleFormat]
 
 
 class OfficialRuleFileItem(TypedDict):
-    """Typing for a single node of the official rule file format."""
+    """A single group in the official Prometheus/Loki rule file format."""
 
     name: str
     rules: List[SingleRuleFormat]
 
 
 class OfficialRuleFileFormat(TypedDict, total=False):
-    """Typing for the official rule file format.
+    """The official Prometheus/Loki rule file format.
 
     References:
     - https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/
