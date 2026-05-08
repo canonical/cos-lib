@@ -104,6 +104,8 @@ from .types import (
     OfficialRuleFileItem,
     QueryType,
     RuleType,
+    SigmaRuleFileFormat,
+    SigmaRuleFormat,
     SingleRuleFormat,
 )
 
@@ -612,3 +614,81 @@ class RecordingRules(Rules):
     """
 
     pass
+
+
+class SigmaRules:
+    """Utility class for amalgamating Sigma rule files and injecting juju topology.
+
+    Unlike Prometheus/Loki rules, Sigma rules are independent (no grouping concept).
+    Each rule is identified by its ``id`` (UUID) rather than a group+alert name.
+    Detection logic uses a ``detection`` block instead of an ``expr`` field.
+
+    Topology is injected into rule labels only — there is no expression rewriting.
+    """
+
+    def __init__(self, topology: Optional[JujuTopology] = None):
+        """Build a SigmaRules object.
+
+        Args:
+            topology: an optional ``JujuTopology`` instance used to annotate all rules.
+        """
+        self.topology = topology
+        self.rules: List[SigmaRuleFormat] = []
+
+    def _inject_topology(self, rule: SigmaRuleFormat) -> SigmaRuleFormat:
+        """Inject juju topology labels into a sigma rule (in-place)."""
+        if self.topology:
+            labels = rule.setdefault("labels", {})
+            for label, val in self.topology.label_matcher_dict.items():
+                if label not in labels:
+                    labels[label] = val
+        return rule
+
+    def add(self, rule_dict: Mapping[str, Any]) -> None:
+        """Add a sigma rule from a dict.
+
+        Accepts either a single sigma rule dict or a collection in
+        ``SigmaRuleFileFormat`` (with a ``"rules"`` key).
+
+        Args:
+            rule_dict: a sigma rule dict or ``{"rules": [...]}`` collection.
+        """
+        if not rule_dict:
+            return
+        rule_copy = copy.deepcopy(dict(rule_dict))
+        if "rules" in rule_copy:
+            for r in rule_copy["rules"]:
+                self.rules.append(self._inject_topology(r))
+        else:
+            self.rules.append(self._inject_topology(rule_copy))
+
+    def add_path(self, dir_path: Union[str, Path], *, recursive: bool = False) -> None:
+        """Add sigma rules from a directory or file path.
+
+        Args:
+            dir_path: either a rules file or a dir of rules files.
+            recursive: whether to read files recursively or not.
+        """
+        path = Path(dir_path) if isinstance(dir_path, str) else dir_path
+        if path.is_dir():
+            for file_path in _multi_suffix_glob(path, _RULE_FILE_SUFFIXES, recursive):
+                self._add_from_file(file_path)
+        elif path.is_file():
+            self._add_from_file(path)
+        else:
+            logger.debug("Rules path does not exist: %s", path)
+
+    def _add_from_file(self, file_path: Path) -> None:
+        """Read a single sigma rule file and add it."""
+        rule_file = _read_rule_file(file_path)
+        if rule_file is not None:
+            self.add(rule_file)
+
+    def as_dict(self) -> SigmaRuleFileFormat:
+        """Return sigma rules in dict representation.
+
+        Returns:
+            A dictionary with a ``"rules"`` key containing the list of sigma rules,
+            or an empty dict if no rules have been added.
+        """
+        return SigmaRuleFileFormat(rules=self.rules) if self.rules else SigmaRuleFileFormat()
