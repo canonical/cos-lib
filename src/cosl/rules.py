@@ -228,9 +228,7 @@ class InjectResult:
 _RULE_FILE_SUFFIXES = [".rule", ".rules", ".yml", ".yaml"]
 
 
-def _multi_suffix_glob(
-    dir_path: Path, suffixes: List[str], recursive: bool = True
-) -> List[Path]:
+def _multi_suffix_glob(dir_path: Path, suffixes: List[str], recursive: bool = True) -> List[Path]:
     """Get all files in a directory that have a matching suffix.
 
     The result is sorted to avoid unnecessary relation-get calls.
@@ -377,9 +375,7 @@ class Rules:
         groups: List[OfficialRuleFileItem] = []
 
         # Gather all records into a list of groups
-        for file_path in _multi_suffix_glob(
-            dir_path, _RULE_FILE_SUFFIXES, recursive
-        ):
+        for file_path in _multi_suffix_glob(dir_path, _RULE_FILE_SUFFIXES, recursive):
             groups_from_file = self._from_file(dir_path, file_path)
             if groups_from_file:
                 logger.debug("Reading rule from %s", file_path)
