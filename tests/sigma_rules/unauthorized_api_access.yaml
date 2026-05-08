@@ -1,0 +1,19 @@
+title: Unauthorized API Access Attempt
+id: b2c3d4e5-f6a7-8901-bcde-f23456789012
+status: test
+description: Detects HTTP 401/403 responses from API endpoints
+logsource:
+  category: webserver
+  product: generic
+  service: api_gateway
+detection:
+  selection:
+    http_status:
+      - 401
+      - 403
+  filter:
+    request_path|startswith: /api/
+  condition: selection and filter
+level: medium
+labels:
+  team: security

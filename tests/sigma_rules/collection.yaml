@@ -1,0 +1,30 @@
+rules:
+  - title: Disk Space Critical
+    id: c3d4e5f6-a7b8-9012-cdef-345678901234
+    status: stable
+    description: Detects critically low disk space
+    logsource:
+      category: system
+      product: linux
+    detection:
+      selection:
+        metric: disk_usage_percent
+      filter:
+        disk_usage_percent|gte: 95
+      condition: selection and filter
+    level: critical
+
+  - title: Memory Exhaustion Warning
+    id: d4e5f6a7-b8c9-0123-defa-456789012345
+    status: experimental
+    description: Detects when system memory is nearly exhausted
+    logsource:
+      category: system
+      product: linux
+    detection:
+      selection:
+        metric: memory_percent
+      filter:
+        memory_percent|gte: 90
+      condition: selection and filter
+    level: high
