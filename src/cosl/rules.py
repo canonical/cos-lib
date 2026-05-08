@@ -221,6 +221,48 @@ class InjectResult:
     errmsg: Optional[str]
 
 
+# --- Free functions for file I/O, reusable across rule backends --- #
+
+_RULE_FILE_SUFFIXES = [".rule", ".rules", ".yml", ".yaml"]
+
+
+def _multi_suffix_glob(
+    dir_path: Path, suffixes: List[str], recursive: bool = True
+) -> List[Path]:
+    """Get all files in a directory that have a matching suffix.
+
+    The result is sorted to avoid unnecessary relation-get calls.
+
+    Args:
+        dir_path: path to the directory to glob from.
+        suffixes: list of suffixes to include in the glob (items should begin with a period).
+        recursive: a flag indicating whether a glob is recursive (nested) or not.
+
+    Returns:
+        List of files in ``dir_path`` that have one of the suffixes specified in ``suffixes``.
+    """
+    all_files_in_dir = dir_path.glob("**/*" if recursive else "*")
+    matched = filter(lambda f: f.is_file() and f.suffix in suffixes, all_files_in_dir)
+    return sorted(matched)
+
+
+def _read_rule_file(file_path: Path) -> Optional[Dict[str, Any]]:
+    """Read and parse a YAML rule file.
+
+    Args:
+        file_path: full path to a rule file.
+
+    Returns:
+        The parsed YAML content as a dict, or None if reading/parsing failed.
+    """
+    with file_path.open() as rf:
+        try:
+            return yaml.safe_load(rf)
+        except Exception as e:
+            logger.error("Failed to read rules from %s: %s", file_path.name, e)
+            return None
+
+
 class Rules:
     """Utility class for amalgamating alerting/recording rule  files and injecting juju topology.
 
@@ -310,19 +352,10 @@ class Rules:
     ) -> List[Path]:
         """Helper function for getting all files in a directory that have a matching suffix.
 
-        The result is sorted to avoid unnecessary relation-get calls.
-
-        Args:
-            dir_path: path to the directory to glob from.
-            suffixes: list of suffixes to include in the glob (items should begin with a period).
-            recursive: a flag indicating whether a glob is recursive (nested) or not.
-
-        Returns:
-            List of files in `dir_path` that have one of the suffixes specified in `suffixes`.
+        .. deprecated::
+            Use the module-level :func:`_multi_suffix_glob` function instead.
         """
-        all_files_in_dir = dir_path.glob("**/*" if recursive else "*")
-        matched = filter(lambda f: f.is_file() and f.suffix in suffixes, all_files_in_dir)
-        return sorted(matched)
+        return _multi_suffix_glob(dir_path, suffixes, recursive)
 
     def _from_dir(self, dir_path: Path, recursive: bool) -> List[OfficialRuleFileItem]:
         """Read all rule files in a directory.
@@ -342,8 +375,8 @@ class Rules:
         groups: List[OfficialRuleFileItem] = []
 
         # Gather all records into a list of groups
-        for file_path in Rules._multi_suffix_glob(
-            dir_path, [".rule", ".rules", ".yml", ".yaml"], recursive
+        for file_path in _multi_suffix_glob(
+            dir_path, _RULE_FILE_SUFFIXES, recursive
         ):
             groups_from_file = self._from_file(dir_path, file_path)
             if groups_from_file:
@@ -365,33 +398,28 @@ class Rules:
             A list of dictionaries representing the rules file, if file is valid (the structure is
             formed by `yaml.safe_load` of the file); an empty list otherwise.
         """
-        with file_path.open() as rf:
-            # Load a list of rules from file then add labels and filters
-            try:
-                rule_file = yaml.safe_load(rf)
+        rule_file = _read_rule_file(file_path)
+        if rule_file is None:
+            return []
 
-            except Exception as e:
-                logger.error("Failed to read rules from %s: %s", file_path.name, e)
-                return []
+        # Generate group name prefix
+        #  - name, from juju topology
+        #  - suffix, from the relative path of the rule file;
+        rel_path = file_path.parent.relative_to(root_path)
+        rel_path = "" if rel_path == Path(".") else str(rel_path)
+        group_name_parts = [self.topology.identifier] if self.topology else []
+        group_name_parts.append(rel_path)
+        group_name_prefix = "_".join(filter(None, group_name_parts))
 
-            # Generate group name prefix
-            #  - name, from juju topology
-            #  - suffix, from the relative path of the rule file;
-            rel_path = file_path.parent.relative_to(root_path)
-            rel_path = "" if rel_path == Path(".") else str(rel_path)
-            group_name_parts = [self.topology.identifier] if self.topology else []
-            group_name_parts.append(rel_path)
-            group_name_prefix = "_".join(filter(None, group_name_parts))
+        try:
+            groups = self._from_dict(
+                rule_file, group_name=file_path.stem, group_name_prefix=group_name_prefix
+            )
+        except ValueError as e:
+            logger.error("Invalid rules file: %s (%s)", file_path.name, e)
+            return []
 
-            try:
-                groups = self._from_dict(
-                    rule_file, group_name=file_path.stem, group_name_prefix=group_name_prefix
-                )
-            except ValueError as e:
-                logger.error("Invalid rules file: %s (%s)", file_path.name, e)
-                return []
-
-            return groups
+        return groups
 
     def _from_dict(
         self,
