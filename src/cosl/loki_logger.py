@@ -9,6 +9,7 @@ import copy
 import functools
 import json
 import logging
+import ssl
 import string
 import time
 import urllib.error
@@ -67,7 +68,8 @@ class LokiEmitter:
         self._error_notified_once = False
 
     def _send_request(self, req: request.Request, jsondata_encoded: bytes):
-        return request.urlopen(req, jsondata_encoded, capath=self.cert)
+        ctx = ssl.create_default_context(cafile=self.cert) if self.cert else None
+        return request.urlopen(req, jsondata_encoded, context=ctx)
 
     def __call__(self, record: logging.LogRecord, line: str):
         """Send log record to Loki."""
