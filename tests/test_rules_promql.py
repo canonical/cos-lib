@@ -836,3 +836,24 @@ class TestGroupNameSuffix(unittest.TestCase):
         self.assertEqual(
             f"SomeGroupName{self.suffix}", rules_dict.get("groups", [])[0].get("name", "")
         )
+
+
+def test_multi_suffix_glob_logs_ignored_files(caplog):
+    sandbox = TempFS("rule_files", auto_clean=True)
+    sandbox.writetext("valid.rules", "content")
+    sandbox.writetext("also_valid.yml", "content")
+    sandbox.writetext("ignored.txt", "content")
+    sandbox.writetext("also_ignored.json", "content")
+
+    suffixes = [".rules", ".yml", ".yaml", ".rule"]
+    with caplog.at_level("INFO", logger="cosl.rules"):
+        matched = Rules._multi_suffix_glob(
+            Path(sandbox.getsyspath("/")), suffixes, recursive=False
+        )
+
+    matched_names = {p.name for p in matched}
+    assert matched_names == {"valid.rules", "also_valid.yml"}
+
+    assert len(caplog.records) == 1
+    assert "ignored.txt" in caplog.records[0].message
+    assert "also_ignored.json" in caplog.records[0].message
