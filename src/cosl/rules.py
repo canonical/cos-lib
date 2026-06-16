@@ -242,7 +242,15 @@ def _multi_suffix_glob(dir_path: Path, suffixes: List[str], recursive: bool = Tr
         List of files in ``dir_path`` that have one of the suffixes specified in ``suffixes``.
     """
     all_files_in_dir = dir_path.glob("**/*" if recursive else "*")
-    matched = filter(lambda f: f.is_file() and f.suffix in suffixes, all_files_in_dir)
+    all_files = {p for p in all_files_in_dir if p.is_file()}
+    matched = {p for p in all_files if p.suffix in suffixes}
+    ignored = all_files - matched
+    if ignored:
+        logger.info(
+            "Ignoring files with unrecognized suffix (expected one of %s): %s",
+            suffixes,
+            ", ".join(str(p) for p in sorted(ignored)),
+        )
     return sorted(matched)
 
 
