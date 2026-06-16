@@ -4,12 +4,12 @@
 import json
 import logging
 from typing import List
-from unittest.mock import _Call, patch
+from unittest.mock import MagicMock, _Call, patch
 from urllib.error import HTTPError
 
 import pytest
 
-from cosl.loki_logger import LokiHandler
+from cosl.loki_logger import LokiEmitter, LokiHandler
 
 
 def _get_loki_http_post_payload(call: _Call):
@@ -100,3 +100,30 @@ def test_logging_fail_send(send_request_mock):
         root_logger.removeHandler(handler)
 
     # THEN the interpreter doesn't blow up
+
+
+@patch("cosl.loki_logger.request.urlopen")
+def test_send_request_without_cert(mock_urlopen):
+    emitter = LokiEmitter(url="http://loki.test/push")
+    req = MagicMock(spec="urllib.request.Request")
+    data = b"payload"
+
+    emitter._send_request(req, data)
+
+    mock_urlopen.assert_called_once_with(req, data, context=None)
+
+
+@patch("cosl.loki_logger.request.urlopen")
+@patch("cosl.loki_logger.ssl.create_default_context")
+def test_send_request_with_cert(mock_create_ctx, mock_urlopen):
+    mock_ctx = MagicMock()
+    mock_create_ctx.return_value = mock_ctx
+
+    emitter = LokiEmitter(url="http://loki.test/push", cert="/etc/ssl/my-ca.pem")
+    req = MagicMock(spec="urllib.request.Request")
+    data = b"payload"
+
+    emitter._send_request(req, data)
+
+    mock_create_ctx.assert_called_once_with(cafile="/etc/ssl/my-ca.pem")
+    mock_urlopen.assert_called_once_with(req, data, context=mock_ctx)
