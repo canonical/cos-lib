@@ -246,14 +246,15 @@ def _multi_suffix_glob(dir_path: Path, suffixes: List[str], recursive: bool = Tr
     return sorted(matched)
 
 
-def _read_rule_file(file_path: Path) -> Optional[Dict[str, Any]]:
+def _read_rule_file(file_path: Path) -> Optional[Any]:
     """Read and parse a YAML rule file.
 
     Args:
         file_path: full path to a rule file.
 
     Returns:
-        The parsed YAML content as a dict, or None if reading/parsing failed.
+        The parsed YAML content (typically a dict, but may be a list or scalar for
+        non-mapping YAML, and ``None`` for an empty file), or ``None`` if parsing failed.
     """
     with file_path.open() as rf:
         try:
@@ -345,17 +346,6 @@ class Rules:
         """
         # one rule per file
         return "expr" in rules_dict and not RULE_TYPES.isdisjoint(rules_dict)
-
-    @staticmethod
-    def _multi_suffix_glob(
-        dir_path: Path, suffixes: List[str], recursive: bool = True
-    ) -> List[Path]:
-        """Helper function for getting all files in a directory that have a matching suffix.
-
-        .. deprecated::
-            Use the module-level :func:`_multi_suffix_glob` function instead.
-        """
-        return _multi_suffix_glob(dir_path, suffixes, recursive)
 
     def _from_dir(self, dir_path: Path, recursive: bool) -> List[OfficialRuleFileItem]:
         """Read all rule files in a directory.
