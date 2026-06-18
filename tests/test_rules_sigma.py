@@ -10,7 +10,8 @@ from pytest_bdd import given, parsers, scenarios, then, when
 from cosl.juju_topology import JujuTopology
 from cosl.rules import SigmaRules
 
-SIGMA_RULES_DIR = Path(__file__).resolve().parent / "sigma_rules"
+VALID_SIGMA_RULES_DIR = Path(__file__).resolve().parent / "sigma_rules" / "valid_rules"
+INVALID_SIGMA_RULES_DIR = Path(__file__).resolve().parent / "sigma_rules" / "invalid_rules"
 MODEL_UUID = "53316f3c-b681-47b8-b272-9f8a2a858e0e"
 
 # --- Scenarios (auto-collect all from feature file) ---
@@ -98,14 +99,19 @@ def when_add_with_labels(sigma, label_a, label_b):
     )
 
 
-@when(parsers.parse('I load the sigma rule file "{filename}"'))
+@when(parsers.parse('I load the valid sigma rule file "{filename}"'))
 def when_load_file(sigma, filename):
-    sigma.add_path(SIGMA_RULES_DIR / filename)
+    sigma.add_path(VALID_SIGMA_RULES_DIR / filename)
+
+
+@when(parsers.parse('I load the invalid sigma rule file "{filename}"'))
+def when_load_file(sigma, filename):
+    sigma.add_path(INVALID_SIGMA_RULES_DIR / filename)
 
 
 @when("I load the sigma rules directory")
 def when_load_directory(sigma):
-    sigma.add_path(SIGMA_RULES_DIR)
+    sigma.add_path(VALID_SIGMA_RULES_DIR)
 
 
 @when(

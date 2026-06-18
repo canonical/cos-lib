@@ -96,6 +96,8 @@ from typing import (
 )
 
 import yaml
+from sigma.exceptions import SigmaError
+from sigma.rule import SigmaRule  # type: ignore[reportMissingTypeStubs]
 
 from . import CosTool, JujuTopology
 from .types import (
@@ -652,11 +654,16 @@ class SigmaRules:
         if not rule_dict:
             return
         rule_copy = copy.deepcopy(dict(rule_dict))
-        if "rules" in rule_copy:
-            for r in rule_copy["rules"]:
-                self.rules.append(self._inject_topology(r))
-        else:
-            self.rules.append(self._inject_topology(rule_copy))
+        rules = rule_copy.get("rules") or [rule_copy]
+        for rule in rules:
+            try:
+                # leverage pysigma's rule validation by casting to SigmaRule and back
+                sigma_rule = SigmaRule.from_dict(cast(Dict[str, Any], rule))
+                self.rules.append(
+                    self._inject_topology(cast(SigmaRuleFormat, sigma_rule.to_dict()))
+                )
+            except (KeyError, AttributeError, SigmaError) as e:
+                logger.error("Invalid sigma_rule: %s", e)
 
     def add_path(self, dir_path: Union[str, Path], *, recursive: bool = False) -> None:
         """Add sigma rules from a directory or file path.

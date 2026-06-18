@@ -45,7 +45,7 @@ Feature: Sigma Rules processing
   # --- Loading from filesystem ---
 
   Scenario: Loading a single Sigma rule file
-    When I load the sigma rule file "ssh_failed_login.yaml"
+    When I load the valid sigma rule file "ssh_failed_login.yaml"
     Then the rules collection contains 1 rule
     And the rule titled "Failed SSH Login Attempt" exists
     And the rule has id "5f3a4e20-1b2c-4d5e-9f8a-7b6c3d4e5f6a"
@@ -56,22 +56,22 @@ Feature: Sigma Rules processing
     Then the rules collection contains 5 rules
 
   Scenario: A collection file expands into multiple rules
-    When I load the sigma rule file "collection.yaml"
+    When I load the valid sigma rule file "collection.yaml"
     Then the rules collection contains 2 rules
     And the rule titled "Disk Space Critical" exists
     And the rule titled "Memory Exhaustion Warning" exists
 
   Scenario: Loading a nonexistent path does nothing
-    When I load the sigma rule file "nonexistent.yaml"
+    When I load the valid sigma rule file "nonexistent.yaml"
     Then the rules collection is empty
 
   Scenario: Topology is injected when loading from file
-    When I load the sigma rule file "high_cpu_process.yaml"
+    When I load the valid sigma rule file "high_cpu_process.yaml"
     Then the rule has label "juju_model" set to "testmodel"
     And the rule has label "juju_application" set to "myapp"
 
   Scenario: Existing file labels are preserved on load
-    When I load the sigma rule file "unauthorized_api_access.yaml"
+    When I load the valid sigma rule file "unauthorized_api_access.yaml"
     Then the rule has label "team" set to "security"
     And the rule has label "juju_model" set to "testmodel"
 
@@ -80,3 +80,13 @@ Feature: Sigma Rules processing
   Scenario: Adding a rule does not mutate the caller's input
     When I add a sigma rule and keep a reference to the original dict
     Then the original dict is unchanged
+
+  # --- Rule validation ---
+
+  Scenario: Loading an invalid rule
+    When I load the invalid sigma rule file "invalid_rule.yaml"
+    Then the rules collection is empty
+
+  Scenario: Loading a mix of valid and invalid rules
+    When I load the invalid sigma rule file "valid_and_invalid.yaml"
+    Then the rules collection contains 1 rule
