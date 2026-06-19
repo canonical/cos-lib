@@ -640,6 +640,7 @@ class SigmaRules:
         ``juju_*`` tags take precedence.
         """
         if self.topology:
+            # TODO: Should we copy instead of side-effecting? Why return if we side-effect? The method name should reflect the behavious e.g. inject vs. rule_with_topology
             tags = rule.setdefault("tags", [])
             existing = {tag.split(".", 1)[0] for tag in tags}
             for namespace, val in self.topology.label_matcher_dict.items():
@@ -661,12 +662,7 @@ class SigmaRules:
         rule_copy = copy.deepcopy(dict(rule_dict))
         rules = rule_copy["rules"] if isinstance(rule_copy.get("rules"), list) else [rule_copy]
         for rule in rules:
-            if (
-                not isinstance(rule, dict)
-                or not {"title", "logsource", "detection"} <= rule.keys()
-            ):
-                logger.error("Skipping invalid Sigma rule: requires title, logsource, detection")
-                continue
+            # TODO: we want to use our types here or rely on the PySigma library to validate
             self.rules.append(self._inject_topology(cast(SigmaRuleFormat, rule)))
 
     def add_path(self, dir_path: Union[str, Path], *, recursive: bool = False) -> None:
