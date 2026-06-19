@@ -615,11 +615,13 @@ class RecordingRules(Rules):
 class SigmaRules:
     """Utility class for amalgamating Sigma rule files and injecting juju topology.
 
-    Unlike Prometheus/Loki rules, Sigma rules are independent (no grouping concept).
-    Each rule is identified by its ``id`` (UUID) rather than a group+alert name.
-    Detection logic uses a ``detection`` block instead of an ``expr`` field.
+    Unlike Prometheus/Loki rules, Sigma rules are independent (no grouping concept):
+    detection logic lives in a ``detection`` block instead of an ``expr`` field. A rule
+    may carry an ``id`` (UUID) for reference, but it is optional and not enforced here as
+    a uniqueness key.
 
-    Topology is injected into rule labels only — there is no expression rewriting.
+    Topology is injected into each rule's ``tags`` as ``namespace.value`` entries
+    (e.g. ``juju_model.testmodel``) — there is no expression rewriting.
     """
 
     def __init__(self, topology: Optional[JujuTopology] = None):
@@ -632,19 +634,24 @@ class SigmaRules:
         self.rules: List[SigmaRuleFormat] = []
 
     def _inject_topology(self, rule: SigmaRuleFormat) -> SigmaRuleFormat:
-        """Inject juju topology labels into a sigma rule (in-place)."""
+        """Inject juju topology into a sigma rule's ``tags`` as ``namespace.value`` (in-place).
+
+        Tags whose namespace is already present are left untouched, so caller-set
+        ``juju_*`` tags take precedence.
+        """
         if self.topology:
-            labels = rule.setdefault("labels", {})
-            for label, val in self.topology.label_matcher_dict.items():
-                if label not in labels:
-                    labels[label] = val
+            tags = rule.setdefault("tags", [])
+            existing = {tag.split(".", 1)[0] for tag in tags}
+            for namespace, val in self.topology.label_matcher_dict.items():
+                if namespace not in existing:
+                    tags.append(f"{namespace}.{val}")
         return rule
 
     def add(self, rule_dict: Mapping[str, Any]) -> None:
-        """Add a sigma rule from a dict.
+        """Add one or more sigma rules from a dict.
 
-        Accepts either a single sigma rule dict or a collection in
-        ``SigmaRuleFileFormat`` (with a ``"rules"`` key).
+        Accepts a single sigma rule or a ``{"rules": [...]}`` collection. Entries missing
+        the required Sigma fields (title, logsource, detection) are skipped with a log error.
 
         Args:
             rule_dict: a sigma rule dict or ``{"rules": [...]}`` collection.
@@ -652,11 +659,15 @@ class SigmaRules:
         if not rule_dict:
             return
         rule_copy = copy.deepcopy(dict(rule_dict))
-        if "rules" in rule_copy:
-            for r in rule_copy["rules"]:
-                self.rules.append(self._inject_topology(r))
-        else:
-            self.rules.append(self._inject_topology(rule_copy))
+        rules = rule_copy["rules"] if isinstance(rule_copy.get("rules"), list) else [rule_copy]
+        for rule in rules:
+            if (
+                not isinstance(rule, dict)
+                or not {"title", "logsource", "detection"} <= rule.keys()
+            ):
+                logger.error("Skipping invalid Sigma rule: requires title, logsource, detection")
+                continue
+            self.rules.append(self._inject_topology(cast(SigmaRuleFormat, rule)))
 
     def add_path(self, dir_path: Union[str, Path], *, recursive: bool = False) -> None:
         """Add sigma rules from a directory or file path.

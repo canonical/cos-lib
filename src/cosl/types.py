@@ -93,7 +93,7 @@ class SigmaRuleFormat(TypedDict, total=False):
     logsource: Required[SigmaRuleLogSource]
     detection: Required[Dict[str, Any]]
     level: NotRequired[str]
-    labels: NotRequired[Dict[str, str]]
+    tags: NotRequired[List[str]]
 
 
 class SigmaRuleFileFormat(TypedDict, total=False):
