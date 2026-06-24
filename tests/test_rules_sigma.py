@@ -5,166 +5,281 @@
 
 from pathlib import Path
 
-from pytest_bdd import given, parsers, scenarios, then, when
+import pytest
 
 from cosl.juju_topology import JujuTopology
 from cosl.rules import SigmaRules
 
 SIGMA_RULES_DIR = Path(__file__).resolve().parent / "sigma_rules"
+SIGMA_SINGLE_DIR = SIGMA_RULES_DIR / "single"
+SIGMA_COLLECTION_DIR = SIGMA_RULES_DIR / "collection"
 MODEL_UUID = "53316f3c-b681-47b8-b272-9f8a2a858e0e"
 
-# --- Scenarios (auto-collect all from feature file) ---
 
-scenarios("features/sigma_rules.feature")
-
-
-# --- Given steps --- #
-
-
-@given(
-    parsers.parse('a Juju topology for model "{model}" and application "{app}"'),
-    target_fixture="sigma",
-)
-def given_topology(model, app):
-    topo = JujuTopology(
-        model=model,
-        model_uuid=MODEL_UUID,
-        unit=f"{app}/0",
-        application=app,
+@pytest.fixture
+def sigma():
+    topology = JujuTopology(
+        model="testmodel", model_uuid=MODEL_UUID, unit="myapp/0", application="myapp"
     )
-    return SigmaRules(topology=topo)
+    return SigmaRules(topology=topology)
 
 
-@given("no Juju topology", target_fixture="sigma")
-def given_no_topology():
-    return SigmaRules()
-
-
-# --- When steps --- #
-
-
-@when(parsers.parse('I add a single sigma rule titled "{title}"'))
-def when_add_single_rule(sigma, title):
-    sigma.add(
-        {
-            "title": title,
-            "logsource": {"category": "test", "product": "linux"},
-            "detection": {"selection": {"field": "value"}, "condition": "selection"},
-            "level": "low",
-        }
-    )
-
-
-@when(parsers.parse('I add a collection containing rules "{title_a}" and "{title_b}"'))
-def when_add_collection(sigma, title_a, title_b):
-    sigma.add(
-        {
-            "rules": [
-                {
-                    "title": title_a,
-                    "logsource": {"category": "auth", "product": "linux"},
-                    "detection": {"selection": {"user": "root"}, "condition": "selection"},
-                    "level": "high",
-                },
-                {
-                    "title": title_b,
-                    "logsource": {"category": "network", "product": "linux"},
-                    "detection": {"selection": {"port": 22}, "condition": "selection"},
-                    "level": "medium",
-                },
-            ]
-        }
-    )
-
-
-@when("I add an empty dict")
-def when_add_empty(sigma):
-    sigma.add({})
-
-
-@when(parsers.parse('I add a sigma rule with labels "{label_a}" and "{label_b}"'))
-def when_add_with_labels(sigma, label_a, label_b):
-    labels = {}
-    for pair in (label_a, label_b):
-        k, v = pair.split("=", 1)
-        labels[k] = v
-    sigma.add(
-        {
-            "title": "Pre-labeled Rule",
-            "logsource": {"category": "test", "product": "linux"},
-            "detection": {"selection": {"x": 1}, "condition": "selection"},
-            "labels": labels,
-        }
-    )
-
-
-@when(parsers.parse('I load the sigma rule file "{filename}"'))
-def when_load_file(sigma, filename):
-    sigma.add_path(SIGMA_RULES_DIR / filename)
-
-
-@when("I load the sigma rules directory")
-def when_load_directory(sigma):
-    sigma.add_path(SIGMA_RULES_DIR)
-
-
-@when(
-    "I add a sigma rule and keep a reference to the original dict",
-    target_fixture="original_dict",
-)
-def when_add_and_keep_ref(sigma):
-    original = {
-        "title": "Original",
+def _rule(title, **extra):
+    return {
+        "title": title,
         "logsource": {"category": "test", "product": "linux"},
-        "detection": {"selection": {"a": 1}, "condition": "selection"},
+        "detection": {"selection": {"field": "value"}, "condition": "selection"},
+        **extra,
     }
-    sigma.add(original)
-    return original
 
 
-# --- Then steps --- #
+# --- Adding rules from dicts ---
 
 
-@then(parsers.parse("the rules collection contains {count:d} rule"))
-@then(parsers.parse("the rules collection contains {count:d} rules"))
-def then_rule_count(sigma, count):
-    result = sigma.as_dict()
-    assert len(result.get("rules", [])) == count
+def test_add_single_rule(sigma):
+    sigma.add(_rule("Test Rule"))
+    assert len(sigma.as_dict()["rules"]) == 1
+    assert sigma.rules[0]["title"] == "Test Rule"
 
 
-@then("the rules collection is empty")
-def then_empty(sigma):
+def test_add_collection(sigma):
+    sigma.add({"rules": [_rule("Rule A"), _rule("Rule B")]})
+    assert {r["title"] for r in sigma.rules} == {"Rule A", "Rule B"}
+
+
+def test_add_empty_dict_does_nothing(sigma):
+    sigma.add({})
     assert sigma.as_dict() == {}
 
 
-@then(parsers.parse('the rule titled "{title}" exists'))
-def then_rule_titled(sigma, title):
+# --- Topology injection ---
+
+
+def test_topology_injected_as_tags(sigma):
+    sigma.add(_rule("Labeled Rule"))
+    tags = sigma.rules[0]["tags"]
+    assert "juju_model.testmodel" in tags
+    assert "juju_application.myapp" in tags
+    assert any(tag.startswith("juju_model_uuid.") for tag in tags)
+
+
+def test_topology_does_not_overwrite_existing_tags(sigma):
+    sigma.add(_rule("Pre-tagged Rule", tags=["juju_application.custom-app"]))
+    tags = sigma.rules[0]["tags"]
+    assert "juju_application.custom-app" in tags
+    assert "juju_application.myapp" not in tags
+    assert "juju_model.testmodel" in tags
+
+
+def test_no_topology_means_no_tags():
+    sigma = SigmaRules()
+    sigma.add(_rule("No Topo Rule"))
+    assert "tags" not in sigma.rules[0]
+
+
+# --- Loading from filesystem ---
+
+
+def test_load_single_file(sigma):
+    sigma.add_path(SIGMA_SINGLE_DIR / "ssh_failed_login.yaml")
+    assert len(sigma.rules) == 1
+    assert sigma.rules[0]["title"] == "Failed SSH Login Attempt"
+    assert sigma.rules[0]["id"] == "5f3a4e20-1b2c-4d5e-9f8a-7b6c3d4e5f6a"
+
+
+def test_load_directory_recursively(sigma):
+    # 3 single-rule files + 1 collection file containing 2 rules = 5
+    sigma.add_path(SIGMA_RULES_DIR, recursive=True)
+    assert len(sigma.rules) == 5
+
+
+def test_load_single_rule_directory(sigma):
+    sigma.add_path(SIGMA_SINGLE_DIR)
+    assert len(sigma.rules) == 3
+
+
+def test_collection_file_expands(sigma):
+    sigma.add_path(SIGMA_COLLECTION_DIR / "collection.yaml")
+    assert {r["title"] for r in sigma.rules} == {
+        "Disk Space Critical",
+        "Memory Exhaustion Warning",
+    }
+
+
+def test_load_nonexistent_path(sigma):
+    sigma.add_path(SIGMA_RULES_DIR / "nonexistent.yaml")
+    assert sigma.as_dict() == {}
+
+
+def test_topology_injected_on_file_load(sigma):
+    sigma.add_path(SIGMA_SINGLE_DIR / "high_cpu_process.yaml")
+    tags = sigma.rules[0]["tags"]
+    assert "juju_model.testmodel" in tags
+    assert "juju_application.myapp" in tags
+
+
+def test_existing_file_tags_preserved(sigma):
+    sigma.add_path(SIGMA_SINGLE_DIR / "unauthorized_api_access.yaml")
+    tags = sigma.rules[0]["tags"]
+    assert "team.security" in tags
+    assert "juju_model.testmodel" in tags
+
+
+# --- Isolation ---
+
+
+def test_add_does_not_mutate_input(sigma):
+    original = _rule("Original")
+    sigma.add(original)
+    assert "tags" not in original, "add() must not mutate the caller's dict"
+
+
+# --- Topology tag de-duplication edges (gap #5) ---
+
+
+def test_existing_juju_model_tag_not_overwritten(sigma):
+    # An upstream charm (e.g. an aggregator forwarding rules) may already have set a
+    # juju_model tag; it must win over the local topology.
+    sigma.add(_rule("Upstream Model", tags=["juju_model.upstream-model"]))
+    tags = sigma.rules[0]["tags"]
+    assert "juju_model.upstream-model" in tags
+    assert "juju_model.testmodel" not in tags
+    # other namespaces are still injected
+    assert "juju_application.myapp" in tags
+
+
+def test_existing_juju_model_uuid_tag_not_overwritten(sigma):
+    sigma.add(_rule("Upstream UUID", tags=["juju_model_uuid.deadbeef"]))
+    tags = sigma.rules[0]["tags"]
+    assert "juju_model_uuid.deadbeef" in tags
+    assert not any(
+        tag.startswith("juju_model_uuid.") and tag != "juju_model_uuid.deadbeef" for tag in tags
+    )
+    assert "juju_model.testmodel" in tags
+
+
+def test_dotless_existing_tag_is_preserved_and_does_not_block_juju_tags(sigma):
+    # Sigma rules commonly carry flat, dotless tags (e.g. "tlp"). These must survive
+    # untouched and must not accidentally swallow any juju_* namespace.
+    sigma.add(_rule("Flat Tag", tags=["tlp"]))
+    tags = sigma.rules[0]["tags"]
+    assert "tlp" in tags
+    assert "juju_model.testmodel" in tags
+    assert "juju_application.myapp" in tags
+    assert any(tag.startswith("juju_model_uuid.") for tag in tags)
+
+
+# --- Accumulation and (intentional) lack of de-duplication (gap #6) ---
+
+
+def test_rules_accumulate_across_add_calls(sigma):
+    sigma.add(_rule("First"))
+    sigma.add(_rule("Second"))
+    assert [r["title"] for r in sigma.rules] == ["First", "Second"]
+
+
+def test_add_path_then_add_dict_accumulate(sigma):
+    sigma.add_path(SIGMA_SINGLE_DIR / "ssh_failed_login.yaml")
+    sigma.add(_rule("Manual"))
     titles = {r["title"] for r in sigma.rules}
-    assert title in titles
+    assert titles == {"Failed SSH Login Attempt", "Manual"}
 
 
-@then(parsers.parse('the rule has label "{label}" set to "{value}"'))
-def then_label_equals(sigma, label, value):
-    labels = sigma.rules[0].get("labels", {})
-    assert labels.get(label) == value
+def test_identical_rules_are_not_deduplicated(sigma):
+    # SigmaRules deliberately does not de-duplicate: topology may legitimately
+    # differentiate otherwise-identical rules, and `id` is optional. Pin this so a
+    # future "helpful" dedup change is a conscious decision.
+    sigma.add(_rule("Dup", id="11111111-1111-4111-8111-111111111111"))
+    sigma.add(_rule("Dup", id="11111111-1111-4111-8111-111111111111"))
+    assert len(sigma.rules) == 2
 
 
-@then(parsers.parse('the rule has a label named "{label}"'))
-def then_label_exists(sigma, label):
-    labels = sigma.rules[0].get("labels", {})
-    assert label in labels
+def test_same_file_loaded_twice_yields_duplicates(sigma):
+    sigma.add_path(SIGMA_SINGLE_DIR / "ssh_failed_login.yaml")
+    sigma.add_path(SIGMA_SINGLE_DIR / "ssh_failed_login.yaml")
+    assert len(sigma.rules) == 2
 
 
-@then(parsers.parse('the rule has id "{rule_id}"'))
-def then_rule_id(sigma, rule_id):
+def test_rule_id_is_preserved_verbatim(sigma):
+    rule_id = "5f3a4e20-1b2c-4d5e-9f8a-7b6c3d4e5f6a"
+    sigma.add(_rule("Has ID", id=rule_id))
     assert sigma.rules[0]["id"] == rule_id
 
 
-@then("the rule has no labels")
-def then_no_labels(sigma):
-    assert "labels" not in sigma.rules[0]
+# --- as_dict() returns an isolated rules list (gap #4) ---
 
 
-@then("the original dict is unchanged")
-def then_original_unchanged(original_dict):
-    assert "labels" not in original_dict, "add() must not mutate the caller's dict"
+def test_as_dict_returns_copy_of_rules_list(sigma):
+    sigma.add(_rule("Original"))
+    snapshot = sigma.as_dict()
+    snapshot["rules"].append(_rule("Injected"))
+    # Mutating the returned mapping's list must not affect internal state.
+    assert len(sigma.rules) == 1
+    assert sigma.rules[0]["title"] == "Original"
+
+
+# --- Filesystem edge cases (gaps #2, #3, #7) ---
+
+
+def test_empty_file_adds_no_rules(sigma, tmp_path):
+    empty = tmp_path / "empty.yaml"
+    empty.write_text("")
+    sigma.add_path(empty)
+    assert sigma.as_dict() == {}
+
+
+def test_null_only_file_adds_no_rules(sigma, tmp_path):
+    null_only = tmp_path / "null_only.yaml"
+    null_only.write_text("null\n")
+    sigma.add_path(null_only)
+    assert sigma.as_dict() == {}
+
+
+def test_directory_ignores_unrecognized_suffixes(sigma, tmp_path, caplog):
+    # A valid rule alongside files with non-rule suffixes: only the rule is loaded,
+    # and the ignored files are logged.
+    (tmp_path / "good.yaml").write_text(
+        "title: Good Rule\n"
+        "logsource:\n  category: test\n  product: linux\n"
+        "detection:\n  selection:\n    field: value\n  condition: selection\n"
+    )
+    (tmp_path / "notes.txt").write_text("not a rule")
+    (tmp_path / "data.json").write_text('{"not": "a rule"}')
+
+    with caplog.at_level("INFO", logger="cosl.rules"):
+        sigma.add_path(tmp_path)
+
+    assert [r["title"] for r in sigma.rules] == ["Good Rule"]
+    log_text = " ".join(rec.message for rec in caplog.records)
+    assert "notes.txt" in log_text
+    assert "data.json" in log_text
+
+
+def test_directory_non_recursive_skips_subdirs(sigma, tmp_path):
+    _write_sigma_rule(tmp_path / "top.yaml", "Top Rule")
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    _write_sigma_rule(nested / "deep.yaml", "Deep Rule")
+
+    sigma.add_path(tmp_path)  # recursive defaults to False
+
+    assert [r["title"] for r in sigma.rules] == ["Top Rule"]
+
+
+def test_directory_recursive_includes_subdirs(sigma, tmp_path):
+    _write_sigma_rule(tmp_path / "top.yaml", "Top Rule")
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    _write_sigma_rule(nested / "deep.yaml", "Deep Rule")
+
+    sigma.add_path(tmp_path, recursive=True)
+
+    assert {r["title"] for r in sigma.rules} == {"Top Rule", "Deep Rule"}
+
+
+def _write_sigma_rule(path: Path, title: str) -> None:
+    path.write_text(
+        f"title: {title}\n"
+        "logsource:\n  category: test\n  product: linux\n"
+        "detection:\n  selection:\n    field: value\n  condition: selection\n"
+    )

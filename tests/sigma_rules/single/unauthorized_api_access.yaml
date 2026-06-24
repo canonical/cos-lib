@@ -15,5 +15,5 @@ detection:
     request_path|startswith: /api/
   condition: selection and filter
 level: medium
-labels:
-  team: security
+tags:
+  - team.security

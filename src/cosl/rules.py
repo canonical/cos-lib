@@ -631,20 +631,21 @@ class SigmaRules:
         self.topology = topology
         self.rules: List[SigmaRuleFormat] = []
 
-    def _inject_topology(self, rule: SigmaRuleFormat) -> SigmaRuleFormat:
-        """Inject juju topology into a sigma rule's ``tags`` as ``namespace.value`` (in-place).
+    def _inject_topology(self, rule: SigmaRuleFormat) -> None:
+        """Inject juju topology into a sigma rule's ``tags`` as ``namespace.value``.
 
+        Mutates ``rule`` in place. The caller is responsible for ensuring ``rule`` is
+        owned (``add()`` deep-copies before calling this), so we avoid a redundant copy.
         Tags whose namespace is already present are left untouched, so caller-set
         ``juju_*`` tags take precedence.
         """
-        if self.topology:
-            # TODO: Should we copy instead of side-effecting? Why return if we side-effect? The method name should reflect the behavious e.g. inject vs. rule_with_topology
-            tags = rule.setdefault("tags", [])
-            existing = {tag.split(".", 1)[0] for tag in tags}
-            for namespace, val in self.topology.label_matcher_dict.items():
-                if namespace not in existing:
-                    tags.append(f"{namespace}.{val}")
-        return rule
+        if not self.topology:
+            return
+        tags = rule.setdefault("tags", [])
+        existing = {tag.split(".", 1)[0] for tag in tags}
+        for namespace, val in self.topology.label_matcher_dict.items():
+            if namespace not in existing:
+                tags.append(f"{namespace}.{val}")
 
     def add(self, rule_dict: Mapping[str, Any]) -> None:
         """Add one or more sigma rules from a dict.
@@ -661,7 +662,9 @@ class SigmaRules:
         rules = rule_copy["rules"] if isinstance(rule_copy.get("rules"), list) else [rule_copy]
         for rule in rules:
             # TODO: we want to use our types here or rely on the PySigma library to validate
-            self.rules.append(self._inject_topology(cast(SigmaRuleFormat, rule)))
+            sigma_rule = cast(SigmaRuleFormat, rule)
+            self._inject_topology(sigma_rule)
+            self.rules.append(sigma_rule)
 
     def add_path(self, dir_path: Union[str, Path], *, recursive: bool = False) -> None:
         """Add sigma rules from a directory or file path.
@@ -688,8 +691,12 @@ class SigmaRules:
     def as_dict(self) -> SigmaRuleFileFormat:
         """Return sigma rules in dict representation.
 
+        The returned mapping holds a *copy* of the internal rules list, so mutating it
+        (e.g. appending or reordering) does not affect this object's state. The rule
+        dicts themselves are shared, not deep-copied.
+
         Returns:
             A dictionary with a ``"rules"`` key containing the list of sigma rules,
             or an empty dict if no rules have been added.
         """
-        return SigmaRuleFileFormat(rules=self.rules) if self.rules else SigmaRuleFileFormat()
+        return SigmaRuleFileFormat(rules=list(self.rules)) if self.rules else SigmaRuleFileFormat()
