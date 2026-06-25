@@ -635,9 +635,16 @@ class SigmaRules:
         """Inject juju topology into a sigma rule's ``tags`` as ``namespace.value``.
 
         Mutates ``rule`` in place. The caller is responsible for ensuring ``rule`` is
-        owned (``add()`` deep-copies before calling this), so we avoid a redundant copy.
+        owned.
+
         Tags whose namespace is already present are left untouched, so caller-set
         ``juju_*`` tags take precedence.
+
+        The resulting ``tags`` list is sorted so the output is deterministic regardless of
+        input ordering. This matters because rules are serialized onto relation data; an
+        unstable ordering would trigger spurious ``relation-changed`` events. Sigma ``tags``
+        are an unordered set of labels (https://sigmahq.io/docs/basics/rules.html#tags), so
+        sorting is semantically safe.
         """
         if not self.topology:
             return
@@ -646,6 +653,7 @@ class SigmaRules:
         for namespace, val in self.topology.label_matcher_dict.items():
             if namespace not in existing:
                 tags.append(f"{namespace}.{val}")
+        tags.sort()
 
     def add(self, rule_dict: Mapping[str, Any]) -> None:
         """Add one or more sigma rules from a dict.
