@@ -223,8 +223,6 @@ class InjectResult:
     errmsg: Optional[str]
 
 
-# --- Free functions for file I/O, reusable across rule backends --- #
-
 _RULE_FILE_SUFFIXES = [".rule", ".rules", ".yml", ".yaml"]
 
 
