@@ -13,7 +13,7 @@ from deepdiff import DeepDiff
 from fs.tempfs import TempFS
 
 from cosl.juju_topology import JujuTopology
-from cosl.rules import AlertRules, Rules
+from cosl.rules import AlertRules, Rules, _multi_suffix_glob
 
 
 class TestAddRulesFromPath(unittest.TestCase):
@@ -847,7 +847,7 @@ def test_multi_suffix_glob_logs_ignored_files(caplog):
 
     suffixes = [".rules", ".yml", ".yaml", ".rule"]
     with caplog.at_level("INFO", logger="cosl.rules"):
-        matched = Rules._multi_suffix_glob(
+        matched = _multi_suffix_glob(
             Path(sandbox.getsyspath("/")), suffixes, recursive=False
         )
 
