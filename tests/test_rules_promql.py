@@ -847,9 +847,7 @@ def test_multi_suffix_glob_logs_ignored_files(caplog):
 
     suffixes = [".rules", ".yml", ".yaml", ".rule"]
     with caplog.at_level("INFO", logger="cosl.rules"):
-        matched = _multi_suffix_glob(
-            Path(sandbox.getsyspath("/")), suffixes, recursive=False
-        )
+        matched = _multi_suffix_glob(Path(sandbox.getsyspath("/")), suffixes, recursive=False)
 
     matched_names = {p.name for p in matched}
     assert matched_names == {"valid.rules", "also_valid.yml"}
