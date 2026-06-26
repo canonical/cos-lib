@@ -283,3 +283,66 @@ def _write_sigma_rule(path: Path, title: str) -> None:
         "logsource:\n  category: test\n  product: linux\n"
         "detection:\n  selection:\n    field: value\n  condition: selection\n"
     )
+
+
+# --- Determinism: output must be stable across hooks to avoid spurious relation-changed ---
+
+
+def test_tags_are_sorted_regardless_of_input_order(sigma):
+    sigma.add(_rule("Unsorted", tags=["zeta.last", "alpha.first", "mike.middle"]))
+    tags = sigma.rules[0]["tags"]
+    assert tags == sorted(tags), "tags must be sorted for byte-stable serialization"
+
+
+def test_same_input_produces_identical_output(sigma):
+    # Two SigmaRules built from identical input must serialize identically; otherwise
+    # the relation databag would change on every hook and fire relation-changed.
+    other = SigmaRules(
+        topology=JujuTopology(
+            model="testmodel", model_uuid=MODEL_UUID, unit="myapp/0", application="myapp"
+        )
+    )
+    rule = _rule("Stable", tags=["zeta.z", "alpha.a"])
+    sigma.add(dict(rule))
+    other.add(dict(rule))
+    assert sigma.as_dict() == other.as_dict()
+
+
+def test_no_id_is_never_generated(sigma):
+    # A UUID must never be auto-assigned; doing so would change output every hook.
+    sigma.add(_rule("No Id"))
+    assert "id" not in sigma.rules[0]
+
+
+def test_reinjecting_already_topologized_rules_is_idempotent(sigma):
+    # Models the RuleStore.combine() forwarding path: an aggregator re-ingests rules
+    # that already carry juju_* tags. Re-injection must not add, duplicate, or reorder
+    # tags, so the forwarded output is byte-identical to the input.
+    sigma.add(_rule("Forwarded"))
+    first = sigma.as_dict()
+
+    downstream = SigmaRules(
+        topology=JujuTopology(
+            model="testmodel", model_uuid=MODEL_UUID, unit="myapp/0", application="myapp"
+        )
+    )
+    # Feed the already-injected output back in, as combine() does.
+    downstream.add(first)
+    assert downstream.as_dict() == first
+
+
+def test_reinjection_does_not_duplicate_juju_tags(sigma):
+    sigma.add(_rule("Once"))
+    injected = sigma.as_dict()["rules"][0]["tags"]
+
+    downstream = SigmaRules(
+        topology=JujuTopology(
+            model="testmodel", model_uuid=MODEL_UUID, unit="myapp/0", application="myapp"
+        )
+    )
+    downstream.add({"rules": [dict(sigma.rules[0])]})
+    reinjected = downstream.as_dict()["rules"][0]["tags"]
+    assert reinjected == injected
+    # no namespace appears twice
+    namespaces = [t.split(".", 1)[0] for t in reinjected]
+    assert len(namespaces) == len(set(namespaces))
