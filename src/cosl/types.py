@@ -71,6 +71,37 @@ class OfficialRuleFileFormat(TypedDict, total=False):
     groups: List[OfficialRuleFileItem]
 
 
+class SigmaRuleLogSource(TypedDict, total=False):
+    """Typing for the logsource field of a Sigma rule."""
+
+    category: str
+    product: str
+    service: str
+
+
+class SigmaRuleFormat(TypedDict, total=False):
+    """Typing for a single Sigma rule.
+
+    References:
+    - https://sigmahq.io/docs/basics/rules.html
+    """
+
+    title: Required[str]
+    id: NotRequired[str]
+    status: NotRequired[str]
+    description: NotRequired[str]
+    logsource: Required[SigmaRuleLogSource]
+    detection: Required[Dict[str, Any]]
+    level: NotRequired[str]
+    tags: NotRequired[List[str]]
+
+
+class SigmaRuleFileFormat(TypedDict, total=False):
+    """Typing for a collection of Sigma rules, analogous to OfficialRuleFileFormat."""
+
+    rules: List[SigmaRuleFormat]
+
+
 def type_convert_stored(
     obj: Union[StoredList, StoredDict, Any],
 ) -> Union[List[Any], Dict[Any, Any], Any]:

@@ -96,6 +96,8 @@ from typing import (
 )
 
 import yaml
+from sigma.exceptions import SigmaError
+from sigma.rule import SigmaRule  # type: ignore[reportMissingTypeStubs]
 
 from . import CosTool, JujuTopology
 from .types import (
@@ -104,6 +106,8 @@ from .types import (
     OfficialRuleFileItem,
     QueryType,
     RuleType,
+    SigmaRuleFileFormat,
+    SigmaRuleFormat,
     SingleRuleFormat,
 )
 
@@ -604,3 +608,107 @@ class RecordingRules(Rules):
     """
 
     pass
+
+
+class SigmaRules:
+    """Utility class for amalgamating Sigma rule files and injecting juju topology.
+
+    Unlike Prometheus/Loki rules, Sigma rules are independent (no grouping concept):
+    detection logic lives in a ``detection`` block instead of an ``expr`` field. A rule
+    may carry an ``id`` (UUID) for reference, but it is optional and not enforced here as
+    a uniqueness key.
+
+    Topology is injected into each rule's ``tags`` as ``namespace.value`` entries
+    (e.g. ``juju_model.testmodel``) — there is no expression rewriting.
+    """
+
+    def __init__(self, topology: Optional[JujuTopology] = None):
+        """Build a SigmaRules object.
+
+        Args:
+            topology: an optional ``JujuTopology`` instance used to annotate all rules.
+        """
+        self.topology = topology
+        self.rules: List[SigmaRuleFormat] = []
+
+    def _inject_topology(self, rule: SigmaRuleFormat) -> None:
+        """Inject juju topology into a sigma rule's ``tags`` as ``namespace.value``.
+
+        Mutates ``rule`` in place. The caller is responsible for ensuring ``rule`` is
+        owned.
+
+        Tags whose namespace is already present are left untouched, so caller-set
+        ``juju_*`` tags take precedence.
+
+        The resulting ``tags`` list is sorted so the output is deterministic regardless of
+        input ordering. This matters because rules are serialized onto relation data; an
+        unstable ordering would trigger spurious ``relation-changed`` events. Sigma ``tags``
+        are an unordered set of labels (https://sigmahq.io/docs/basics/rules.html#tags), so
+        sorting is semantically safe.
+        """
+        if not self.topology:
+            return
+        tags = rule.setdefault("tags", [])
+        existing = {tag.split(".", 1)[0] for tag in tags}
+        for namespace, val in self.topology.label_matcher_dict.items():
+            if namespace not in existing:
+                tags.append(f"{namespace}.{val}")
+        tags.sort()
+
+    def add(self, rule_dict: Mapping[str, Any]) -> None:
+        """Add one or more sigma rules from a dict.
+
+        Accepts a single sigma rule or a ``{"rules": [...]}`` collection. Entries missing
+        the required Sigma fields (title, logsource, detection) are skipped with a log error.
+
+        Args:
+            rule_dict: a sigma rule dict or ``{"rules": [...]}`` collection.
+        """
+        if not rule_dict:
+            return
+        rule_copy = copy.deepcopy(dict(rule_dict))
+        rules = rule_copy["rules"] if isinstance(rule_copy.get("rules"), list) else [rule_copy]
+        for rule in rules:
+            try:
+                # leverage pysigma's rule validation by casting to SigmaRule and back
+                sigma_rule = SigmaRule.from_dict(cast(Dict[str, Any], rule)).to_dict()
+                sigma_rule = cast(SigmaRuleFormat, sigma_rule)
+                self._inject_topology(sigma_rule)
+                self.rules.append(sigma_rule)
+            except (KeyError, AttributeError, SigmaError) as e:
+                logger.error("Invalid sigma_rule: %s", e)
+
+    def add_path(self, dir_path: Union[str, Path], *, recursive: bool = False) -> None:
+        """Add sigma rules from a directory or file path.
+
+        Args:
+            dir_path: either a rules file or a dir of rules files.
+            recursive: whether to read files recursively or not.
+        """
+        path = Path(dir_path) if isinstance(dir_path, str) else dir_path
+        if path.is_dir():
+            for file_path in _multi_suffix_glob(path, _RULE_FILE_SUFFIXES, recursive):
+                self._add_from_file(file_path)
+        elif path.is_file():
+            self._add_from_file(path)
+        else:
+            logger.debug("Rules path does not exist: %s", path)
+
+    def _add_from_file(self, file_path: Path) -> None:
+        """Read a single sigma rule file and add it."""
+        rule_file = _read_rule_file(file_path)
+        if rule_file is not None:
+            self.add(rule_file)
+
+    def as_dict(self) -> SigmaRuleFileFormat:
+        """Return sigma rules in dict representation.
+
+        The returned mapping holds a *copy* of the internal rules list, so mutating it
+        (e.g. appending or reordering) does not affect this object's state. The rule
+        dicts themselves are shared, not deep-copied.
+
+        Returns:
+            A dictionary with a ``"rules"`` key containing the list of sigma rules,
+            or an empty dict if no rules have been added.
+        """
+        return SigmaRuleFileFormat(rules=list(self.rules)) if self.rules else SigmaRuleFileFormat()
