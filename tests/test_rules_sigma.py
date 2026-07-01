@@ -13,6 +13,7 @@ from cosl.rules import SigmaRules
 SIGMA_RULES_DIR = Path(__file__).resolve().parent / "sigma_rules"
 SIGMA_SINGLE_DIR = SIGMA_RULES_DIR / "single"
 SIGMA_COLLECTION_DIR = SIGMA_RULES_DIR / "collection"
+SIGMA_INVALID_DIR = SIGMA_RULES_DIR / "invalid"
 MODEL_UUID = "53316f3c-b681-47b8-b272-9f8a2a858e0e"
 
 
@@ -88,9 +89,10 @@ def test_load_single_file(sigma):
 
 
 def test_load_directory_recursively(sigma):
-    # 3 single-rule files + 1 collection file containing 2 rules = 5
+    # 3 single-rule files + 1 collection file containing 2 rules
+    # + 1 partially-valid collection file containing 1 rule = 6
     sigma.add_path(SIGMA_RULES_DIR, recursive=True)
-    assert len(sigma.rules) == 5
+    assert len(sigma.rules) == 6
 
 
 def test_load_single_rule_directory(sigma):
@@ -158,12 +160,14 @@ def test_existing_juju_model_uuid_tag_not_overwritten(sigma):
     assert "juju_model.testmodel" in tags
 
 
-def test_dotless_existing_tag_is_preserved_and_does_not_block_juju_tags(sigma):
-    # Sigma rules commonly carry flat, dotless tags (e.g. "tlp"). These must survive
-    # untouched and must not accidentally swallow any juju_* namespace.
-    sigma.add(_rule("Flat Tag", tags=["tlp"]))
+def test_existing_tag_is_preserved_and_does_not_block_juju_tags(sigma):
+    # existing tags must survive injection untouched and must not swallow
+    # any juju_* namespace.
+    # Note: pySigma rejects dotless tags with the message:
+    # "Sigma tag must start with namespace separated with dot from remaining tag."
+    sigma.add(_rule("Flat Tag", tags=["attack.privilege-escalation"]))
     tags = sigma.rules[0]["tags"]
-    assert "tlp" in tags
+    assert "attack.privilege-escalation" in tags
     assert "juju_model.testmodel" in tags
     assert "juju_application.myapp" in tags
     assert any(tag.startswith("juju_model_uuid.") for tag in tags)
@@ -346,3 +350,18 @@ def test_reinjection_does_not_duplicate_juju_tags(sigma):
     # no namespace appears twice
     namespaces = [t.split(".", 1)[0] for t in reinjected]
     assert len(namespaces) == len(set(namespaces))
+
+
+# --- Rule validation ---
+
+
+def test_loading_invalid_rule_creates_empty_list(sigma):
+    sigma.add_path(SIGMA_INVALID_DIR / "high_cpu_process.yaml")
+    assert len(sigma.rules) == 0  # must not raise exception
+
+
+def test_loading_partially_valid_collection_yields_valid_rules(sigma):
+    sigma.add_path(SIGMA_INVALID_DIR / "collection.yaml")
+    assert len(sigma.rules) == 1
+    assert sigma.rules[0].get("title") == "Disk Space Critical"
+    pass
