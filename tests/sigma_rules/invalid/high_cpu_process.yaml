@@ -1,0 +1,15 @@
+title: Abnormally High CPU Usage by Process
+id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+status: stable
+description: Detects when a single process uses excessive CPU
+# made invalid by removing the logsource
+# logsource:
+#   category: process_monitoring
+#   product: linux
+detection:
+  selection:
+    metric: cpu_percent
+  filter:
+    cpu_percent|gte: 95
+  condition: selection and filter
+level: high
