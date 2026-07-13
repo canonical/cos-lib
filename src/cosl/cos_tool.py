@@ -33,9 +33,9 @@ _EXEC_CACHE_MAXSIZE = 2048
 def _cached_exec(cmd: Tuple[str, ...]) -> str:
     """Run a cos-tool command and memoize its output.
 
-    ``cos-tool transform``/``validate`` are pure, deterministic functions of their
+    `cos-tool transform` / `validate` are pure, deterministic functions of their
     argument list (tool path + flags + expression/rule file), so identical
-    invocations can be memoized. ``cmd`` is a tuple (hashable) rather than a list.
+    invocations can be memoized.
 
     Note:
         The result depends on the cos-tool binary at the path embedded in ``cmd``.
