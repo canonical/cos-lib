@@ -61,78 +61,44 @@ class TestExecCache(unittest.TestCase):
         clear_exec_cache()
         self.addCleanup(clear_exec_cache)
 
+    @unittest.mock.patch("cosl.cos_tool.CosTool._get_tool_path")
     @unittest.mock.patch("cosl.cos_tool.subprocess.run")
-    def test_identical_commands_run_subprocess_once(self, mock_run):
-        """Identical cos-tool invocations should spawn the subprocess only once."""
-        mock_run.return_value = unittest.mock.Mock(stdout=b"transformed")
+    def test_identical_expressions_run_subprocess_once(self, mock_run, mock_get_path):
+        """Identical expressions should spawn the subprocess only once."""
+        mock_get_path.return_value = PosixPath("/usr/bin/cos-tool-amd64")
+        mock_run.return_value = unittest.mock.Mock(stdout=b"up{juju_model='my_model'}")
         tool = CosTool(default_query_type="promql")
+        topology = {"juju_model": "my_model", "juju_application": "app"}
 
-        first = tool._exec(
-            [
-                "cos-tool",
-                "--format",
-                "promql",
-                "transform",
-                "--label-matcher=juju_model='my_model'",
-                "--label-matcher=juju_application='app'",
-                "-label-matcher=juju_unit='app/0'",
-            ]
-        )
-        second = tool._exec(
-            [
-                "cos-tool",
-                "--format",
-                "promql",
-                "transform",
-                "--label-matcher=juju_model='my_model'",
-                "--label-matcher=juju_application='app'",
-                "-label-matcher=juju_unit='app/0'",
-            ]
-        )
+        first = tool.inject_label_matchers("up", topology)
+        second = tool.inject_label_matchers("up", topology)
 
-        self.assertEqual(first, "transformed")
-        self.assertEqual(second, "transformed")
-        # The subprocess should have run only once; the second call is served from cache.
+        self.assertEqual(first, "up{juju_model='my_model'}")
+        self.assertEqual(second, "up{juju_model='my_model'}")
         self.assertEqual(mock_run.call_count, 1)
 
+    @unittest.mock.patch("cosl.cos_tool.CosTool._get_tool_path")
     @unittest.mock.patch("cosl.cos_tool.subprocess.run")
-    def test_different_commands_run_subprocess_each(self, mock_run):
-        """Distinct cos-tool invocations should each spawn a subprocess."""
-        mock_run.return_value = unittest.mock.Mock(stdout=b"out")
+    def test_different_expressions_run_subprocess_each(self, mock_run, mock_get_path):
+        """Different expressions should each spawn a subprocess."""
+        mock_get_path.return_value = PosixPath("/usr/bin/cos-tool-amd64")
+        mock_run.return_value = unittest.mock.Mock(stdout=b"result")
         tool = CosTool(default_query_type="promql")
 
-        tool._exec(
-            [
-                "cos-tool",
-                "--format",
-                "promql",
-                "transform",
-                "--label-matcher=juju_model='my_model'",
-                "--label-matcher=juju_application='app'",
-                "-label-matcher=juju_unit='app/0'",
-            ]
-        )
-        tool._exec(
-            [
-                "cos-tool",
-                "--format",
-                "promql",
-                "transform",
-                "--label-matcher=juju_model='my_model'",
-                "--label-matcher=juju_application='app'",
-                "-label-matcher=juju_unit='app/1'",
-            ]
-        )
+        tool.inject_label_matchers("up", {"juju_model": "m"})
+        tool.inject_label_matchers("down", {"juju_model": "m"})
 
         self.assertEqual(mock_run.call_count, 2)
 
+    @unittest.mock.patch("cosl.cos_tool.CosTool._get_tool_path")
     @unittest.mock.patch("cosl.cos_tool.subprocess.run")
-    def test_cache_shared_across_instances(self, mock_run):
-        """The cache is shared across CosTool instances (they are created per-ruleset)."""
-        mock_run.return_value = unittest.mock.Mock(stdout=b"x")
-        cmd = ["cos-tool", "--format", "promql", "transform", "--", "up"]
+    def test_cache_shared_across_instances(self, mock_run, mock_get_path):
+        """The cache is shared across CosTool instances."""
+        mock_get_path.return_value = PosixPath("/usr/bin/cos-tool-amd64")
+        mock_run.return_value = unittest.mock.Mock(stdout=b"result")
+        topology = {"juju_model": "my_model"}
 
-        CosTool(default_query_type="promql")._exec(cmd)
-        CosTool(default_query_type="promql")._exec(cmd)
+        CosTool(default_query_type="promql").inject_label_matchers("up", topology)
+        CosTool(default_query_type="promql").inject_label_matchers("up", topology)
 
         self.assertEqual(mock_run.call_count, 1)
