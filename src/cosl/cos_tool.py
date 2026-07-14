@@ -8,6 +8,7 @@ import platform
 import re
 import subprocess
 import tempfile
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -19,6 +20,42 @@ from .types import OfficialRuleFileFormat, QueryType
 logger = logging.getLogger(__name__)
 
 _F = TypeVar("_F", bound=Callable[..., Any])
+
+# Upper bound for the memoization cache of cos-tool invocations. cos-tool is invoked
+# once per alert expression, and the same expressions are frequently reprocessed
+# (e.g. bundled rules across many related applications, or the same rules staged then
+# forwarded to several backends). A bounded LRU cache avoids the (dominant) subprocess
+# spawn + pipe-read overhead while keeping memory usage bounded in long-lived processes.
+_EXEC_CACHE_MAXSIZE = 2048
+
+
+@lru_cache(maxsize=_EXEC_CACHE_MAXSIZE)
+def _cached_exec(cmd: Tuple[str, ...]) -> str:
+    """Run a cos-tool command and memoize its output.
+
+    `cos-tool transform` / `validate` are pure, deterministic functions of their
+    argument list (tool path + flags + expression/rule file), so identical
+    invocations can be memoized.
+
+    Note:
+        The result depends on the cos-tool binary at the path embedded in ``cmd``.
+        The binary is assumed immutable for the lifetime of the process. Call
+        :func:`clear_exec_cache` if that assumption is ever violated.
+    """
+    result = subprocess.run(
+        list(cmd), check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+    )
+    return result.stdout.decode("utf-8").strip()
+
+
+def clear_exec_cache() -> None:
+    """Clear the memoization cache of cos-tool invocations.
+
+    Charms that reconcile their whole state on every event may call this at the start
+    of a reconciliation to bound the cache to a single reconciliation, though the
+    bounded LRU size already prevents unbounded growth.
+    """
+    _cached_exec.cache_clear()
 
 
 def ensure_querytype(func: _F) -> _F:
@@ -192,5 +229,8 @@ class CosTool:
         return None
 
     def _exec(self, cmd: List[str]) -> str:
-        result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        return result.stdout.decode("utf-8").strip()
+        # Delegate to a module-level, memoized worker. The result depends only on the
+        # command (not on instance state), so identical invocations across the many
+        # short-lived CosTool instances created during rule processing are deduplicated,
+        # avoiding redundant subprocess spawns.
+        return _cached_exec(tuple(cmd))
