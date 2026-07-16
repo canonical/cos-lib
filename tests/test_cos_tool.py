@@ -21,6 +21,20 @@ def spy_on_cos_tool():
     return unittest.mock.patch("cosl.cos_tool.subprocess.run", side_effect=subprocess.run)
 
 
+def isolate_cache(test_case):
+    """Point the cache at a fresh temp dir for the duration of ``test_case``.
+
+    Keeps tests off the shared default location (``/tmp/cosl-cos-tool``) so they neither
+    read stale entries nor pollute it, and restores the default when the test finishes.
+    """
+    tmp = tempfile.TemporaryDirectory()
+    test_case.addCleanup(tmp.cleanup)
+    test_case.addCleanup(configure_cache, None)
+    configure_cache(tmp.name)
+    clear_exec_cache()
+    return tmp.name
+
+
 class TestTool(unittest.TestCase):
     """Test that the cos-tool base implementation works."""
 
@@ -70,8 +84,7 @@ class TestExecCache(unittest.TestCase):
     """Test that cos-tool invocations are memoized to avoid redundant subprocess calls."""
 
     def setUp(self):
-        clear_exec_cache()
-        self.addCleanup(clear_exec_cache)
+        isolate_cache(self)
         # These tests run the real binary (resolved as cos-tool-<arch> in CWD).
         if CosTool(default_query_type="promql").path is None:
             self.skipTest("real cos-tool binary not available")
@@ -109,9 +122,9 @@ class TestExecCachePersistence(unittest.TestCase):
     """Test on-disk persistence of the cos-tool cache across processes."""
 
     def setUp(self):
-        clear_exec_cache()
-        # Revert to a process-local temporary cache after each test.
-        self.addCleanup(configure_cache, None)
+        # Isolate every test from the shared default cache: point at a fresh temp dir and
+        # restore the default afterwards so tests neither read nor pollute /tmp/cosl-cos-tool.
+        isolate_cache(self)
 
     def test_persisted_cache_reused_across_processes(self):
         """Results written under a directory are reused after reconfiguring to it.
@@ -139,10 +152,9 @@ class TestExecCachePersistence(unittest.TestCase):
                 self.assertEqual(out, "transformed")
                 self.assertEqual(mock_run.call_count, 0)
 
-    def test_temporary_cache_when_unconfigured(self):
-        """Without configure_cache, memoization still works within the process."""
-        # GIVEN no cache directory configured (process-local temporary cache)
-        clear_exec_cache()
+    def test_cache_memoizes_within_a_directory(self):
+        """A configured cache memoizes: identical calls run the subprocess only once."""
+        # GIVEN a cache pointed at a directory (the setUp temp dir)
         with unittest.mock.patch(
             "cosl.cos_tool.subprocess.run",
             return_value=unittest.mock.Mock(stdout=b"x"),
@@ -151,41 +163,50 @@ class TestExecCachePersistence(unittest.TestCase):
             first = _exec(["cmd"], cache_key=("k",))
             second = _exec(["cmd"], cache_key=("k",))
 
-            # THEN it is memoized in-process: same result, only one subprocess
+            # THEN it is memoized: same result, only one subprocess
             self.assertEqual(first, "x")
             self.assertEqual(second, "x")
             self.assertEqual(mock_run.call_count, 1)
 
-    def test_reconfigure_to_none_starts_fresh(self):
-        """Reverting to a temporary cache does not see the previous directory's data."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # GIVEN a value cached in a persistent directory
-            configure_cache(tmpdir)
-            with unittest.mock.patch(
-                "cosl.cos_tool.subprocess.run",
-                return_value=unittest.mock.Mock(stdout=b"persisted"),
-            ):
-                _exec(["cmd"], cache_key=("k",))
+    def test_reconfigure_switches_directory(self):
+        """Reconfiguring to a different directory does not see the previous one's data."""
+        # GIVEN a value cached in the current (setUp) directory
+        with unittest.mock.patch(
+            "cosl.cos_tool.subprocess.run",
+            return_value=unittest.mock.Mock(stdout=b"first-dir"),
+        ):
+            _exec(["cmd"], cache_key=("k",))
 
-            # WHEN the cache is reconfigured to a fresh temporary one
-            configure_cache(None)
+        # WHEN the cache is repointed at a different, empty directory
+        with tempfile.TemporaryDirectory() as other_dir:
+            configure_cache(other_dir)
             with unittest.mock.patch(
                 "cosl.cos_tool.subprocess.run",
-                return_value=unittest.mock.Mock(stdout=b"fresh"),
+                return_value=unittest.mock.Mock(stdout=b"second-dir"),
             ) as mock_run:
                 out = _exec(["cmd"], cache_key=("k",))
 
-                # THEN the previous directory's data is not visible: the binary runs again
-                self.assertEqual(out, "fresh")
+                # THEN the first directory's data is not visible: the binary runs again
+                self.assertEqual(out, "second-dir")
                 self.assertEqual(mock_run.call_count, 1)
+
+    def test_default_cache_location(self):
+        """Without configure_cache (or with None), the cache uses the shared default dir."""
+        import cosl.cos_tool as cos_tool
+
+        # WHEN the cache is reset to its default
+        configure_cache(None)
+
+        # THEN it points at the fixed, shared location under /tmp
+        self.assertEqual(cos_tool._exec_cache.directory, cos_tool._DEFAULT_CACHE_DIR)
+        self.assertEqual(cos_tool._DEFAULT_CACHE_DIR, "/tmp/cosl-cos-tool")
 
 
 class TestValidateCaching(unittest.TestCase):
     """Validation must be memoized by rule content, not by the tempfile path."""
 
     def setUp(self):
-        clear_exec_cache()
-        self.addCleanup(clear_exec_cache)
+        isolate_cache(self)
         # Runs the real binary (resolved as cos-tool-<arch> in CWD).
         if CosTool(default_query_type="promql").path is None:
             self.skipTest("real cos-tool binary not available")
@@ -217,9 +238,7 @@ class TestCacheFidelity(unittest.TestCase):
     """
 
     def setUp(self):
-        clear_exec_cache()
-        self.addCleanup(clear_exec_cache)
-        self.addCleanup(configure_cache, None)
+        isolate_cache(self)
         # These tests require the real cos-tool binary (resolved as cos-tool-<arch> in CWD).
         if CosTool(default_query_type="promql").path is None:
             self.skipTest("real cos-tool binary not available")

@@ -30,32 +30,40 @@ _F = TypeVar("_F", bound=Callable[..., Any])
 # aggregation deployment with room to grow.
 _EXEC_CACHE_SIZE_LIMIT = 256 * 1024 * 1024  # 256 MiB
 
+# Default on-disk location for the cache when ``configure_cache`` is not called. A fixed,
+# shared path (rather than a random temp dir) means all processes reuse the same cache, so
+# even callers that never configure a persistent directory get cross-process reuse for the
+# lifetime of this directory. Juju serialises hook execution per unit, so there is no
+# concurrent writer. Note ``/tmp`` typically does not survive a reboot / pod recreation;
+# use ``configure_cache`` with real persistent storage when that matters.
+_DEFAULT_CACHE_DIR = "/tmp/cosl-cos-tool"  # noqa: S108
+
 # Module-level, process-wide cache shared by all CosTool instances: cos-tool results
 # depend only on their inputs, not on which instance produced them, so results are
 # reusable across the many short-lived instances created during rule processing.
 #
-# Until configured with a persistent directory, it uses a temporary directory that lives
-# for the process (like the previous in-memory memoization). ``configure_cache`` points
-# it at persistent storage so results survive across process invocations (each Juju event
-# is a fresh process, which would otherwise always start cold).
-_exec_cache = Cache(size_limit=_EXEC_CACHE_SIZE_LIMIT)
+# It defaults to a fixed on-disk directory (see ``_DEFAULT_CACHE_DIR``). ``configure_cache``
+# points it at a different (e.g. charm-persistent) directory so results survive beyond what
+# ``/tmp`` offers (each Juju event is a fresh process, which would otherwise start cold).
+_exec_cache = Cache(directory=_DEFAULT_CACHE_DIR, size_limit=_EXEC_CACHE_SIZE_LIMIT)
 
 
 def configure_cache(cache_dir: Optional[Union[str, Path]]) -> None:
-    """Enable on-disk persistence of the cos-tool result cache.
+    """Point the cos-tool result cache at a specific directory.
 
-    By default the cache lives in a temporary directory and starts cold in every process.
-    Charms that reconcile on every Juju event spawn a fresh process each time, so they
-    never benefit from a previous run's work. Point this at a persistent directory (e.g. a
-    charm's persistent storage mount) to carry the cache across process invocations.
+    By default the cache lives at a fixed shared path (``/tmp/cosl-cos-tool``), which gives
+    cross-process reuse but does not survive a reboot or pod recreation. Charms reconcile on
+    every Juju event (a fresh process each time), so point this at a persistent directory
+    (e.g. a charm's persistent storage mount) to carry the cache across process invocations
+    reliably.
 
-    Passing ``None`` reverts to a process-local temporary cache.
+    Passing ``None`` reverts to the default shared location.
 
     Args:
-        cache_dir: directory in which to store the cache, or ``None`` for a temporary one.
+        cache_dir: directory in which to store the cache, or ``None`` for the default.
     """
     global _exec_cache
-    directory = str(cache_dir) if cache_dir is not None else None
+    directory = str(cache_dir) if cache_dir is not None else _DEFAULT_CACHE_DIR
     _exec_cache.close()
     _exec_cache = Cache(directory=directory, size_limit=_EXEC_CACHE_SIZE_LIMIT)
 
