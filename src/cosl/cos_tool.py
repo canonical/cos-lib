@@ -38,14 +38,19 @@ _EXEC_CACHE_SIZE_LIMIT = 256 * 1024 * 1024  # 256 MiB
 # use ``configure_cache`` with real persistent storage when that matters.
 _DEFAULT_CACHE_DIR = "/tmp/cosl-cos-tool"  # noqa: S108
 
-# Module-level, process-wide cache shared by all CosTool instances: cos-tool results
-# depend only on their inputs, not on which instance produced them, so results are
-# reusable across the many short-lived instances created during rule processing.
-#
-# It defaults to a fixed on-disk directory (see ``_DEFAULT_CACHE_DIR``). ``configure_cache``
-# points it at a different (e.g. charm-persistent) directory so results survive beyond what
-# ``/tmp`` offers (each Juju event is a fresh process, which would otherwise start cold).
-_exec_cache = Cache(directory=_DEFAULT_CACHE_DIR, size_limit=_EXEC_CACHE_SIZE_LIMIT)
+# The cache is opened lazily (see ``_get_cache``) rather than at import, so importing this
+# module has no filesystem side effects (no directory creation, no failure on a read-only
+# or permission-restricted ``/tmp``). Only the target directory is held at module scope.
+_cache_dir: str = _DEFAULT_CACHE_DIR
+_exec_cache: Optional[Cache] = None
+
+
+def _get_cache() -> Cache:
+    """Return the process-wide cache, opening it at ``_cache_dir`` on first use."""
+    global _exec_cache
+    if _exec_cache is None:
+        _exec_cache = Cache(directory=_cache_dir, size_limit=_EXEC_CACHE_SIZE_LIMIT)
+    return _exec_cache
 
 
 def configure_cache(cache_dir: Optional[Union[str, Path]]) -> None:
@@ -57,15 +62,17 @@ def configure_cache(cache_dir: Optional[Union[str, Path]]) -> None:
     (e.g. a charm's persistent storage mount) to carry the cache across process invocations
     reliably.
 
-    Passing ``None`` reverts to the default shared location.
+    Passing ``None`` reverts to the default shared location. The cache is (re)opened lazily
+    on next use, so this never creates directories eagerly.
 
     Args:
         cache_dir: directory in which to store the cache, or ``None`` for the default.
     """
-    global _exec_cache
-    directory = str(cache_dir) if cache_dir is not None else _DEFAULT_CACHE_DIR
-    _exec_cache.close()
-    _exec_cache = Cache(directory=directory, size_limit=_EXEC_CACHE_SIZE_LIMIT)
+    global _cache_dir, _exec_cache
+    _cache_dir = str(cache_dir) if cache_dir is not None else _DEFAULT_CACHE_DIR
+    if _exec_cache is not None:
+        _exec_cache.close()
+    _exec_cache = None  # reopened lazily at _cache_dir on next use
 
 
 def clear_exec_cache() -> None:
@@ -75,7 +82,7 @@ def clear_exec_cache() -> None:
     reconciliation to bound the cache to a single reconciliation, though the size limit
     already prevents unbounded growth.
     """
-    _exec_cache.clear()
+    _get_cache().clear()
 
 
 def _exec(cmd: List[str], cache_key: Optional[Tuple[str, ...]] = None) -> str:
@@ -87,10 +94,11 @@ def _exec(cmd: List[str], cache_key: Optional[Tuple[str, ...]] = None) -> str:
             pass an explicit key for commands that reference a nondeterministic path
             (e.g. the tempfile used by ``validate_alert_rules``), so the cache still hits.
     """
+    cache = _get_cache()
     key = tuple(cache_key) if cache_key is not None else tuple(cmd)
     # diskcache ships no type stubs, so ``get``/``set`` are untyped; we only ever store
     # ``str`` under these keys, so cast the retrieved value back to ``str``.
-    cached = cast(Optional[str], _exec_cache.get(key))  # pyright: ignore[reportUnknownMemberType]
+    cached = cast(Optional[str], cache.get(key))  # pyright: ignore[reportUnknownMemberType]
     if cached is not None:
         logger.debug("cache hit for cos-tool invocation: %s", cmd)
         return cached
@@ -98,7 +106,7 @@ def _exec(cmd: List[str], cache_key: Optional[Tuple[str, ...]] = None) -> str:
         list(cmd), check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
     )
     output = result.stdout.decode("utf-8").strip()
-    _exec_cache.set(key, output)  # pyright: ignore[reportUnknownMemberType]
+    cache.set(key, output)  # pyright: ignore[reportUnknownMemberType]
     return output
 
 

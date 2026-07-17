@@ -1,6 +1,7 @@
 # Copyright 2020 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import os
 import subprocess
 import tempfile
 import unittest
@@ -197,9 +198,22 @@ class TestExecCachePersistence(unittest.TestCase):
         # WHEN the cache is reset to its default
         configure_cache(None)
 
-        # THEN it points at the fixed, shared location under /tmp
-        self.assertEqual(cos_tool._exec_cache.directory, cos_tool._DEFAULT_CACHE_DIR)
+        # THEN the target directory is the fixed, shared location under /tmp
+        self.assertEqual(cos_tool._cache_dir, cos_tool._DEFAULT_CACHE_DIR)
         self.assertEqual(cos_tool._DEFAULT_CACHE_DIR, "/tmp/cosl-cos-tool")
+
+    def test_import_has_no_filesystem_side_effects(self):
+        """Opening the cache is lazy: configuring a dir must not create it eagerly."""
+        import cosl.cos_tool as cos_tool
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = os.path.join(tmpdir, "not-created-yet")
+            # WHEN a directory is configured but the cache is never used
+            configure_cache(target)
+
+            # THEN the directory is not created until first use
+            self.assertFalse(os.path.exists(target))
+            self.assertIsNone(cos_tool._exec_cache)
 
 
 class TestValidateCaching(unittest.TestCase):
