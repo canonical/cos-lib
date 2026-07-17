@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cosl"
-version = "1.10.1"
+version = "1.10.2"
 authors = [
     { name = "sed-i", email = "82407168+sed-i@users.noreply.github.com" },
 ]
@@ -18,6 +18,7 @@ dependencies = [
     "tenacity",
     "PyYAML",
     "typing-extensions",
+    "diskcache",
 ]
 
 classifiers = [

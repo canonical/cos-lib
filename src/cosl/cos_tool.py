@@ -3,16 +3,19 @@
 
 """COS Tool."""
 
+import functools
 import logging
+import os
 import platform
 import re
 import subprocess
 import tempfile
-from functools import lru_cache
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union, cast
 
 import yaml
+from diskcache import Cache  # pyright: ignore[reportMissingTypeStubs]
 from typing_extensions import TypeVar
 
 from .types import OfficialRuleFileFormat, QueryType
@@ -21,41 +24,126 @@ logger = logging.getLogger(__name__)
 
 _F = TypeVar("_F", bound=Callable[..., Any])
 
-# Upper bound for the memoization cache of cos-tool invocations. cos-tool is invoked
-# once per alert expression, and the same expressions are frequently reprocessed
-# (e.g. bundled rules across many related applications, or the same rules staged then
-# forwarded to several backends). A bounded LRU cache avoids the (dominant) subprocess
-# spawn + pipe-read overhead while keeping memory usage bounded in long-lived processes.
-_EXEC_CACHE_MAXSIZE = 2048
+# Upper bound (in bytes) for the on-disk cos-tool result cache. cos-tool is invoked once
+# per alert expression and its (deterministic) results are memoized to avoid the dominant
+# cost: the subprocess spawn (~tens of ms) on every reconcile. Once the size limit is
+# exceeded, the least-recently-*used* entries are evicted (see ``_EXEC_CACHE_EVICTION``),
+# so the cache never grows unbounded while staying "hot" for the expressions actually in
+# use. Entries are short strings, so this comfortably holds the distinct expressions of a
+# large (hundreds of apps) aggregation deployment with room to grow.
+_EXEC_CACHE_SIZE_LIMIT = 256 * 1024 * 1024  # 256 MiB
+
+# Evict the least-recently-*used* entries (not diskcache's default least-recently-stored),
+# so entries that keep being looked up survive and only genuinely stale ones are dropped.
+_EXEC_CACHE_EVICTION = "least-recently-used"
+
+# Default on-disk location for the cache when ``configure_cache`` is not called. A fixed,
+# shared path (rather than a random temp dir) means all processes reuse the same cache, so
+# even callers that never configure a persistent directory get cross-process reuse for the
+# lifetime of this directory. Juju serialises hook execution per unit, so there is no
+# concurrent writer. Note ``/tmp`` typically does not survive a reboot / pod recreation;
+# use ``configure_cache`` with real persistent storage when that matters.
+_DEFAULT_CACHE_DIR = "/tmp/cosl-cos-tool"  # noqa: S108
+
+# The cache is opened lazily (see ``_get_cache``) rather than at import, so importing this
+# module has no filesystem side effects (no directory creation, no failure on a read-only
+# or permission-restricted ``/tmp``). Only the target directory is held at module scope.
+_cache_dir: str = _DEFAULT_CACHE_DIR
+_exec_cache: Optional[Cache] = None
 
 
-@lru_cache(maxsize=_EXEC_CACHE_MAXSIZE)
-def _cached_exec(cmd: Tuple[str, ...]) -> str:
-    """Run a cos-tool command and memoize its output.
+def _get_cache() -> Cache:
+    """Return the process-wide cache, opening it at ``_cache_dir`` on first use."""
+    global _exec_cache
+    if _exec_cache is None:
+        _exec_cache = Cache(
+            directory=_cache_dir,
+            size_limit=_EXEC_CACHE_SIZE_LIMIT,
+            eviction_policy=_EXEC_CACHE_EVICTION,
+        )
+    return _exec_cache
 
-    `cos-tool transform` / `validate` are pure, deterministic functions of their
-    argument list (tool path + flags + expression/rule file), so identical
-    invocations can be memoized.
 
-    Note:
-        The result depends on the cos-tool binary at the path embedded in ``cmd``.
-        The binary is assumed immutable for the lifetime of the process. Call
-        :func:`clear_exec_cache` if that assumption is ever violated.
+def configure_cache(cache_dir: Optional[Union[str, Path]]) -> None:
+    """Point the cos-tool result cache at a specific directory.
+
+    By default the cache lives at a fixed shared path (``/tmp/cosl-cos-tool``), which gives
+    cross-process reuse but does not survive a reboot or pod recreation. Charms reconcile on
+    every Juju event (a fresh process each time), so point this at a persistent directory
+    (e.g. a charm's persistent storage mount) to carry the cache across process invocations
+    reliably.
+
+    Passing ``None`` reverts to the default shared location. The cache is (re)opened lazily
+    on next use, so this never creates directories eagerly.
+
+    Args:
+        cache_dir: directory in which to store the cache, or ``None`` for the default.
     """
+    global _cache_dir, _exec_cache
+    _cache_dir = str(cache_dir) if cache_dir is not None else _DEFAULT_CACHE_DIR
+    if _exec_cache is not None:
+        _exec_cache.close()
+    _exec_cache = None  # reopened lazily at _cache_dir on next use
+
+
+@functools.lru_cache(maxsize=None)
+def _cosl_version() -> str:
+    """Return the installed ``cosl`` version (or ``"0"`` if it can't be determined)."""
+    try:
+        return version("cosl")
+    except PackageNotFoundError:
+        return "0"
+
+
+@functools.lru_cache(maxsize=None)
+def _binary_fingerprint(path: str) -> str:
+    """Return a cheap fingerprint of the cos-tool binary at ``path``.
+
+    Uses size + mtime rather than a content hash: it detects a replaced binary while
+    staying effectively free (one ``stat``, no multi-MB read), memoized per path.
+    """
+    try:
+        st = os.stat(path)
+    except OSError:
+        return "missing"
+    return f"{st.st_size}:{st.st_mtime_ns}"
+
+
+def _fingerprint(binary_path: str) -> str:
+    """Return a fingerprint invalidating the cache when results could change.
+
+    Combines the ``cosl`` version and the binary's size+mtime, so a library upgrade or a
+    replaced cos-tool binary yields new cache keys instead of serving stale output.
+    """
+    return f"cosl={_cosl_version()};bin={_binary_fingerprint(binary_path)}"
+
+
+def _exec(cmd: List[str], cache_key: Optional[Tuple[str, ...]] = None) -> str:
+    """Run a cos-tool command, memoizing its (deterministic) output.
+
+    Args:
+        cmd: the cos-tool command to run on a cache miss.
+        cache_key: a deterministic key identifying the invocation. Defaults to ``cmd``;
+            pass an explicit key for commands that reference a nondeterministic path
+            (e.g. the tempfile used by ``validate_alert_rules``), so the cache still hits.
+    """
+    cache = _get_cache()
+    # Prefix the key with a fingerprint (cosl version + binary size/mtime) so a library
+    # upgrade or a replaced cos-tool binary invalidates entries automatically, rather than
+    # silently returning output computed by a previous binary. cmd[0] is the binary path.
+    key = (_fingerprint(cmd[0]),) + (tuple(cache_key) if cache_key is not None else tuple(cmd))
+    # diskcache ships no type stubs, so ``get``/``set`` are untyped; we only ever store
+    # ``str`` under these keys, so cast the retrieved value back to ``str``.
+    cached = cast(Optional[str], cache.get(key))  # pyright: ignore[reportUnknownMemberType]
+    if cached is not None:
+        logger.debug("cache hit for cos-tool invocation: %s", cmd)
+        return cached
     result = subprocess.run(
         list(cmd), check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
     )
-    return result.stdout.decode("utf-8").strip()
-
-
-def clear_exec_cache() -> None:
-    """Clear the memoization cache of cos-tool invocations.
-
-    Charms that reconcile their whole state on every event may call this at the start
-    of a reconciliation to bound the cache to a single reconciliation, though the
-    bounded LRU size already prevents unbounded growth.
-    """
-    _cached_exec.cache_clear()
+    output = result.stdout.decode("utf-8").strip()
+    cache.set(key, output)  # pyright: ignore[reportUnknownMemberType]
+    return output
 
 
 def ensure_querytype(func: _F) -> _F:
@@ -158,12 +246,24 @@ class CosTool:
 
                 rules = transformed_rules
 
-            rule_path.write_text(yaml.dump(rules))
+            rules_yaml = yaml.dump(rules)
+            rule_path.write_text(rules_yaml)
 
             args = [str(self.path), "--format", query_type, "validate", str(rule_path)]
+            # The tempfile path is nondeterministic, so it must not be part of the cache
+            # key or validation would never be memoized. Key on the rule *content*
+            # instead: validation is a pure function of the binary, format and rules.
+            cache_key = (
+                str(self.path),
+                "--format",
+                query_type,
+                "validate",
+                "--content",
+                rules_yaml,
+            )
             # noinspection PyBroadException
             try:
-                self._exec(args)  # type: ignore
+                self._exec(args, cache_key=cache_key)  # type: ignore
                 return True, ""
             except subprocess.CalledProcessError as e:
                 logger.debug("Validating the rules failed: %s", e.output.decode("utf-8"))
@@ -228,9 +328,14 @@ class CosTool:
             logger.debug('Could not locate cos-tool at: "{}"'.format(res))
         return None
 
-    def _exec(self, cmd: List[str]) -> str:
-        # Delegate to a module-level, memoized worker. The result depends only on the
-        # command (not on instance state), so identical invocations across the many
-        # short-lived CosTool instances created during rule processing are deduplicated,
-        # avoiding redundant subprocess spawns.
-        return _cached_exec(tuple(cmd))
+    def _exec(self, cmd: List[str], cache_key: Optional[Tuple[str, ...]] = None) -> str:
+        # Delegate to the module-level, memoized worker. The result depends only on the
+        # command inputs (not on instance state), so identical invocations across the
+        # many short-lived CosTool instances created during rule processing are
+        # deduplicated, avoiding redundant subprocess spawns.
+        #
+        # ``cache_key`` lets callers memoize on something other than ``cmd`` itself,
+        # which matters for commands that reference a nondeterministic path (e.g. the
+        # tempfile used by ``validate_alert_rules``): keying on the file path would
+        # never hit, so those callers pass a content-derived key instead.
+        return _exec(cmd, cache_key=cache_key)
