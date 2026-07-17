@@ -8,6 +8,7 @@ import unittest
 import unittest.mock
 from pathlib import PosixPath
 
+import cosl.cos_tool as cos_tool
 from cosl import CosTool
 from cosl.cos_tool import _exec, clear_exec_cache, configure_cache
 
@@ -193,8 +194,6 @@ class TestExecCachePersistence(unittest.TestCase):
 
     def test_default_cache_location(self):
         """Without configure_cache (or with None), the cache uses the shared default dir."""
-        import cosl.cos_tool as cos_tool
-
         # WHEN the cache is reset to its default
         configure_cache(None)
 
@@ -204,8 +203,6 @@ class TestExecCachePersistence(unittest.TestCase):
 
     def test_import_has_no_filesystem_side_effects(self):
         """Opening the cache is lazy: configuring a dir must not create it eagerly."""
-        import cosl.cos_tool as cos_tool
-
         with tempfile.TemporaryDirectory() as tmpdir:
             target = os.path.join(tmpdir, "not-created-yet")
             # WHEN a directory is configured but the cache is never used

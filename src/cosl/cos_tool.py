@@ -23,12 +23,16 @@ _F = TypeVar("_F", bound=Callable[..., Any])
 
 # Upper bound (in bytes) for the on-disk cos-tool result cache. cos-tool is invoked once
 # per alert expression and its (deterministic) results are memoized to avoid the dominant
-# cost: the subprocess spawn (~tens of ms) on every reconcile. diskcache evicts least-
-# recently-used entries once this size is exceeded, so the cache never grows unbounded
-# while staying "hot" for the expressions actually in use. Entries are short strings, so
-# this comfortably holds the distinct expressions of a large (hundreds of apps)
-# aggregation deployment with room to grow.
+# cost: the subprocess spawn (~tens of ms) on every reconcile. Once the size limit is
+# exceeded, the least-recently-*used* entries are evicted (see ``_EXEC_CACHE_EVICTION``),
+# so the cache never grows unbounded while staying "hot" for the expressions actually in
+# use. Entries are short strings, so this comfortably holds the distinct expressions of a
+# large (hundreds of apps) aggregation deployment with room to grow.
 _EXEC_CACHE_SIZE_LIMIT = 256 * 1024 * 1024  # 256 MiB
+
+# Evict the least-recently-*used* entries (not diskcache's default least-recently-stored),
+# so entries that keep being looked up survive and only genuinely stale ones are dropped.
+_EXEC_CACHE_EVICTION = "least-recently-used"
 
 # Default on-disk location for the cache when ``configure_cache`` is not called. A fixed,
 # shared path (rather than a random temp dir) means all processes reuse the same cache, so
@@ -49,7 +53,11 @@ def _get_cache() -> Cache:
     """Return the process-wide cache, opening it at ``_cache_dir`` on first use."""
     global _exec_cache
     if _exec_cache is None:
-        _exec_cache = Cache(directory=_cache_dir, size_limit=_EXEC_CACHE_SIZE_LIMIT)
+        _exec_cache = Cache(
+            directory=_cache_dir,
+            size_limit=_EXEC_CACHE_SIZE_LIMIT,
+            eviction_policy=_EXEC_CACHE_EVICTION,
+        )
     return _exec_cache
 
 
