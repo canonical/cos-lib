@@ -212,6 +212,40 @@ class TestExecCachePersistence(unittest.TestCase):
             self.assertFalse(os.path.exists(target))
             self.assertIsNone(cos_tool._exec_cache)
 
+    def test_cache_uses_lru_eviction(self):
+        """The cache evicts least-recently-*used* entries, not least-recently-stored."""
+        # WHEN the cache is opened
+        cache = cos_tool._get_cache()
+
+        # THEN it is configured with the least-recently-used eviction policy
+        self.assertEqual(cache.eviction_policy, "least-recently-used")
+
+    def test_changed_binary_fingerprint_invalidates_cache(self):
+        """A changed binary fingerprint must miss the cache instead of serving stale output."""
+        cos_tool._binary_fingerprint.cache_clear()
+        self.addCleanup(cos_tool._binary_fingerprint.cache_clear)
+
+        # GIVEN a value cached under one binary fingerprint
+        with unittest.mock.patch.object(cos_tool, "_fingerprint", return_value="fp-v1"):
+            with unittest.mock.patch(
+                "cosl.cos_tool.subprocess.run",
+                return_value=unittest.mock.Mock(stdout=b"v1-output"),
+            ):
+                first = _exec(["cos-tool", "transform", "up"], cache_key=("k",))
+                self.assertEqual(first, "v1-output")
+
+        # WHEN the binary fingerprint changes (e.g. the binary was replaced)
+        with unittest.mock.patch.object(cos_tool, "_fingerprint", return_value="fp-v2"):
+            with unittest.mock.patch(
+                "cosl.cos_tool.subprocess.run",
+                return_value=unittest.mock.Mock(stdout=b"v2-output"),
+            ) as mock_run:
+                out = _exec(["cos-tool", "transform", "up"], cache_key=("k",))
+
+                # THEN it is a cache miss: the binary runs again, no stale value served
+                self.assertEqual(out, "v2-output")
+                self.assertEqual(mock_run.call_count, 1)
+
 
 class TestValidateCaching(unittest.TestCase):
     """Validation must be memoized by rule content, not by the tempfile path."""

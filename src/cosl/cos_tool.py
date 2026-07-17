@@ -3,11 +3,14 @@
 
 """COS Tool."""
 
+import functools
 import logging
+import os
 import platform
 import re
 import subprocess
 import tempfile
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, cast
 
@@ -93,6 +96,38 @@ def clear_exec_cache() -> None:
     _get_cache().clear()
 
 
+@functools.lru_cache(maxsize=None)
+def _cosl_version() -> str:
+    """Return the installed ``cosl`` version (or ``"0"`` if it can't be determined)."""
+    try:
+        return version("cosl")
+    except PackageNotFoundError:
+        return "0"
+
+
+@functools.lru_cache(maxsize=None)
+def _binary_fingerprint(path: str) -> str:
+    """Return a cheap fingerprint of the cos-tool binary at ``path``.
+
+    Uses size + mtime rather than a content hash: it detects a replaced binary while
+    staying effectively free (one ``stat``, no multi-MB read), memoized per path.
+    """
+    try:
+        st = os.stat(path)
+    except OSError:
+        return "missing"
+    return f"{st.st_size}:{st.st_mtime_ns}"
+
+
+def _fingerprint(binary_path: str) -> str:
+    """Return a fingerprint invalidating the cache when results could change.
+
+    Combines the ``cosl`` version and the binary's size+mtime, so a library upgrade or a
+    replaced cos-tool binary yields new cache keys instead of serving stale output.
+    """
+    return f"cosl={_cosl_version()};bin={_binary_fingerprint(binary_path)}"
+
+
 def _exec(cmd: List[str], cache_key: Optional[Tuple[str, ...]] = None) -> str:
     """Run a cos-tool command, memoizing its (deterministic) output.
 
@@ -103,7 +138,10 @@ def _exec(cmd: List[str], cache_key: Optional[Tuple[str, ...]] = None) -> str:
             (e.g. the tempfile used by ``validate_alert_rules``), so the cache still hits.
     """
     cache = _get_cache()
-    key = tuple(cache_key) if cache_key is not None else tuple(cmd)
+    # Prefix the key with a fingerprint (cosl version + binary size/mtime) so a library
+    # upgrade or a replaced cos-tool binary invalidates entries automatically, rather than
+    # silently returning output computed by a previous binary. cmd[0] is the binary path.
+    key = (_fingerprint(cmd[0]),) + (tuple(cache_key) if cache_key is not None else tuple(cmd))
     # diskcache ships no type stubs, so ``get``/``set`` are untyped; we only ever store
     # ``str`` under these keys, so cast the retrieved value back to ``str``.
     cached = cast(Optional[str], cache.get(key))  # pyright: ignore[reportUnknownMemberType]
