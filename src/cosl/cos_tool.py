@@ -86,16 +86,6 @@ def configure_cache(cache_dir: Optional[Union[str, Path]]) -> None:
     _exec_cache = None  # reopened lazily at _cache_dir on next use
 
 
-def clear_exec_cache() -> None:
-    """Clear the memoization cache of cos-tool invocations.
-
-    Charms that reconcile their whole state on every event may call this at the start of a
-    reconciliation to bound the cache to a single reconciliation, though the size limit
-    already prevents unbounded growth.
-    """
-    _get_cache().clear()
-
-
 @functools.lru_cache(maxsize=None)
 def _cosl_version() -> str:
     """Return the installed ``cosl`` version (or ``"0"`` if it can't be determined)."""

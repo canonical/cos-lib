@@ -10,7 +10,7 @@ from pathlib import PosixPath
 
 import cosl.cos_tool as cos_tool
 from cosl import CosTool
-from cosl.cos_tool import _exec, clear_exec_cache, configure_cache
+from cosl.cos_tool import _exec, configure_cache
 
 
 def spy_on_cos_tool():
@@ -33,7 +33,6 @@ def isolate_cache(test_case):
     test_case.addCleanup(tmp.cleanup)
     test_case.addCleanup(configure_cache, None)
     configure_cache(tmp.name)
-    clear_exec_cache()
     return tmp.name
 
 
