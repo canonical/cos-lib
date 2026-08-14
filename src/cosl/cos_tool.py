@@ -136,7 +136,6 @@ def _exec(cmd: List[str], cache_key: Optional[Tuple[str, ...]] = None) -> str:
     # ``str`` under these keys, so cast the retrieved value back to ``str``.
     cached = cast(Optional[str], cache.get(key))  # pyright: ignore[reportUnknownMemberType]
     if cached is not None:
-        logger.debug("cache hit for cos-tool invocation: %s", cmd)
         return cached
     result = subprocess.run(
         list(cmd), check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
