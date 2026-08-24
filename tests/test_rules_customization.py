@@ -79,15 +79,16 @@ class TestFromYamlValidation(unittest.TestCase):
                 AlertRulesCustomization.from_yaml(config)
 
     def test_unknown_top_level_key_raises(self):
+        config = """
+            remove:
+              - where:
+                  alert: Foo
+            destroy:
+              - where:
+                  alert: Foo
+            """
         with self.assertRaisesRegex(AlertRulesCustomizationError, "top-level"):
-            AlertRulesCustomization.from_yaml("""
-                remove:
-                  - where:
-                      alert: Foo
-                destroy:
-                  - where:
-                      alert: Foo
-                """)
+            AlertRulesCustomization.from_yaml(config)
 
     def test_remove_missing_where_raises(self):
         with self.assertRaisesRegex(AlertRulesCustomizationError, "remove"):
@@ -95,81 +96,43 @@ class TestFromYamlValidation(unittest.TestCase):
 
     def test_remove_empty_where_raises(self):
         with self.assertRaisesRegex(AlertRulesCustomizationError, "'where' must not be empty"):
-            AlertRulesCustomization.from_yaml("""
-                remove:
-                  - where: {}
-                """)
+            AlertRulesCustomization.from_yaml("remove:\n  - where: {}")
 
     def test_remove_unknown_where_key_raises(self):
         with self.assertRaisesRegex(AlertRulesCustomizationError, "'where' keys"):
-            AlertRulesCustomization.from_yaml("""
-                remove:
-                  - where:
-                      expr: up < 1
-                """)
+            AlertRulesCustomization.from_yaml("remove:\n  - where:\n      expr: up < 1")
 
     def test_patch_missing_where_raises(self):
         with self.assertRaisesRegex(AlertRulesCustomizationError, "patch"):
-            AlertRulesCustomization.from_yaml("""
-                patch:
-                  - set:
-                      for: 5m
-                """)
+            AlertRulesCustomization.from_yaml("patch:\n  - set:\n      for: 5m")
 
     def test_patch_missing_set_raises(self):
         with self.assertRaisesRegex(AlertRulesCustomizationError, "patch"):
-            AlertRulesCustomization.from_yaml("""
-                patch:
-                  - where:
-                      alert: Foo
-                """)
+            AlertRulesCustomization.from_yaml("patch:\n  - where:\n      alert: Foo")
 
     def test_patch_empty_where_raises(self):
         with self.assertRaisesRegex(AlertRulesCustomizationError, "'where' must not be empty"):
-            AlertRulesCustomization.from_yaml("""
-                patch:
-                  - where: {}
-                    set:
-                      for: 5m
-                """)
+            AlertRulesCustomization.from_yaml("patch:\n  - where: {}\n    set:\n      for: 5m")
 
     def test_patch_unknown_where_key_raises(self):
         with self.assertRaisesRegex(AlertRulesCustomizationError, "'where' keys"):
-            AlertRulesCustomization.from_yaml("""
-                patch:
-                  - where:
-                      record: some:record
-                    set:
-                      expr: up
-                """)
+            AlertRulesCustomization.from_yaml(
+                "patch:\n  - where:\n      record: some:record\n    set:\n      expr: up"
+            )
 
     def test_patch_unknown_set_key_raises(self):
         with self.assertRaisesRegex(AlertRulesCustomizationError, "'set' keys"):
-            AlertRulesCustomization.from_yaml("""
-                patch:
-                  - where:
-                      alert: Foo
-                    set:
-                      duration: 5m
-                """)
+            AlertRulesCustomization.from_yaml(
+                "patch:\n  - where:\n      alert: Foo\n    set:\n      duration: 5m"
+            )
 
     def test_add_without_groups_raises(self):
         with self.assertRaisesRegex(AlertRulesCustomizationError, "'add'"):
-            AlertRulesCustomization.from_yaml("""
-                add:
-                  rules:
-                    - alert: Foo
-                      expr: up
-                """)
+            AlertRulesCustomization.from_yaml("add:\n  rules:\n    - alert: Foo\n      expr: up")
 
     def test_add_groups_not_a_list_raises(self):
         with self.assertRaisesRegex(AlertRulesCustomizationError, "'add.groups' must be a list"):
-            AlertRulesCustomization.from_yaml("""
-                add:
-                  groups:
-                    name: my-group
-                    rules: []
-                """)
+            AlertRulesCustomization.from_yaml("add:\n  groups:\n    name: my-group\n    rules: []")
 
     def test_add_group_missing_name_or_rules_raises(self):
         for group in ("rules: []", "name: my-group"):
@@ -180,8 +143,8 @@ class TestFromYamlValidation(unittest.TestCase):
         cases = {
             "add not a mapping": "add: groups",
             "group not a mapping": "add:\n  groups:\n    - just-a-string",
-            "name not a string": ("add:\n  groups:\n    - name: [1]\n      rules: []"),
-            "rules not a list": ("add:\n  groups:\n    - name: my-group\n      rules: nope"),
+            "name not a string": "add:\n  groups:\n    - name: [1]\n      rules: []",
+            "rules not a list": "add:\n  groups:\n    - name: my-group\n      rules: nope",
         }
         for case, config in cases.items():
             with self.subTest(case):
@@ -196,8 +159,8 @@ class TestFromYamlValidation(unittest.TestCase):
     def test_malformed_operation_entries_raise(self):
         cases = {
             "where not a mapping": "remove:\n  - where: nope",
-            "where.alert not a string": ("remove:\n  - where:\n      alert: [1, 2]"),
-            "where.labels not a mapping": ("remove:\n  - where:\n      labels: severity"),
+            "where.alert not a string": "remove:\n  - where:\n      alert: [1, 2]",
+            "where.labels not a mapping": "remove:\n  - where:\n      labels: severity",
             "set not a mapping": "patch:\n  - where:\n      alert: Foo\n    set: nope",
             "set.expr not a string": (
                 "patch:\n  - where:\n      alert: Foo\n    set:\n      expr: {a: b}"
@@ -233,32 +196,38 @@ class TestNoOpConfigs(unittest.TestCase):
         self._assert_noop("{}")
 
     def test_zero_match_remove_is_noop(self):
-        self._assert_noop("""
+        config = """
             remove:
               - where:
                   alert: NoSuchAlert
               - where:
                   labels:
                     nope: nothing
-            """)
+            """
+        self._assert_noop(config)
 
     def test_zero_match_patch_is_noop(self):
-        self._assert_noop("""
+        config = """
             patch:
               - where:
                   alert: NoSuchAlert
                 set:
                   for: 1m
-            """)
+            """
+        self._assert_noop(config)
 
 
 class TestRemove(unittest.TestCase):
+    def _apply(self, config):
+        return AlertRulesCustomization.from_yaml(config).apply(_sample_alerts())
+
     def test_remove_by_alert_name(self):
-        result = AlertRulesCustomization.from_yaml("""
+        config = """
             remove:
               - where:
                   alert: LowThroughput
-            """).apply(_sample_alerts())
+            """
+        result = self._apply(config)
 
         group_names = [g["name"] for g in result["app-1"]["groups"]]
         self.assertEqual(group_names, ["group_a", "group_b"])
@@ -266,22 +235,24 @@ class TestRemove(unittest.TestCase):
         self.assertEqual(rule_names, ["HighLatency", None])  # record remains
 
     def test_remove_by_group_only_drops_entire_group_including_recording_rules(self):
-        result = AlertRulesCustomization.from_yaml("""
+        config = """
             remove:
               - where:
                   group: group_a
-            """).apply(_sample_alerts())
+            """
+        result = self._apply(config)
 
         group_names = [g["name"] for g in result["app-1"]["groups"]]
         self.assertEqual(group_names, ["group_b"])
 
     def test_remove_group_with_other_selector_keeps_recording_rules(self):
-        result = AlertRulesCustomization.from_yaml("""
+        config = """
             remove:
               - where:
                   group: group_a
                   alert: LowThroughput
-            """).apply(_sample_alerts())
+            """
+        result = self._apply(config)
 
         group = next(g for g in result["app-1"]["groups"] if g["name"] == "group_a")
         rule_names = [r.get("alert") or r.get("record") for r in group["rules"]]
@@ -289,33 +260,36 @@ class TestRemove(unittest.TestCase):
         self.assertEqual(rule_names, ["HighLatency", "job:latency:mean5m"])
 
     def test_remove_by_alert_and_labels_combined(self):
-        result = AlertRulesCustomization.from_yaml("""
+        config_matching = """
             remove:
               - where:
                   alert: HighLatency
                   labels:
                     severity: critical
-            """).apply(_sample_alerts())
+            """
+        result = self._apply(config_matching)
         self.assertNotIn("HighLatency", str(result))
 
         # Same alert but non-matching label value: nothing removed.
-        result = AlertRulesCustomization.from_yaml("""
+        config_not_matching = """
             remove:
               - where:
                   alert: HighLatency
                   labels:
                     severity: warning
-            """).apply(_sample_alerts())
+            """
+        result = self._apply(config_not_matching)
         self.assertIn("HighLatency", str(result))
 
     def test_remove_by_group_and_labels_combined(self):
-        result = AlertRulesCustomization.from_yaml("""
+        config = """
             remove:
               - where:
                   group: group_a
                   labels:
                     severity: warning
-            """).apply(_sample_alerts())
+            """
+        result = self._apply(config)
 
         group = next(g for g in result["app-1"]["groups"] if g["name"] == "group_a")
         rule_names = [r.get("alert") or r.get("record") for r in group["rules"]]
@@ -324,94 +298,111 @@ class TestRemove(unittest.TestCase):
         self.assertEqual(rule_names, ["HighLatency", "job:latency:mean5m"])
 
     def test_remove_by_annotations(self):
-        result = AlertRulesCustomization.from_yaml("""
+        config = """
             remove:
               - where:
                   annotations:
                     summary: latency is high
-            """).apply(_sample_alerts())
+            """
+        result = self._apply(config)
+
         self.assertNotIn("HighLatency", str(result))
         self.assertIn("LowThroughput", str(result))
 
     def test_remove_multiple_entries_are_ored(self):
-        result = AlertRulesCustomization.from_yaml("""
+        config = """
             remove:
               - where:
                   alert: HighLatency
               - where:
                   alert: OtherAlert
-            """).apply(_sample_alerts())
+            """
+        result = self._apply(config)
+
         self.assertNotIn("HighLatency", str(result))
         self.assertNotIn("OtherAlert", str(result))
         self.assertIn("LowThroughput", str(result))
         self.assertIn("HostDown", str(result))
 
     def test_remove_prunes_empty_groups_and_drops_empty_identifiers(self):
-        result = AlertRulesCustomization.from_yaml("""
+        config_pruning_group = """
             remove:
               - where:
                   alert: HostDown
-            """).apply(_sample_alerts())
+            """
+        result = self._apply(config_pruning_group)
         # group_b became empty and was pruned; app-1 keeps group_a only.
         self.assertEqual([g["name"] for g in result["app-1"]["groups"]], ["group_a"])
         self.assertIn("app-2", result)
 
-        result = AlertRulesCustomization.from_yaml("""
+        config_dropping_identifier = """
             remove:
               - where:
                   alert: OtherAlert
-            """).apply(_sample_alerts())
+            """
+        result = self._apply(config_dropping_identifier)
         # app-2's only group became empty, so app-2 was dropped entirely.
         self.assertNotIn("app-2", result)
         self.assertIn("app-1", result)
 
     def test_remove_preserves_recording_rules_when_group_not_sole_selector(self):
-        result = AlertRulesCustomization.from_yaml("""
+        config = """
             remove:
               - where:
                   labels:
                     severity: warning
-            """).apply(_sample_alerts())
+            """
+        result = self._apply(config)
+
         record = _find_rule(result, "app-1", "group_a", "job:latency:mean5m", by_record=True)
         self.assertEqual(record["expr"], "avg(latency)")
 
 
 class TestPatch(unittest.TestCase):
+    def _apply(self, config):
+        return AlertRulesCustomization.from_yaml(config).apply(_sample_alerts())
+
     def test_patch_updates_for(self):
-        result = AlertRulesCustomization.from_yaml("""
+        config = """
             patch:
               - where:
                   alert: HighLatency
                 set:
                   for: 30m
-            """).apply(_sample_alerts())
+            """
+        result = self._apply(config)
+
         self.assertEqual(_find_rule(result, "app-1", "group_a", "HighLatency")["for"], "30m")
         # Untouched rule keeps its original value.
         self.assertEqual(_find_rule(result, "app-1", "group_a", "LowThroughput")["for"], "5m")
 
     def test_patch_replaces_alert_name(self):
-        result = AlertRulesCustomization.from_yaml("""
+        config = """
             patch:
               - where:
                   alert: HighLatency
                 set:
                   alert: RenamedLatency
-            """).apply(_sample_alerts())
+            """
+        result = self._apply(config)
+
         renamed = _find_rule(result, "app-1", "group_a", "RenamedLatency")
         self.assertEqual(renamed["expr"], "latency > 100")
 
     def test_patch_replaces_expr(self):
-        result = AlertRulesCustomization.from_yaml("""
+        config = """
             patch:
               - where:
                   alert: HostDown
                 set:
                   expr: up == 0
-            """).apply(_sample_alerts())
+            """
+        result = self._apply(config)
+
         self.assertEqual(_find_rule(result, "app-1", "group_b", "HostDown")["expr"], "up == 0")
 
     def test_patch_merges_labels(self):
-        result = AlertRulesCustomization.from_yaml("""
+        config = """
             patch:
               - where:
                   alert: HighLatency
@@ -419,7 +410,9 @@ class TestPatch(unittest.TestCase):
                   labels:
                     severity: page
                     extra: added
-            """).apply(_sample_alerts())
+            """
+        result = self._apply(config)
+
         labels = _find_rule(result, "app-1", "group_a", "HighLatency")["labels"]
         # existing key overwritten, new key added, other keys untouched
         self.assertEqual(labels["severity"], "page")
@@ -427,7 +420,7 @@ class TestPatch(unittest.TestCase):
         self.assertEqual(labels["juju_application"], "app-1")
 
     def test_patch_merges_annotations(self):
-        result = AlertRulesCustomization.from_yaml("""
+        config = """
             patch:
               - where:
                   alert: HighLatency
@@ -435,26 +428,30 @@ class TestPatch(unittest.TestCase):
                   annotations:
                     summary: new summary
                     description: new description
-            """).apply(_sample_alerts())
+            """
+        result = self._apply(config)
+
         annotations = _find_rule(result, "app-1", "group_a", "HighLatency")["annotations"]
         self.assertEqual(annotations["summary"], "new summary")
         self.assertEqual(annotations["description"], "new description")
 
     def test_patch_skips_recording_rules(self):
-        result = AlertRulesCustomization.from_yaml("""
+        config = """
             patch:
               - where:
                   group: group_a
                 set:
                   expr: hacked
-            """).apply(_sample_alerts())
+            """
+        result = self._apply(config)
+
         record = _find_rule(result, "app-1", "group_a", "job:latency:mean5m", by_record=True)
         self.assertEqual(record["expr"], "avg(latency)")
         # Alerting rules in the same group were patched.
         self.assertEqual(_find_rule(result, "app-1", "group_a", "HighLatency")["expr"], "hacked")
 
     def test_patch_matches_on_labels(self):
-        result = AlertRulesCustomization.from_yaml("""
+        config = """
             patch:
               - where:
                   labels:
@@ -462,7 +459,9 @@ class TestPatch(unittest.TestCase):
                 set:
                   labels:
                     severity: critical
-            """).apply(_sample_alerts())
+            """
+        result = self._apply(config)
+
         self.assertEqual(
             _find_rule(result, "app-1", "group_a", "LowThroughput")["labels"]["severity"],
             "critical",
@@ -512,9 +511,7 @@ class TestAdd(unittest.TestCase):
 
 class TestApplySemantics(unittest.TestCase):
     def test_input_is_not_mutated(self):
-        sample = _sample_alerts()
-        snapshot = copy.deepcopy(sample)
-        AlertRulesCustomization.from_yaml("""
+        config = """
             remove:
               - where:
                   alert: LowThroughput
@@ -531,11 +528,14 @@ class TestApplySemantics(unittest.TestCase):
                   rules:
                     - alert: Added
                       expr: up
-            """).apply(sample)
+            """
+        sample = _sample_alerts()
+        snapshot = copy.deepcopy(sample)
+        AlertRulesCustomization.from_yaml(config).apply(sample)
         self.assertEqual(sample, snapshot)
 
     def test_order_of_operations_is_remove_then_patch_then_add(self):
-        result = AlertRulesCustomization.from_yaml("""
+        config = """
             remove:
               - where:
                   alert: GoneForever
@@ -554,21 +554,22 @@ class TestApplySemantics(unittest.TestCase):
                   rules:
                     - alert: GoneForever
                       expr: up
-            """).apply(
-            {
-                "app": {
-                    "groups": [
-                        {
-                            "name": "g",
-                            "rules": [
-                                {"alert": "GoneForever", "expr": "x", "for": "10m"},
-                                {"alert": "Survivor", "expr": "y", "for": "10m"},
-                            ],
-                        }
-                    ]
-                }
+            """
+        relation_alerts = {
+            "app": {
+                "groups": [
+                    {
+                        "name": "g",
+                        "rules": [
+                            {"alert": "GoneForever", "expr": "x", "for": "10m"},
+                            {"alert": "Survivor", "expr": "y", "for": "10m"},
+                        ],
+                    }
+                ]
             }
-        )
+        }
+        result = AlertRulesCustomization.from_yaml(config).apply(relation_alerts)
+
         rules = result["app"]["groups"][0]["rules"]
         # Removed despite a patch entry targeting it; patch applied to the survivor;
         # the added rule lands under the fixed key, untouched by remove/patch.
@@ -579,22 +580,23 @@ class TestApplySemantics(unittest.TestCase):
         self.assertNotIn("for", added)  # the patch entry did not leak into the added rule
 
     def test_apply_is_reusable_across_inputs(self):
-        customization = AlertRulesCustomization.from_yaml("""
+        config = """
             remove:
               - where:
                   alert: HostDown
-            """)
+            """
+        customization = AlertRulesCustomization.from_yaml(config)
+
         result_1 = customization.apply(_sample_alerts())
         self.assertNotIn("HostDown", str(result_1["app-1"]))
         self.assertIn("app-2", result_1)
 
-        result_2 = customization.apply(
-            {
-                "other": {
-                    "groups": [{"name": "g", "rules": [{"alert": "HostDown", "expr": "up < 1"}]}]
-                }
+        other_relation_alerts = {
+            "other": {
+                "groups": [{"name": "g", "rules": [{"alert": "HostDown", "expr": "up < 1"}]}]
             }
-        )
+        }
+        result_2 = customization.apply(other_relation_alerts)
         self.assertEqual(result_2, {})
 
         # And the first input's result is unchanged by the second call.
