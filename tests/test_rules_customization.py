@@ -1,607 +1,576 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
+"""pytest-bdd step definitions for alert rule customization behavioural tests.
+
+Feature file: tests/features/alert_rule_customization.feature
+Schema/validation tests: tests/test_rules_customization_schema.py
+"""
 
 import copy
-import unittest
+
+import pytest
+from pytest_bdd import given, parsers, scenario, scenarios, then, when
 
 from cosl.rules_customization import (
     CUSTOM_ALERT_RULES_KEY,
     AlertRulesCustomization,
-    AlertRulesCustomizationError,
 )
+from conftest import find_rule
+
+scenarios("features/alert_rule_customization.feature")
 
 
-def _sample_alerts():
-    """Relation alerts dict in the same shape as MetricsConsumer.alerts."""
-    return {
-        "app-1": {
+# ---------------------------------------------------------------------------
+# Shared context fixture — carries state between Given/When/Then steps
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def ctx():
+    """Mutable context dict shared across steps within a scenario."""
+    return {}
+
+
+# ---------------------------------------------------------------------------
+# Given
+# ---------------------------------------------------------------------------
+
+
+@given("a set of relation alerts from two apps")
+def given_sample_alerts(ctx, sample_alerts):
+    ctx["alerts"] = sample_alerts
+    ctx["original"] = copy.deepcopy(sample_alerts)
+
+
+@given("a rule named \"GoneForever\" and a rule named \"Survivor\"")
+def given_gone_forever_and_survivor(ctx):
+    ctx["alerts"] = {
+        "app": {
             "groups": [
                 {
-                    "name": "group_a",
+                    "name": "g",
                     "rules": [
-                        {
-                            "alert": "HighLatency",
-                            "expr": "latency > 100",
-                            "for": "10m",
-                            "labels": {"severity": "critical", "juju_application": "app-1"},
-                            "annotations": {"summary": "latency is high"},
-                        },
-                        {
-                            "alert": "LowThroughput",
-                            "expr": "throughput < 10",
-                            "for": "5m",
-                            "labels": {"severity": "warning"},
-                        },
-                        {
-                            "record": "job:latency:mean5m",
-                            "expr": "avg(latency)",
-                            "labels": {"severity": "warning"},
-                        },
-                    ],
-                },
-                {
-                    "name": "group_b",
-                    "rules": [
-                        {"alert": "HostDown", "expr": "up < 1"},
-                    ],
-                },
-            ]
-        },
-        "app-2": {
-            "groups": [
-                {
-                    "name": "group_c",
-                    "rules": [
-                        {"alert": "OtherAlert", "expr": "x > 0"},
+                        {"alert": "GoneForever", "expr": "x", "for": "10m"},
+                        {"alert": "Survivor", "expr": "y", "for": "10m"},
                     ],
                 }
             ]
-        },
+        }
     }
+    ctx["original"] = copy.deepcopy(ctx["alerts"])
 
 
-def _find_rule(alerts, identifier, group_name, rule_name, *, by_record=False):
-    """Fetch a single rule from an alerts dict for assertions."""
-    key = "record" if by_record else "alert"
-    groups = alerts[identifier]["groups"]
-    group = next(g for g in groups if g["name"] == group_name)
-    return next(rule for rule in group["rules"] if rule.get(key) == rule_name)
+# ---------------------------------------------------------------------------
+# When — Remove
+# ---------------------------------------------------------------------------
 
 
-class TestFromYamlValidation(unittest.TestCase):
-    def test_invalid_yaml_raises(self):
-        with self.assertRaises(AlertRulesCustomizationError):
-            AlertRulesCustomization.from_yaml("remove: [unclosed")
+@when('I apply a customization that removes alert "LowThroughput"')
+def when_remove_low_throughput(ctx):
+    config = """
+remove:
+  - where:
+      alert: LowThroughput
+"""
+    ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
 
-    def test_non_mapping_top_level_raises(self):
-        for config in ("- a\n- b", "42", '"just a string"'):
-            with self.assertRaises(AlertRulesCustomizationError):
-                AlertRulesCustomization.from_yaml(config)
 
-    def test_unknown_top_level_key_raises(self):
-        config = """
-            remove:
-              - where:
-                  alert: Foo
-            destroy:
-              - where:
-                  alert: Foo
-            """
-        with self.assertRaisesRegex(AlertRulesCustomizationError, "top-level"):
-            AlertRulesCustomization.from_yaml(config)
+@when('I apply a customization that removes group "group_a"')
+def when_remove_group_a(ctx):
+    config = """
+remove:
+  - where:
+      group: group_a
+"""
+    ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
 
-    def test_remove_missing_where_raises(self):
-        with self.assertRaisesRegex(AlertRulesCustomizationError, "remove"):
-            AlertRulesCustomization.from_yaml("remove:\n  - alert: Foo")
 
-    def test_remove_empty_where_raises(self):
-        with self.assertRaisesRegex(AlertRulesCustomizationError, "'where' must not be empty"):
-            AlertRulesCustomization.from_yaml("remove:\n  - where: {}")
+@when('I apply a customization that removes alerts in group "group_a" with alert name "LowThroughput"')
+def when_remove_group_a_low_throughput(ctx):
+    config = """
+remove:
+  - where:
+      group: group_a
+      alert: LowThroughput
+"""
+    ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
 
-    def test_remove_unknown_where_key_raises(self):
-        with self.assertRaisesRegex(AlertRulesCustomizationError, "'where' keys"):
-            AlertRulesCustomization.from_yaml("remove:\n  - where:\n      expr: up < 1")
 
-    def test_patch_missing_where_raises(self):
-        with self.assertRaisesRegex(AlertRulesCustomizationError, "patch"):
-            AlertRulesCustomization.from_yaml("patch:\n  - set:\n      for: 5m")
+@when('I apply a customization that removes alerts with label "severity" equal to "warning"')
+def when_remove_by_severity_warning(ctx):
+    config = """
+remove:
+  - where:
+      labels:
+        severity: warning
+"""
+    ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
 
-    def test_patch_missing_set_raises(self):
-        with self.assertRaisesRegex(AlertRulesCustomizationError, "patch"):
-            AlertRulesCustomization.from_yaml("patch:\n  - where:\n      alert: Foo")
 
-    def test_patch_empty_where_raises(self):
-        with self.assertRaisesRegex(AlertRulesCustomizationError, "'where' must not be empty"):
-            AlertRulesCustomization.from_yaml("patch:\n  - where: {}\n    set:\n      for: 5m")
+@when('I apply a customization that removes alerts with annotation "summary" equal to "latency is high"')
+def when_remove_by_annotation(ctx):
+    config = """
+remove:
+  - where:
+      annotations:
+        summary: latency is high
+"""
+    ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
 
-    def test_patch_unknown_where_key_raises(self):
-        with self.assertRaisesRegex(AlertRulesCustomizationError, "'where' keys"):
-            AlertRulesCustomization.from_yaml(
-                "patch:\n  - where:\n      record: some:record\n    set:\n      expr: up"
-            )
 
-    def test_patch_unknown_set_key_raises(self):
-        with self.assertRaisesRegex(AlertRulesCustomizationError, "'set' keys"):
-            AlertRulesCustomization.from_yaml(
-                "patch:\n  - where:\n      alert: Foo\n    set:\n      duration: 5m"
-            )
+@when('I apply a customization that removes alerts with label "juju_application" equal to "app-1"')
+def when_remove_by_juju_application(ctx):
+    config = """
+remove:
+  - where:
+      labels:
+        juju_application: app-1
+"""
+    ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
 
-    def test_add_without_groups_raises(self):
-        with self.assertRaisesRegex(AlertRulesCustomizationError, "'add'"):
-            AlertRulesCustomization.from_yaml("add:\n  rules:\n    - alert: Foo\n      expr: up")
 
-    def test_add_groups_not_a_list_raises(self):
-        with self.assertRaisesRegex(AlertRulesCustomizationError, "'add.groups' must be a list"):
-            AlertRulesCustomization.from_yaml("add:\n  groups:\n    name: my-group\n    rules: []")
+@when('I apply a customization that removes alert "HighLatency" and alert "OtherAlert"')
+def when_remove_two_alerts(ctx):
+    config = """
+remove:
+  - where:
+      alert: HighLatency
+  - where:
+      alert: OtherAlert
+"""
+    ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
 
-    def test_add_group_missing_name_or_rules_raises(self):
-        for group in ("rules: []", "name: my-group"):
-            with self.assertRaisesRegex(AlertRulesCustomizationError, "add.groups"):
-                AlertRulesCustomization.from_yaml(f"add:\n  groups:\n    - {group}")
 
-    def test_add_malformed_values_raise(self):
-        cases = {
-            "add not a mapping": "add: groups",
-            "group not a mapping": "add:\n  groups:\n    - just-a-string",
-            "name not a string": "add:\n  groups:\n    - name: [1]\n      rules: []",
-            "rules not a list": "add:\n  groups:\n    - name: my-group\n      rules: nope",
+@when('I apply a customization that removes alert "HostDown"')
+def when_remove_host_down(ctx):
+    config = """
+remove:
+  - where:
+      alert: HostDown
+"""
+    ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
+
+
+@when('I apply a customization that removes alert "OtherAlert"')
+def when_remove_other_alert(ctx):
+    config = """
+remove:
+  - where:
+      alert: OtherAlert
+"""
+    ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
+
+
+# ---------------------------------------------------------------------------
+# When — Patch
+# ---------------------------------------------------------------------------
+
+
+@when('I apply a customization that patches alert "HighLatency" setting for to "30m"')
+def when_patch_for(ctx):
+    config = """
+patch:
+  - where:
+      alert: HighLatency
+    set:
+      for: 30m
+"""
+    ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
+
+
+@when('I apply a customization that patches alert "HighLatency" setting alert name to "RenamedLatency"')
+def when_patch_alert_name(ctx):
+    config = """
+patch:
+  - where:
+      alert: HighLatency
+    set:
+      alert: RenamedLatency
+"""
+    ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
+
+
+@when('I apply a customization that patches alert "HostDown" setting expr to "up == 0"')
+def when_patch_expr(ctx):
+    config = """
+patch:
+  - where:
+      alert: HostDown
+    set:
+      expr: up == 0
+"""
+    ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
+
+
+@when('I apply a customization that patches alert "HighLatency" setting label "severity" to "page" and adding label "extra" as "added"')
+def when_patch_labels(ctx):
+    config = """
+patch:
+  - where:
+      alert: HighLatency
+    set:
+      labels:
+        severity: page
+        extra: added
+"""
+    ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
+
+
+@when('I apply a customization that patches alert "HighLatency" setting label "juju_application" to "other-app"')
+def when_patch_juju_label(ctx):
+    config = """
+patch:
+  - where:
+      alert: HighLatency
+    set:
+      labels:
+        juju_application: other-app
+"""
+    ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
+
+
+@when('I apply a customization that patches alert "HighLatency" setting annotation "summary" to "new summary" and adding annotation "description" as "new description"')
+def when_patch_annotations(ctx):
+    config = """
+patch:
+  - where:
+      alert: HighLatency
+    set:
+      annotations:
+        summary: new summary
+        description: new description
+"""
+    ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
+
+
+@when('I apply a customization that patches all rules in group "group_a" setting expr to "hacked"')
+def when_patch_group_expr(ctx):
+    config = """
+patch:
+  - where:
+      group: group_a
+    set:
+      expr: hacked
+"""
+    ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
+
+
+@when('I apply a customization that patches alerts with label "severity" equal to "warning" setting label "severity" to "critical"')
+def when_patch_by_label(ctx):
+    config = """
+patch:
+  - where:
+      labels:
+        severity: warning
+    set:
+      labels:
+        severity: critical
+"""
+    ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
+
+
+# ---------------------------------------------------------------------------
+# When — Add
+# ---------------------------------------------------------------------------
+
+
+@when('I apply a customization that adds a group named "my-custom-alerts" with alert "MyAlert"')
+def when_add_group(ctx):
+    config = """
+add:
+  groups:
+    - name: my-custom-alerts
+      rules:
+        - alert: MyAlert
+          expr: up{juju_model="prod"} == 0
+          for: 5m
+"""
+    ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
+
+
+@when("I apply a customization that adds a group named \"my-custom-alerts\" with alert \"MyAlert\" and expr 'up{juju_model=\"prod\"} == 0'")
+def when_add_group_check_expr(ctx):
+    config = """
+add:
+  groups:
+    - name: my-custom-alerts
+      rules:
+        - alert: MyAlert
+          expr: 'up{juju_model="prod"} == 0'
+"""
+    ctx["customization"] = AlertRulesCustomization.from_yaml(config)
+    ctx["result"] = ctx["customization"].apply(ctx["alerts"])
+
+
+@when("I apply the same customization twice with an add block")
+def when_apply_twice_add(ctx):
+    config = """
+add:
+  groups:
+    - name: my-custom-alerts
+      rules:
+        - alert: MyAlert
+          expr: up == 0
+"""
+    ctx["customization"] = AlertRulesCustomization.from_yaml(config)
+    ctx["result1"] = ctx["customization"].apply(ctx["alerts"])
+    ctx["result2"] = ctx["customization"].apply(ctx["alerts"])
+
+
+@when("I mutate the alert name in the first result")
+def when_mutate_first_result(ctx):
+    ctx["result1"][CUSTOM_ALERT_RULES_KEY]["groups"][0]["rules"][0]["alert"] = "Mangled"
+
+
+# ---------------------------------------------------------------------------
+# When — Apply semantics
+# ---------------------------------------------------------------------------
+
+
+@when("I apply a customization that removes alert \"LowThroughput\" and patches alert \"HighLatency\"")
+def when_remove_and_patch(ctx):
+    config = """
+remove:
+  - where:
+      alert: LowThroughput
+patch:
+  - where:
+      alert: HighLatency
+    set:
+      for: 1h
+      labels:
+        severity: page
+"""
+    AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
+    ctx["result"] = ctx["alerts"]  # we check that the original is unchanged
+
+
+@when('I apply a customization that removes "GoneForever", patches "Survivor" for to "2m", and adds a new "GoneForever"')
+def when_order_of_operations(ctx):
+    config = """
+remove:
+  - where:
+      alert: GoneForever
+patch:
+  - where:
+      alert: GoneForever
+    set:
+      for: 1m
+  - where:
+      alert: Survivor
+    set:
+      for: 2m
+add:
+  groups:
+    - name: added
+      rules:
+        - alert: GoneForever
+          expr: up
+"""
+    ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
+
+
+@when("I apply the same remove customization to two different inputs")
+def when_reuse_customization(ctx):
+    config = """
+remove:
+  - where:
+      alert: HostDown
+"""
+    customization = AlertRulesCustomization.from_yaml(config)
+    ctx["result1"] = customization.apply(ctx["alerts"])
+    other = {
+        "other": {
+            "groups": [{"name": "g", "rules": [{"alert": "HostDown", "expr": "up < 1"}]}]
         }
-        for case, config in cases.items():
-            with self.subTest(case):
-                with self.assertRaises(AlertRulesCustomizationError):
-                    AlertRulesCustomization.from_yaml(config)
-
-    def test_operations_not_a_list_raises(self):
-        for key in ("remove", "patch"):
-            with self.assertRaisesRegex(AlertRulesCustomizationError, f"'{key}'"):
-                AlertRulesCustomization.from_yaml(f"{key}: not-a-list")
-
-    def test_malformed_operation_entries_raise(self):
-        cases = {
-            "where not a mapping": "remove:\n  - where: nope",
-            "where.alert not a string": "remove:\n  - where:\n      alert: [1, 2]",
-            "where.labels not a mapping": "remove:\n  - where:\n      labels: severity",
-            "set not a mapping": "patch:\n  - where:\n      alert: Foo\n    set: nope",
-            "set.expr not a string": (
-                "patch:\n  - where:\n      alert: Foo\n    set:\n      expr: {a: b}"
-            ),
-            "set.labels not a mapping": (
-                "patch:\n  - where:\n      alert: Foo\n    set:\n      labels: x"
-            ),
-            "remove entry not a mapping": "remove:\n  - just-a-string",
-            "patch entry not a mapping": "patch:\n  - just-a-string",
-        }
-        for case, config in cases.items():
-            with self.subTest(case):
-                with self.assertRaises(AlertRulesCustomizationError):
-                    AlertRulesCustomization.from_yaml(config)
+    }
+    ctx["result2"] = customization.apply(other)
 
 
-class TestNoOpConfigs(unittest.TestCase):
-    def _assert_noop(self, config_string):
-        sample = _sample_alerts()
-        result = AlertRulesCustomization.from_yaml(config_string).apply(sample)
-        self.assertEqual(result, sample)
-
-    def test_empty_config_is_noop(self):
-        self._assert_noop("")
-
-    def test_whitespace_config_is_noop(self):
-        self._assert_noop("   \n\t  ")
-
-    def test_none_parsing_config_is_noop(self):
-        # yaml.safe_load of these strings returns None or empty structures.
-        self._assert_noop("~")
-        self._assert_noop("# just a comment")
-        self._assert_noop("{}")
-
-    def test_zero_match_remove_is_noop(self):
-        config = """
-            remove:
-              - where:
-                  alert: NoSuchAlert
-              - where:
-                  labels:
-                    nope: nothing
-            """
-        self._assert_noop(config)
-
-    def test_zero_match_patch_is_noop(self):
-        config = """
-            patch:
-              - where:
-                  alert: NoSuchAlert
-                set:
-                  for: 1m
-            """
-        self._assert_noop(config)
+# ---------------------------------------------------------------------------
+# Then — Presence / absence of alerts
+# ---------------------------------------------------------------------------
 
 
-class TestRemove(unittest.TestCase):
-    def _apply(self, config):
-        return AlertRulesCustomization.from_yaml(config).apply(_sample_alerts())
-
-    def test_remove_by_alert_name(self):
-        config = """
-            remove:
-              - where:
-                  alert: LowThroughput
-            """
-        result = self._apply(config)
-
-        group_names = [g["name"] for g in result["app-1"]["groups"]]
-        self.assertEqual(group_names, ["group_a", "group_b"])
-        rule_names = [r.get("alert") for r in result["app-1"]["groups"][0]["rules"]]
-        self.assertEqual(rule_names, ["HighLatency", None])  # record remains
-
-    def test_remove_by_group_only_drops_entire_group_including_recording_rules(self):
-        config = """
-            remove:
-              - where:
-                  group: group_a
-            """
-        result = self._apply(config)
-
-        group_names = [g["name"] for g in result["app-1"]["groups"]]
-        self.assertEqual(group_names, ["group_b"])
-
-    def test_remove_group_with_other_selector_keeps_recording_rules(self):
-        config = """
-            remove:
-              - where:
-                  group: group_a
-                  alert: LowThroughput
-            """
-        result = self._apply(config)
-
-        group = next(g for g in result["app-1"]["groups"] if g["name"] == "group_a")
-        rule_names = [r.get("alert") or r.get("record") for r in group["rules"]]
-        # Only the matching alerting rule is removed; the rest survives.
-        self.assertEqual(rule_names, ["HighLatency", "job:latency:mean5m"])
-
-    def test_remove_by_alert_and_labels_combined(self):
-        config_matching = """
-            remove:
-              - where:
-                  alert: HighLatency
-                  labels:
-                    severity: critical
-            """
-        result = self._apply(config_matching)
-        self.assertNotIn("HighLatency", str(result))
-
-        # Same alert but non-matching label value: nothing removed.
-        config_not_matching = """
-            remove:
-              - where:
-                  alert: HighLatency
-                  labels:
-                    severity: warning
-            """
-        result = self._apply(config_not_matching)
-        self.assertIn("HighLatency", str(result))
-
-    def test_remove_by_group_and_labels_combined(self):
-        config = """
-            remove:
-              - where:
-                  group: group_a
-                  labels:
-                    severity: warning
-            """
-        result = self._apply(config)
-
-        group = next(g for g in result["app-1"]["groups"] if g["name"] == "group_a")
-        rule_names = [r.get("alert") or r.get("record") for r in group["rules"]]
-        # Both the alerting rule and the recording rule carry severity=warning,
-        # but only the alerting rule may be removed (group selector is combined).
-        self.assertEqual(rule_names, ["HighLatency", "job:latency:mean5m"])
-
-    def test_remove_by_annotations(self):
-        config = """
-            remove:
-              - where:
-                  annotations:
-                    summary: latency is high
-            """
-        result = self._apply(config)
-
-        self.assertNotIn("HighLatency", str(result))
-        self.assertIn("LowThroughput", str(result))
-
-    def test_remove_multiple_entries_are_ored(self):
-        config = """
-            remove:
-              - where:
-                  alert: HighLatency
-              - where:
-                  alert: OtherAlert
-            """
-        result = self._apply(config)
-
-        self.assertNotIn("HighLatency", str(result))
-        self.assertNotIn("OtherAlert", str(result))
-        self.assertIn("LowThroughput", str(result))
-        self.assertIn("HostDown", str(result))
-
-    def test_remove_prunes_empty_groups_and_drops_empty_identifiers(self):
-        config_pruning_group = """
-            remove:
-              - where:
-                  alert: HostDown
-            """
-        result = self._apply(config_pruning_group)
-        # group_b became empty and was pruned; app-1 keeps group_a only.
-        self.assertEqual([g["name"] for g in result["app-1"]["groups"]], ["group_a"])
-        self.assertIn("app-2", result)
-
-        config_dropping_identifier = """
-            remove:
-              - where:
-                  alert: OtherAlert
-            """
-        result = self._apply(config_dropping_identifier)
-        # app-2's only group became empty, so app-2 was dropped entirely.
-        self.assertNotIn("app-2", result)
-        self.assertIn("app-1", result)
-
-    def test_remove_preserves_recording_rules_when_group_not_sole_selector(self):
-        config = """
-            remove:
-              - where:
-                  labels:
-                    severity: warning
-            """
-        result = self._apply(config)
-
-        record = _find_rule(result, "app-1", "group_a", "job:latency:mean5m", by_record=True)
-        self.assertEqual(record["expr"], "avg(latency)")
+@then(parsers.parse('alert "{alert_name}" is absent from the result'))
+def then_alert_absent(ctx, alert_name):
+    assert alert_name not in str(ctx["result"])
 
 
-class TestPatch(unittest.TestCase):
-    def _apply(self, config):
-        return AlertRulesCustomization.from_yaml(config).apply(_sample_alerts())
-
-    def test_patch_updates_for(self):
-        config = """
-            patch:
-              - where:
-                  alert: HighLatency
-                set:
-                  for: 30m
-            """
-        result = self._apply(config)
-
-        self.assertEqual(_find_rule(result, "app-1", "group_a", "HighLatency")["for"], "30m")
-        # Untouched rule keeps its original value.
-        self.assertEqual(_find_rule(result, "app-1", "group_a", "LowThroughput")["for"], "5m")
-
-    def test_patch_replaces_alert_name(self):
-        config = """
-            patch:
-              - where:
-                  alert: HighLatency
-                set:
-                  alert: RenamedLatency
-            """
-        result = self._apply(config)
-
-        renamed = _find_rule(result, "app-1", "group_a", "RenamedLatency")
-        self.assertEqual(renamed["expr"], "latency > 100")
-
-    def test_patch_replaces_expr(self):
-        config = """
-            patch:
-              - where:
-                  alert: HostDown
-                set:
-                  expr: up == 0
-            """
-        result = self._apply(config)
-
-        self.assertEqual(_find_rule(result, "app-1", "group_b", "HostDown")["expr"], "up == 0")
-
-    def test_patch_merges_labels(self):
-        config = """
-            patch:
-              - where:
-                  alert: HighLatency
-                set:
-                  labels:
-                    severity: page
-                    extra: added
-            """
-        result = self._apply(config)
-
-        labels = _find_rule(result, "app-1", "group_a", "HighLatency")["labels"]
-        # existing key overwritten, new key added, other keys untouched
-        self.assertEqual(labels["severity"], "page")
-        self.assertEqual(labels["extra"], "added")
-        self.assertEqual(labels["juju_application"], "app-1")
-
-    def test_patch_merges_annotations(self):
-        config = """
-            patch:
-              - where:
-                  alert: HighLatency
-                set:
-                  annotations:
-                    summary: new summary
-                    description: new description
-            """
-        result = self._apply(config)
-
-        annotations = _find_rule(result, "app-1", "group_a", "HighLatency")["annotations"]
-        self.assertEqual(annotations["summary"], "new summary")
-        self.assertEqual(annotations["description"], "new description")
-
-    def test_patch_skips_recording_rules(self):
-        config = """
-            patch:
-              - where:
-                  group: group_a
-                set:
-                  expr: hacked
-            """
-        result = self._apply(config)
-
-        record = _find_rule(result, "app-1", "group_a", "job:latency:mean5m", by_record=True)
-        self.assertEqual(record["expr"], "avg(latency)")
-        # Alerting rules in the same group were patched.
-        self.assertEqual(_find_rule(result, "app-1", "group_a", "HighLatency")["expr"], "hacked")
-
-    def test_patch_matches_on_labels(self):
-        config = """
-            patch:
-              - where:
-                  labels:
-                    severity: warning
-                set:
-                  labels:
-                    severity: critical
-            """
-        result = self._apply(config)
-
-        self.assertEqual(
-            _find_rule(result, "app-1", "group_a", "LowThroughput")["labels"]["severity"],
-            "critical",
-        )
-        # The recording rule also has severity=warning but must not be patched.
-        record = _find_rule(result, "app-1", "group_a", "job:latency:mean5m", by_record=True)
-        self.assertEqual(record["labels"]["severity"], "warning")
-        # The alert in the other app is unaffected.
-        self.assertEqual(_find_rule(result, "app-2", "group_c", "OtherAlert")["expr"], "x > 0")
+@then(parsers.parse('alert "{alert_name}" is present in the result'))
+def then_alert_present(ctx, alert_name):
+    assert alert_name in str(ctx["result"])
 
 
-class TestAdd(unittest.TestCase):
-    _config = """
-        add:
-          groups:
-            - name: my-custom-alerts
-              rules:
-                - alert: MyAlert
-                  expr: up{juju_model="prod"} == 0
-                  for: 5m
-        """
-
-    def test_add_inserts_groups_under_fixed_key(self):
-        sample = _sample_alerts()
-        result = AlertRulesCustomization.from_yaml(self._config).apply(sample)
-
-        custom = result[CUSTOM_ALERT_RULES_KEY]
-        self.assertEqual(custom["groups"][0]["name"], "my-custom-alerts")
-        self.assertEqual(custom["groups"][0]["rules"][0]["alert"], "MyAlert")
-        # Existing identifiers are left untouched.
-        self.assertEqual(set(result), set(sample) | {CUSTOM_ALERT_RULES_KEY})
-
-    def test_added_rules_receive_no_topology_injection(self):
-        result = AlertRulesCustomization.from_yaml(self._config).apply(_sample_alerts())
-        rule = result[CUSTOM_ALERT_RULES_KEY]["groups"][0]["rules"][0]
-        self.assertEqual(rule["expr"], 'up{juju_model="prod"} == 0')
-        self.assertNotIn("labels", rule)
-
-    def test_added_rules_are_deep_copied(self):
-        customization = AlertRulesCustomization.from_yaml(self._config)
-        result = customization.apply({})
-        result[CUSTOM_ALERT_RULES_KEY]["groups"][0]["rules"][0]["alert"] = "Mangled"
-        # A subsequent apply() must not be affected by mutations of a previous output.
-        fresh = customization.apply({})[CUSTOM_ALERT_RULES_KEY]["groups"][0]["rules"][0]
-        self.assertEqual(fresh["alert"], "MyAlert")
+@then(parsers.parse('the recording rule "{record_name}" is present in the result'))
+def then_recording_rule_present(ctx, record_name):
+    assert record_name in str(ctx["result"])
 
 
-class TestApplySemantics(unittest.TestCase):
-    def test_input_is_not_mutated(self):
-        config = """
-            remove:
-              - where:
-                  alert: LowThroughput
-            patch:
-              - where:
-                  alert: HighLatency
-                set:
-                  for: 1h
-                  labels:
-                    severity: page
-            add:
-              groups:
-                - name: added
-                  rules:
-                    - alert: Added
-                      expr: up
-            """
-        sample = _sample_alerts()
-        snapshot = copy.deepcopy(sample)
-        AlertRulesCustomization.from_yaml(config).apply(sample)
-        self.assertEqual(sample, snapshot)
-
-    def test_order_of_operations_is_remove_then_patch_then_add(self):
-        config = """
-            remove:
-              - where:
-                  alert: GoneForever
-            patch:
-              - where:
-                  alert: GoneForever
-                set:
-                  for: 1m
-              - where:
-                  alert: Survivor
-                set:
-                  for: 2m
-            add:
-              groups:
-                - name: added
-                  rules:
-                    - alert: GoneForever
-                      expr: up
-            """
-        relation_alerts = {
-            "app": {
-                "groups": [
-                    {
-                        "name": "g",
-                        "rules": [
-                            {"alert": "GoneForever", "expr": "x", "for": "10m"},
-                            {"alert": "Survivor", "expr": "y", "for": "10m"},
-                        ],
-                    }
-                ]
-            }
-        }
-        result = AlertRulesCustomization.from_yaml(config).apply(relation_alerts)
-
-        rules = result["app"]["groups"][0]["rules"]
-        # Removed despite a patch entry targeting it; patch applied to the survivor;
-        # the added rule lands under the fixed key, untouched by remove/patch.
-        self.assertEqual([r["alert"] for r in rules], ["Survivor"])
-        self.assertEqual(rules[0]["for"], "2m")
-        added = result[CUSTOM_ALERT_RULES_KEY]["groups"][0]["rules"][0]
-        self.assertEqual(added["alert"], "GoneForever")
-        self.assertNotIn("for", added)  # the patch entry did not leak into the added rule
-
-    def test_apply_is_reusable_across_inputs(self):
-        config = """
-            remove:
-              - where:
-                  alert: HostDown
-            """
-        customization = AlertRulesCustomization.from_yaml(config)
-
-        result_1 = customization.apply(_sample_alerts())
-        self.assertNotIn("HostDown", str(result_1["app-1"]))
-        self.assertIn("app-2", result_1)
-
-        other_relation_alerts = {
-            "other": {
-                "groups": [{"name": "g", "rules": [{"alert": "HostDown", "expr": "up < 1"}]}]
-            }
-        }
-        result_2 = customization.apply(other_relation_alerts)
-        self.assertEqual(result_2, {})
-
-        # And the first input's result is unchanged by the second call.
-        self.assertIn("app-1", result_1)
+# ---------------------------------------------------------------------------
+# Then — Presence / absence of groups and identifiers
+# ---------------------------------------------------------------------------
 
 
-if __name__ == "__main__":
-    unittest.main()
+@then(parsers.parse('group "{group_name}" is absent from identifier "{identifier}"'))
+def then_group_absent(ctx, group_name, identifier):
+    result = ctx["result"]
+    if identifier not in result:
+        return  # identifier itself gone, group certainly absent
+    group_names = [g["name"] for g in result[identifier].get("groups", [])]
+    assert group_name not in group_names
+
+
+@then(parsers.parse('group "{group_name}" is present in identifier "{identifier}"'))
+def then_group_present(ctx, group_name, identifier):
+    result = ctx["result"]
+    assert identifier in result
+    group_names = [g["name"] for g in result[identifier].get("groups", [])]
+    assert group_name in group_names
+
+
+@then(parsers.parse('identifier "{identifier}" is absent from the result'))
+def then_identifier_absent(ctx, identifier):
+    assert identifier not in ctx["result"]
+
+
+@then(parsers.parse('identifier "{identifier}" is present in the result'))
+def then_identifier_present(ctx, identifier):
+    assert identifier in ctx["result"]
+
+
+# ---------------------------------------------------------------------------
+# Then — Rule field assertions
+# ---------------------------------------------------------------------------
+
+
+@then(parsers.parse('alert "{alert_name}" has for equal to "{value}"'))
+def then_alert_for(ctx, alert_name, value):
+    result = ctx["result"]
+    found = _find_alert_anywhere(result, alert_name)
+    assert found["for"] == value, f"expected for={value!r}, got {found.get('for')!r}"
+
+
+@then(parsers.parse("alert \"{alert_name}\" has expr equal to '{value}'"))
+def then_alert_expr_single_quoted(ctx, alert_name, value):
+    result = ctx["result"]
+    found = _find_alert_anywhere(result, alert_name)
+    assert found["expr"] == value, f"expected expr={value!r}, got {found.get('expr')!r}"
+
+
+@then(parsers.parse('alert "{alert_name}" has expr equal to "{value}"'))
+def then_alert_expr(ctx, alert_name, value):
+    result = ctx["result"]
+    found = _find_alert_anywhere(result, alert_name)
+    assert found["expr"] == value, f"expected expr={value!r}, got {found.get('expr')!r}"
+
+
+@then(parsers.parse('alert "{alert_name}" has label "{label_key}" equal to "{label_value}"'))
+def then_alert_label(ctx, alert_name, label_key, label_value):
+    result = ctx["result"]
+    found = _find_alert_anywhere(result, alert_name)
+    labels = found.get("labels", {})
+    assert labels.get(label_key) == label_value, (
+        f"expected label {label_key}={label_value!r}, got {labels.get(label_key)!r}"
+    )
+
+
+@then(parsers.parse('alert "{alert_name}" has annotation "{ann_key}" equal to "{ann_value}"'))
+def then_alert_annotation(ctx, alert_name, ann_key, ann_value):
+    result = ctx["result"]
+    found = _find_alert_anywhere(result, alert_name)
+    annotations = found.get("annotations", {})
+    assert annotations.get(ann_key) == ann_value, (
+        f"expected annotation {ann_key}={ann_value!r}, got {annotations.get(ann_key)!r}"
+    )
+
+
+@then(parsers.parse('alert "{alert_name}" has no labels'))
+def then_alert_no_labels(ctx, alert_name):
+    result = ctx["result"]
+    found = _find_alert_anywhere(result, alert_name)
+    assert not found.get("labels"), f"expected no labels, got {found.get('labels')!r}"
+
+
+@then(parsers.parse('the recording rule "{record_name}" has expr equal to "{value}"'))
+def then_recording_rule_expr(ctx, record_name, value):
+    result = ctx["result"]
+    found = _find_record_anywhere(result, record_name)
+    assert found["expr"] == value, f"expected expr={value!r}, got {found.get('expr')!r}"
+
+
+@then(parsers.parse('the recording rule "{record_name}" has label "{label_key}" equal to "{label_value}"'))
+def then_recording_rule_label(ctx, record_name, label_key, label_value):
+    result = ctx["result"]
+    found = _find_record_anywhere(result, record_name)
+    labels = found.get("labels", {})
+    assert labels.get(label_key) == label_value
+
+
+# ---------------------------------------------------------------------------
+# Then — Apply semantics
+# ---------------------------------------------------------------------------
+
+
+@then("the original input is unchanged")
+def then_original_unchanged(ctx):
+    assert ctx["alerts"] == ctx["original"]
+
+
+@then(parsers.parse('alert "{alert_name}" is absent from identifier "{identifier}"'))
+def then_alert_absent_from_identifier(ctx, alert_name, identifier):
+    result = ctx["result"]
+    if identifier not in result:
+        return
+    assert alert_name not in str(result[identifier])
+
+
+@then('alert "Survivor" has for equal to "2m"')
+def then_survivor_for(ctx):
+    rules = ctx["result"]["app"]["groups"][0]["rules"]
+    survivor = next(r for r in rules if r.get("alert") == "Survivor")
+    assert survivor["for"] == "2m"
+
+
+@then('the added alert "GoneForever" does not have a for field')
+def then_added_gone_forever_no_for(ctx):
+    added = ctx["result"][CUSTOM_ALERT_RULES_KEY]["groups"][0]["rules"][0]
+    assert added["alert"] == "GoneForever"
+    assert "for" not in added
+
+
+@then("the second result still contains alert \"MyAlert\"")
+def then_second_result_has_my_alert(ctx):
+    rule = ctx["result2"][CUSTOM_ALERT_RULES_KEY]["groups"][0]["rules"][0]
+    assert rule["alert"] == "MyAlert"
+
+
+@then("alert \"HostDown\" is absent from both results")
+def then_host_down_absent_both(ctx):
+    assert "HostDown" not in str(ctx["result1"])
+    assert "HostDown" not in str(ctx["result2"])
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _find_alert_anywhere(result, alert_name):
+    """Search all identifiers/groups for an alerting rule by name."""
+    for rule_file in result.values():
+        for group in rule_file.get("groups", []):
+            for rule in group.get("rules", []):
+                if rule.get("alert") == alert_name:
+                    return rule
+    raise AssertionError(f"Alert {alert_name!r} not found in result")
+
+
+def _find_record_anywhere(result, record_name):
+    """Search all identifiers/groups for a recording rule by name."""
+    for rule_file in result.values():
+        for group in rule_file.get("groups", []):
+            for rule in group.get("rules", []):
+                if rule.get("record") == record_name:
+                    return rule
+    raise AssertionError(f"Recording rule {record_name!r} not found in result")
