@@ -9,13 +9,12 @@ Schema/validation tests: tests/test_rules_customization_schema.py
 import copy
 
 import pytest
-from pytest_bdd import given, parsers, scenario, scenarios, then, when
+from pytest_bdd import given, parsers, scenarios, then, when
 
 from cosl.rules_customization import (
     CUSTOM_ALERT_RULES_KEY,
     AlertRulesCustomization,
 )
-from conftest import find_rule
 
 scenarios("features/alert_rule_customization.feature")
 
@@ -42,7 +41,7 @@ def given_sample_alerts(ctx, sample_alerts):
     ctx["original"] = copy.deepcopy(sample_alerts)
 
 
-@given("a rule named \"GoneForever\" and a rule named \"Survivor\"")
+@given('a rule named "GoneForever" and a rule named "Survivor"')
 def given_gone_forever_and_survivor(ctx):
     ctx["alerts"] = {
         "app": {
@@ -85,7 +84,9 @@ remove:
     ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
 
 
-@when('I apply a customization that removes alerts in group "group_a" with alert name "LowThroughput"')
+@when(
+    'I apply a customization that removes alerts in group "group_a" with alert name "LowThroughput"'
+)
 def when_remove_group_a_low_throughput(ctx):
     config = """
 remove:
@@ -107,7 +108,9 @@ remove:
     ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
 
 
-@when('I apply a customization that removes alerts with annotation "summary" equal to "latency is high"')
+@when(
+    'I apply a customization that removes alerts with annotation "summary" equal to "latency is high"'
+)
 def when_remove_by_annotation(ctx):
     config = """
 remove:
@@ -178,7 +181,9 @@ patch:
     ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
 
 
-@when('I apply a customization that patches alert "HighLatency" setting alert name to "RenamedLatency"')
+@when(
+    'I apply a customization that patches alert "HighLatency" setting alert name to "RenamedLatency"'
+)
 def when_patch_alert_name(ctx):
     config = """
 patch:
@@ -202,7 +207,9 @@ patch:
     ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
 
 
-@when('I apply a customization that patches alert "HighLatency" setting label "severity" to "page" and adding label "extra" as "added"')
+@when(
+    'I apply a customization that patches alert "HighLatency" setting label "severity" to "page" and adding label "extra" as "added"'
+)
 def when_patch_labels(ctx):
     config = """
 patch:
@@ -216,7 +223,9 @@ patch:
     ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
 
 
-@when('I apply a customization that patches alert "HighLatency" setting label "juju_application" to "other-app"')
+@when(
+    'I apply a customization that patches alert "HighLatency" setting label "juju_application" to "other-app"'
+)
 def when_patch_juju_label(ctx):
     config = """
 patch:
@@ -229,7 +238,9 @@ patch:
     ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
 
 
-@when('I apply a customization that patches alert "HighLatency" setting annotation "summary" to "new summary" and adding annotation "description" as "new description"')
+@when(
+    'I apply a customization that patches alert "HighLatency" setting annotation "summary" to "new summary" and adding annotation "description" as "new description"'
+)
 def when_patch_annotations(ctx):
     config = """
 patch:
@@ -255,7 +266,9 @@ patch:
     ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
 
 
-@when('I apply a customization that patches alerts with label "severity" equal to "warning" setting label "severity" to "critical"')
+@when(
+    'I apply a customization that patches alerts with label "severity" equal to "warning" setting label "severity" to "critical"'
+)
 def when_patch_by_label(ctx):
     config = """
 patch:
@@ -288,7 +301,9 @@ add:
     ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
 
 
-@when("I apply a customization that adds a group named \"my-custom-alerts\" with alert \"MyAlert\" and expr 'up{juju_model=\"prod\"} == 0'")
+@when(
+    'I apply a customization that adds a group named "my-custom-alerts" with alert "MyAlert" and expr \'up{juju_model="prod"} == 0\''
+)
 def when_add_group_check_expr(ctx):
     config = """
 add:
@@ -327,7 +342,7 @@ def when_mutate_first_result(ctx):
 # ---------------------------------------------------------------------------
 
 
-@when("I apply a customization that removes alert \"LowThroughput\" and patches alert \"HighLatency\"")
+@when('I apply a customization that removes alert "LowThroughput" and patches alert "HighLatency"')
 def when_remove_and_patch(ctx):
     config = """
 remove:
@@ -345,7 +360,9 @@ patch:
     ctx["result"] = ctx["alerts"]  # we check that the original is unchanged
 
 
-@when('I apply a customization that removes "GoneForever", patches "Survivor" for to "2m", and adds a new "GoneForever"')
+@when(
+    'I apply a customization that removes "GoneForever", patches "Survivor" for to "2m", and adds a new "GoneForever"'
+)
 def when_order_of_operations(ctx):
     config = """
 remove:
@@ -380,9 +397,7 @@ remove:
     customization = AlertRulesCustomization.from_yaml(config)
     ctx["result1"] = customization.apply(ctx["alerts"])
     other = {
-        "other": {
-            "groups": [{"name": "g", "rules": [{"alert": "HostDown", "expr": "up < 1"}]}]
-        }
+        "other": {"groups": [{"name": "g", "rules": [{"alert": "HostDown", "expr": "up < 1"}]}]}
     }
     ctx["result2"] = customization.apply(other)
 
@@ -470,9 +485,9 @@ def then_alert_label(ctx, alert_name, label_key, label_value):
     result = ctx["result"]
     found = _find_alert_anywhere(result, alert_name)
     labels = found.get("labels", {})
-    assert labels.get(label_key) == label_value, (
-        f"expected label {label_key}={label_value!r}, got {labels.get(label_key)!r}"
-    )
+    assert (
+        labels.get(label_key) == label_value
+    ), f"expected label {label_key}={label_value!r}, got {labels.get(label_key)!r}"
 
 
 @then(parsers.parse('alert "{alert_name}" has annotation "{ann_key}" equal to "{ann_value}"'))
@@ -480,9 +495,9 @@ def then_alert_annotation(ctx, alert_name, ann_key, ann_value):
     result = ctx["result"]
     found = _find_alert_anywhere(result, alert_name)
     annotations = found.get("annotations", {})
-    assert annotations.get(ann_key) == ann_value, (
-        f"expected annotation {ann_key}={ann_value!r}, got {annotations.get(ann_key)!r}"
-    )
+    assert (
+        annotations.get(ann_key) == ann_value
+    ), f"expected annotation {ann_key}={ann_value!r}, got {annotations.get(ann_key)!r}"
 
 
 @then(parsers.parse('alert "{alert_name}" has no labels'))
@@ -499,7 +514,11 @@ def then_recording_rule_expr(ctx, record_name, value):
     assert found["expr"] == value, f"expected expr={value!r}, got {found.get('expr')!r}"
 
 
-@then(parsers.parse('the recording rule "{record_name}" has label "{label_key}" equal to "{label_value}"'))
+@then(
+    parsers.parse(
+        'the recording rule "{record_name}" has label "{label_key}" equal to "{label_value}"'
+    )
+)
 def then_recording_rule_label(ctx, record_name, label_key, label_value):
     result = ctx["result"]
     found = _find_record_anywhere(result, record_name)
@@ -539,13 +558,13 @@ def then_added_gone_forever_no_for(ctx):
     assert "for" not in added
 
 
-@then("the second result still contains alert \"MyAlert\"")
+@then('the second result still contains alert "MyAlert"')
 def then_second_result_has_my_alert(ctx):
     rule = ctx["result2"][CUSTOM_ALERT_RULES_KEY]["groups"][0]["rules"][0]
     assert rule["alert"] == "MyAlert"
 
 
-@then("alert \"HostDown\" is absent from both results")
+@then('alert "HostDown" is absent from both results')
 def then_host_down_absent_both(ctx):
     assert "HostDown" not in str(ctx["result1"])
     assert "HostDown" not in str(ctx["result2"])
