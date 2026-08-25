@@ -123,3 +123,8 @@ ignore-words-list = "assertIn"
 [tool.hatch.metadata]
 # allow git+ dependencies in pyproject
 allow-direct-references = true
+
+[dependency-groups]
+test = [
+    "pytest>=8.3.5",
+]

@@ -5,7 +5,6 @@ import copy
 import unittest
 
 from cosl.rules_customization import (
-    CUSTOM_ALERT_RULES_KEY,
     AlertRulesCustomization,
     AlertRulesCustomizationError,
 )
@@ -125,31 +124,6 @@ class TestFromYamlValidation(unittest.TestCase):
             AlertRulesCustomization.from_yaml(
                 "patch:\n  - where:\n      alert: Foo\n    set:\n      duration: 5m"
             )
-
-    def test_add_without_groups_raises(self):
-        with self.assertRaisesRegex(AlertRulesCustomizationError, "'add'"):
-            AlertRulesCustomization.from_yaml("add:\n  rules:\n    - alert: Foo\n      expr: up")
-
-    def test_add_groups_not_a_list_raises(self):
-        with self.assertRaisesRegex(AlertRulesCustomizationError, "'add.groups' must be a list"):
-            AlertRulesCustomization.from_yaml("add:\n  groups:\n    name: my-group\n    rules: []")
-
-    def test_add_group_missing_name_or_rules_raises(self):
-        for group in ("rules: []", "name: my-group"):
-            with self.assertRaisesRegex(AlertRulesCustomizationError, "add.groups"):
-                AlertRulesCustomization.from_yaml(f"add:\n  groups:\n    - {group}")
-
-    def test_add_malformed_values_raise(self):
-        cases = {
-            "add not a mapping": "add: groups",
-            "group not a mapping": "add:\n  groups:\n    - just-a-string",
-            "name not a string": "add:\n  groups:\n    - name: [1]\n      rules: []",
-            "rules not a list": "add:\n  groups:\n    - name: my-group\n      rules: nope",
-        }
-        for case, config in cases.items():
-            with self.subTest(case):
-                with self.assertRaises(AlertRulesCustomizationError):
-                    AlertRulesCustomization.from_yaml(config)
 
     def test_operations_not_a_list_raises(self):
         for key in ("remove", "patch"):
@@ -472,43 +446,6 @@ class TestPatch(unittest.TestCase):
         # The alert in the other app is unaffected.
         self.assertEqual(_find_rule(result, "app-2", "group_c", "OtherAlert")["expr"], "x > 0")
 
-
-class TestAdd(unittest.TestCase):
-    _config = """
-        add:
-          groups:
-            - name: my-custom-alerts
-              rules:
-                - alert: MyAlert
-                  expr: up{juju_model="prod"} == 0
-                  for: 5m
-        """
-
-    def test_add_inserts_groups_under_fixed_key(self):
-        sample = _sample_alerts()
-        result = AlertRulesCustomization.from_yaml(self._config).apply(sample)
-
-        custom = result[CUSTOM_ALERT_RULES_KEY]
-        self.assertEqual(custom["groups"][0]["name"], "my-custom-alerts")
-        self.assertEqual(custom["groups"][0]["rules"][0]["alert"], "MyAlert")
-        # Existing identifiers are left untouched.
-        self.assertEqual(set(result), set(sample) | {CUSTOM_ALERT_RULES_KEY})
-
-    def test_added_rules_receive_no_topology_injection(self):
-        result = AlertRulesCustomization.from_yaml(self._config).apply(_sample_alerts())
-        rule = result[CUSTOM_ALERT_RULES_KEY]["groups"][0]["rules"][0]
-        self.assertEqual(rule["expr"], 'up{juju_model="prod"} == 0')
-        self.assertNotIn("labels", rule)
-
-    def test_added_rules_are_deep_copied(self):
-        customization = AlertRulesCustomization.from_yaml(self._config)
-        result = customization.apply({})
-        result[CUSTOM_ALERT_RULES_KEY]["groups"][0]["rules"][0]["alert"] = "Mangled"
-        # A subsequent apply() must not be affected by mutations of a previous output.
-        fresh = customization.apply({})[CUSTOM_ALERT_RULES_KEY]["groups"][0]["rules"][0]
-        self.assertEqual(fresh["alert"], "MyAlert")
-
-
 class TestApplySemantics(unittest.TestCase):
     def test_input_is_not_mutated(self):
         config = """
@@ -522,19 +459,13 @@ class TestApplySemantics(unittest.TestCase):
                   for: 1h
                   labels:
                     severity: page
-            add:
-              groups:
-                - name: added
-                  rules:
-                    - alert: Added
-                      expr: up
             """
         sample = _sample_alerts()
         snapshot = copy.deepcopy(sample)
         AlertRulesCustomization.from_yaml(config).apply(sample)
         self.assertEqual(sample, snapshot)
 
-    def test_order_of_operations_is_remove_then_patch_then_add(self):
+    def test_order_of_operations_is_remove_then_patch(self):
         config = """
             remove:
               - where:
@@ -548,12 +479,6 @@ class TestApplySemantics(unittest.TestCase):
                   alert: Survivor
                 set:
                   for: 2m
-            add:
-              groups:
-                - name: added
-                  rules:
-                    - alert: GoneForever
-                      expr: up
             """
         relation_alerts = {
             "app": {
@@ -571,13 +496,9 @@ class TestApplySemantics(unittest.TestCase):
         result = AlertRulesCustomization.from_yaml(config).apply(relation_alerts)
 
         rules = result["app"]["groups"][0]["rules"]
-        # Removed despite a patch entry targeting it; patch applied to the survivor;
-        # the added rule lands under the fixed key, untouched by remove/patch.
+        # Removed despite a patch entry targeting it; patch applied to the survivor.
         self.assertEqual([r["alert"] for r in rules], ["Survivor"])
         self.assertEqual(rules[0]["for"], "2m")
-        added = result[CUSTOM_ALERT_RULES_KEY]["groups"][0]["rules"][0]
-        self.assertEqual(added["alert"], "GoneForever")
-        self.assertNotIn("for", added)  # the patch entry did not leak into the added rule
 
     def test_apply_is_reusable_across_inputs(self):
         config = """

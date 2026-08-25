@@ -9,13 +9,11 @@ takes relation-derived alert rule files (the same dict that relation libraries s
 ``MetricsConsumer.alerts`` produce) and an admin-provided YAML customization config, and
 returns the modified rules in the same format.
 
-The customization config supports three top-level keys:
+The customization config supports two top-level keys:
 
 - ``remove``: drop matching alerting rules (or entire groups, when ``group`` is the only
   selector).
 - ``patch``: modify matching alerting rules by merging a ``set`` block into them.
-- ``add``: insert admin-authored rule groups into the output under the fixed key
-  ``custom_alert_rules``.
 
 Matching is performed via a ``where`` block, supporting exact equality on ``alert``,
 ``group``, ``labels`` and ``annotations``. All fields within one ``where`` are ANDed;
@@ -23,9 +21,6 @@ multiple entries in the ``remove``/``patch`` lists provide OR semantics.
 
 Recording rules are never removed or patched unless an entire group is dropped via a
 group-only ``where`` selector.
-
-Rules added via the ``add`` block do NOT receive automatic Juju topology injection: the
-admin must include topology matchers in their expressions and labels manually.
 
 This class is a pure transformation helper. It does not call CosTool, Pebble,
 Prometheus, Loki or Mimir APIs, does not write files and does not set statuses.
@@ -44,10 +39,7 @@ from .types import OfficialRuleFileFormat
 
 logger = logging.getLogger(__name__)
 
-CUSTOM_ALERT_RULES_KEY = "custom_alert_rules"
-"""Fixed output key under which rules from the ``add`` block are inserted."""
-
-_VALID_TOP_LEVEL_KEYS = frozenset({"remove", "patch", "add"})
+_VALID_TOP_LEVEL_KEYS = frozenset({"remove", "patch"})
 _VALID_WHERE_KEYS = frozenset({"alert", "group", "labels", "annotations"})
 _VALID_SET_KEYS = frozenset({"alert", "expr", "for", "labels", "annotations"})
 
@@ -167,45 +159,8 @@ def _validate_patch(entries: Any) -> List[Dict[str, Any]]:
     return validated
 
 
-def _validate_add(add_block: Any) -> Optional[OfficialRuleFileFormat]:
-    """Validate the ``add`` block and return it.
-
-    Raises:
-        AlertRulesCustomizationError: if the add block does not conform to the
-            official rule file format shape.
-    """
-    if add_block is None:
-        return None
-    if not isinstance(add_block, collections.abc.Mapping):
-        raise AlertRulesCustomizationError("'add' must be a mapping with a 'groups' key")
-    validated_add: Dict[str, Any] = dict(cast(Mapping[Any, Any], add_block))
-    if "groups" not in validated_add:
-        raise AlertRulesCustomizationError("'add': missing required key 'groups'")
-    if not isinstance(validated_add["groups"], list):
-        raise AlertRulesCustomizationError("'add.groups' must be a list")
-    groups: List[Any] = cast(List[Any], validated_add["groups"])
-    for index, item in enumerate(groups):
-        if not isinstance(item, collections.abc.Mapping):
-            raise AlertRulesCustomizationError(f"'add.groups[{index}]' must be a mapping")
-        group: Dict[str, Any] = dict(cast(Mapping[Any, Any], item))
-        name = group.get("name")
-        if name is None:
-            raise AlertRulesCustomizationError(
-                f"'add.groups[{index}]': missing required key 'name'"
-            )
-        if not isinstance(name, str):
-            raise AlertRulesCustomizationError(f"'add.groups[{index}].name' must be a string")
-        if "rules" not in group:
-            raise AlertRulesCustomizationError(
-                f"'add.groups[{index}]': missing required key 'rules'"
-            )
-        if not isinstance(group["rules"], list):
-            raise AlertRulesCustomizationError(f"'add.groups[{index}].rules' must be a list")
-    return cast(OfficialRuleFileFormat, validated_add)
-
-
 class AlertRulesCustomization:
-    """Apply admin-defined remove/patch/add operations to relation-derived alert rules.
+    """Apply admin-defined remove/patch operations to relation-derived alert rules.
 
     Build an instance with :meth:`from_yaml`, then call :meth:`apply` on the alerts dict
     (e.g. ``self.metrics_consumer.alerts``). The instance is reusable: ``apply()`` can be
@@ -216,7 +171,6 @@ class AlertRulesCustomization:
         self,
         remove: Optional[List[Dict[str, Any]]] = None,
         patch: Optional[List[Dict[str, Any]]] = None,
-        add: Optional[OfficialRuleFileFormat] = None,
     ):
         r"""Build a customization object from pre-validated operation blocks.
 
@@ -224,7 +178,6 @@ class AlertRulesCustomization:
         """
         self._remove: List[Dict[str, Any]] = remove or []
         self._patch: List[Dict[str, Any]] = patch or []
-        self._add: Optional[OfficialRuleFileFormat] = copy.deepcopy(add)
 
     @classmethod
     def from_yaml(cls, config_string: str) -> "AlertRulesCustomization":
@@ -239,10 +192,9 @@ class AlertRulesCustomization:
 
         Raises:
             AlertRulesCustomizationError: on invalid YAML, unknown top-level keys
-                (only ``remove``, ``patch``, ``add`` are allowed), invalid operation
+                (only ``remove``, ``patch`` are allowed), invalid operation
                 shape (missing ``where``, unknown selector keys, unknown set keys),
-                empty ``where`` selectors, or an ``add`` block not conforming to the
-                official rule file format shape.
+                empty ``where`` selectors.
         """
         if not config_string or not config_string.strip():
             # Empty or whitespace-only config: no-op.
@@ -274,15 +226,14 @@ class AlertRulesCustomization:
         return cls(
             remove=_validate_remove(config.get("remove")),
             patch=_validate_patch(config.get("patch")),
-            add=_validate_add(config.get("add")),
         )
 
     def apply(
         self, relation_alerts: Mapping[str, OfficialRuleFileFormat]
     ) -> Dict[str, OfficialRuleFileFormat]:
-        """Apply remove, patch and add operations to the input rules.
+        """Apply remove and patch operations to the input rules.
 
-        Operations run in this order: remove, patch, add. The input is never mutated;
+        Operations run in this order: remove, patch. The input is never mutated;
         the transformations operate on a deep copy.
 
         Args:
@@ -291,14 +242,12 @@ class AlertRulesCustomization:
 
         Returns:
             The transformed rules, in the same format as the input. Identifiers whose
-            ``groups`` list becomes empty after removal are dropped. If ``add`` is
-            configured, its groups are inserted under ``custom_alert_rules``.
+            ``groups`` list becomes empty after removal are dropped.
         """
         output: Dict[str, OfficialRuleFileFormat] = copy.deepcopy(dict(relation_alerts))
 
         self._apply_remove(output)
         self._apply_patch(output)
-        self._apply_add(output)
 
         return output
 
@@ -432,16 +381,4 @@ class AlertRulesCustomization:
             group_name,
             identifier,
             ", ".join(changes),
-        )
-
-    def _apply_add(self, output: Dict[str, OfficialRuleFileFormat]) -> None:
-        """Insert the ``add`` block's groups under the fixed custom alert rules key."""
-        if self._add is None:
-            return
-        output[CUSTOM_ALERT_RULES_KEY] = copy.deepcopy(self._add)
-        added_groups = cast(List[Any], self._add.get("groups", []))
-        logger.debug(
-            "Added %d group(s) under '%s'",
-            len(added_groups),
-            CUSTOM_ALERT_RULES_KEY,
         )
