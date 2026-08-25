@@ -446,6 +446,7 @@ class TestPatch(unittest.TestCase):
         # The alert in the other app is unaffected.
         self.assertEqual(_find_rule(result, "app-2", "group_c", "OtherAlert")["expr"], "x > 0")
 
+
 class TestApplySemantics(unittest.TestCase):
     def test_input_is_not_mutated(self):
         config = """
