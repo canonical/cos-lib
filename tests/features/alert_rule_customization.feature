@@ -1,7 +1,7 @@
 Feature: Alert rule customization
   As a COS admin
   I want to customize relation-derived alert rules via a YAML config
-  So that I can remove, patch, or add rules without modifying charm code
+  So that I can remove or patch rules without modifying charm code
 
   Background:
     Given a set of relation alerts from two apps
@@ -104,28 +104,6 @@ Feature: Alert rule customization
     And the recording rule "job:latency:mean5m" has label "severity" equal to "warning"
 
   # ---------------------------------------------------------------------------
-  # Add
-  # ---------------------------------------------------------------------------
-
-  Scenario: Add inserts groups under the fixed key custom_alert_rules
-    When I apply a customization that adds a group named "my-custom-alerts" with alert "MyAlert"
-    Then identifier "custom_alert_rules" is present in the result
-    And group "my-custom-alerts" is present in identifier "custom_alert_rules"
-    And alert "MyAlert" is present in the result
-    And identifier "app-1" is present in the result
-    And identifier "app-2" is present in the result
-
-  Scenario: Added rules receive no topology injection
-    When I apply a customization that adds a group named "my-custom-alerts" with alert "MyAlert" and expr 'up{juju_model="prod"} == 0'
-    Then alert "MyAlert" has expr equal to 'up{juju_model="prod"} == 0'
-    And alert "MyAlert" has no labels
-
-  Scenario: Added rules are deep copied so mutations do not affect subsequent apply calls
-    When I apply the same customization twice with an add block
-    And I mutate the alert name in the first result
-    Then the second result still contains alert "MyAlert"
-
-  # ---------------------------------------------------------------------------
   # Apply semantics
   # ---------------------------------------------------------------------------
 
@@ -133,13 +111,11 @@ Feature: Alert rule customization
     When I apply a customization that removes alert "LowThroughput" and patches alert "HighLatency"
     Then the original input is unchanged
 
-  Scenario: Operations are applied in order remove then patch then add
+  Scenario: Operations are applied in order remove then patch
     Given a rule named "GoneForever" and a rule named "Survivor"
-    When I apply a customization that removes "GoneForever", patches "Survivor" for to "2m", and adds a new "GoneForever"
+    When I apply a customization that removes "GoneForever" and patches "Survivor" for to "2m"
     Then alert "GoneForever" is absent from identifier "app"
     And alert "Survivor" has for equal to "2m"
-    And identifier "custom_alert_rules" is present in the result
-    And the added alert "GoneForever" does not have a for field
 
   Scenario: The customization instance is reusable across different inputs
     When I apply the same remove customization to two different inputs

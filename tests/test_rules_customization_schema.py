@@ -94,31 +94,6 @@ class TestFromYamlValidation(unittest.TestCase):
                 "patch:\n  - where:\n      alert: Foo\n    set:\n      duration: 5m"
             )
 
-    def test_add_without_groups_raises(self):
-        with self.assertRaisesRegex(AlertRulesCustomizationError, "'add'"):
-            AlertRulesCustomization.from_yaml("add:\n  rules:\n    - alert: Foo\n      expr: up")
-
-    def test_add_groups_not_a_list_raises(self):
-        with self.assertRaisesRegex(AlertRulesCustomizationError, "'add.groups' must be a list"):
-            AlertRulesCustomization.from_yaml("add:\n  groups:\n    name: my-group\n    rules: []")
-
-    def test_add_group_missing_name_or_rules_raises(self):
-        for group in ("rules: []", "name: my-group"):
-            with self.assertRaisesRegex(AlertRulesCustomizationError, "add.groups"):
-                AlertRulesCustomization.from_yaml(f"add:\n  groups:\n    - {group}")
-
-    def test_add_malformed_values_raise(self):
-        cases = {
-            "add not a mapping": "add: groups",
-            "group not a mapping": "add:\n  groups:\n    - just-a-string",
-            "name not a string": "add:\n  groups:\n    - name: [1]\n      rules: []",
-            "rules not a list": "add:\n  groups:\n    - name: my-group\n      rules: nope",
-        }
-        for case, config in cases.items():
-            with self.subTest(case):
-                with self.assertRaises(AlertRulesCustomizationError):
-                    AlertRulesCustomization.from_yaml(config)
-
     def test_operations_not_a_list_raises(self):
         for key in ("remove", "patch"):
             with self.assertRaisesRegex(AlertRulesCustomizationError, f"'{key}'"):
