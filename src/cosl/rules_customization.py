@@ -34,129 +34,110 @@ import logging
 from typing import Any, Dict, List, Mapping, Optional, cast
 
 import yaml
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from .types import OfficialRuleFileFormat
 
 logger = logging.getLogger(__name__)
 
-_VALID_TOP_LEVEL_KEYS = frozenset({"remove", "patch"})
-_VALID_WHERE_KEYS = frozenset({"alert", "group", "labels", "annotations"})
-_VALID_SET_KEYS = frozenset({"alert", "expr", "for", "labels", "annotations"})
+
+# ---------------------------------------------------------------------------
+# Pydantic models for config validation
+# ---------------------------------------------------------------------------
+
+
+class _WhereBlock(BaseModel):
+    alert: Optional[str] = None
+    group: Optional[str] = None
+    labels: Optional[Dict[str, str]] = None
+    annotations: Optional[Dict[str, str]] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("labels", "annotations")
+    @classmethod
+    def _validate_mapping(cls, v: Any) -> Optional[Dict[str, str]]:  # type: ignore[return]
+        if v is not None and not isinstance(v, collections.abc.Mapping):
+            raise ValueError("must be a mapping of key-value pairs")
+        return v  # type: ignore[return-value]
+
+    @model_validator(mode="after")
+    def _not_empty(self):
+        if not any([self.alert, self.group, self.labels, self.annotations]):
+            raise ValueError("'where' must not be empty")
+        return self
+
+
+class _SetBlock(BaseModel):
+    alert: Optional[str] = None
+    expr: Optional[str] = None
+    for_: Optional[str] = Field(default=None, alias="for")
+    labels: Optional[Dict[str, str]] = None
+    annotations: Optional[Dict[str, str]] = None
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    @field_validator("labels", "annotations")
+    @classmethod
+    def _validate_mapping(cls, v: Any) -> Optional[Dict[str, str]]:  # type: ignore[return]
+        if v is not None and not isinstance(v, collections.abc.Mapping):
+            raise ValueError("must be a mapping of key-value pairs")
+        return v  # type: ignore[return-value]
+
+    @model_validator(mode="after")
+    def _not_empty(self):
+        if not any(
+            [
+                self.alert,
+                self.expr,
+                self.for_,
+                self.labels,
+                self.annotations,
+            ]
+        ):
+            raise ValueError("'set' must not be empty")
+        return self
+
+
+class _RemoveOperation(BaseModel):
+    where: _WhereBlock
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class _PatchOperation(BaseModel):
+    where: _WhereBlock
+    set: _SetBlock
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class _RulesCustomizationConfig(BaseModel):
+    remove: Optional[List[_RemoveOperation]] = None
+    patch: Optional[List[_PatchOperation]] = None
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class AlertRulesCustomizationError(Exception):
     """Raised when the alert rules customization configuration is invalid."""
 
 
-def _validate_where(where: Any, context: str) -> Dict[str, Any]:
-    """Validate a ``where`` selector block and return it as a plain dict.
-
-    Raises:
-        AlertRulesCustomizationError: if the where block is missing, not a mapping,
-            empty, contains unknown keys, or has wrongly-typed values.
-    """
-    if not isinstance(where, collections.abc.Mapping):
-        raise AlertRulesCustomizationError(f"{context}: 'where' must be a mapping")
-    validated_where: Dict[str, Any] = dict(cast(Mapping[Any, Any], where))
-    if not validated_where:
-        raise AlertRulesCustomizationError(f"{context}: 'where' must not be empty")
-    unknown_keys = set(validated_where.keys()) - _VALID_WHERE_KEYS
-    if unknown_keys:
-        raise AlertRulesCustomizationError(
-            f"{context}: unknown 'where' keys {sorted(unknown_keys)}; "
-            f"expected a subset of {sorted(_VALID_WHERE_KEYS)}"
-        )
-    for key in ("alert", "group"):
-        if key in validated_where and not isinstance(validated_where[key], str):
-            raise AlertRulesCustomizationError(f"{context}: 'where.{key}' must be a string")
-    for key in ("labels", "annotations"):
-        if key in validated_where and not isinstance(
-            validated_where[key], collections.abc.Mapping
-        ):
-            raise AlertRulesCustomizationError(
-                f"{context}: 'where.{key}' must be a mapping of key-value pairs"
-            )
-    return validated_where
-
-
-def _validate_set(set_block: Any, context: str) -> Dict[str, Any]:
-    """Validate a patch ``set`` block and return it as a plain dict.
-
-    Raises:
-        AlertRulesCustomizationError: if the set block is missing, not a mapping,
-            contains unknown keys, or has wrongly-typed values.
-    """
-    if not isinstance(set_block, collections.abc.Mapping):
-        raise AlertRulesCustomizationError(f"{context}: 'set' must be a mapping")
-    validated_set: Dict[str, Any] = dict(cast(Mapping[Any, Any], set_block))
-    unknown_keys = set(validated_set.keys()) - _VALID_SET_KEYS
-    if unknown_keys:
-        raise AlertRulesCustomizationError(
-            f"{context}: unknown 'set' keys {sorted(unknown_keys)}; "
-            f"expected a subset of {sorted(_VALID_SET_KEYS)}"
-        )
-    for key in ("alert", "expr", "for"):
-        if key in validated_set and not isinstance(validated_set[key], str):
-            raise AlertRulesCustomizationError(f"{context}: 'set.{key}' must be a string")
-    for key in ("labels", "annotations"):
-        if key in validated_set and not isinstance(validated_set[key], collections.abc.Mapping):
-            raise AlertRulesCustomizationError(
-                f"{context}: 'set.{key}' must be a mapping of key-value pairs"
-            )
-    return validated_set
-
-
-def _validate_remove(entries: Any) -> List[Dict[str, Any]]:
-    """Validate the ``remove`` operation list and return it.
-
-    Raises:
-        AlertRulesCustomizationError: if the operation list is malformed.
-    """
-    if entries is None:
-        return []
-    if not isinstance(entries, list):
-        raise AlertRulesCustomizationError("'remove' must be a list of operations")
-    validated: List[Dict[str, Any]] = []
-    for index, item in enumerate(cast(List[Any], entries)):
-        context = f"remove[{index}]"
-        if not isinstance(item, collections.abc.Mapping):
-            raise AlertRulesCustomizationError(f"{context} must be a mapping with a 'where' key")
-        entry: Dict[str, Any] = dict(cast(Mapping[Any, Any], item))
-        if "where" not in entry:
-            raise AlertRulesCustomizationError(f"{context}: missing required key 'where'")
-        validated.append({"where": _validate_where(entry["where"], context)})
-    return validated
-
-
-def _validate_patch(entries: Any) -> List[Dict[str, Any]]:
-    """Validate the ``patch`` operation list and return it.
-
-    Raises:
-        AlertRulesCustomizationError: if the operation list is malformed.
-    """
-    if entries is None:
-        return []
-    if not isinstance(entries, list):
-        raise AlertRulesCustomizationError("'patch' must be a list of operations")
-    validated: List[Dict[str, Any]] = []
-    for index, item in enumerate(cast(List[Any], entries)):
-        context = f"patch[{index}]"
-        if not isinstance(item, collections.abc.Mapping):
-            raise AlertRulesCustomizationError(
-                f"{context} must be a mapping with 'where' and 'set' keys"
-            )
-        entry: Dict[str, Any] = dict(cast(Mapping[Any, Any], item))
-        if "where" not in entry:
-            raise AlertRulesCustomizationError(f"{context}: missing required key 'where'")
-        if "set" not in entry:
-            raise AlertRulesCustomizationError(f"{context}: missing required key 'set'")
-        validated.append(
-            {
-                "where": _validate_where(entry["where"], context),
-                "set": _validate_set(entry["set"], context),
-            }
-        )
-    return validated
+def _format_pydantic_error(err: ValidationError) -> str:
+    """Format a pydantic ValidationError into a single human-readable message."""
+    messages: List[str] = []
+    for error in err.errors():
+        loc = ".".join(str(p) for p in error["loc"]) if error["loc"] else "root"
+        msg: str = str(error["msg"]).rstrip(".")
+        messages.append(f"{loc}: {msg}")
+    return "; ".join(messages)
 
 
 class AlertRulesCustomization:
@@ -197,7 +178,6 @@ class AlertRulesCustomization:
                 empty ``where`` selectors.
         """
         if not config_string or not config_string.strip():
-            # Empty or whitespace-only config: no-op.
             return cls()
 
         try:
@@ -206,26 +186,30 @@ class AlertRulesCustomization:
             raise AlertRulesCustomizationError(f"invalid YAML: {e}") from e
 
         if parsed is None:
-            # Config parsing to null: no-op.
             return cls()
 
         if not isinstance(parsed, collections.abc.Mapping):
             raise AlertRulesCustomizationError(
-                f"configuration must be a mapping with keys {sorted(_VALID_TOP_LEVEL_KEYS)}; "
+                f"configuration must be a mapping with keys 'remove', 'patch'; "
                 f"got {type(parsed).__name__}"
             )
-        config: Dict[str, Any] = dict(cast(Mapping[Any, Any], parsed))
 
-        unknown_keys = set(config.keys()) - _VALID_TOP_LEVEL_KEYS
-        if unknown_keys:
-            raise AlertRulesCustomizationError(
-                f"unknown top-level keys {sorted(unknown_keys)}; "
-                f"expected a subset of {sorted(_VALID_TOP_LEVEL_KEYS)}"
-            )
+        try:
+            config = _RulesCustomizationConfig.model_validate(parsed)
+        except ValidationError as e:
+            raise AlertRulesCustomizationError(_format_pydantic_error(e)) from e
 
         return cls(
-            remove=_validate_remove(config.get("remove")),
-            patch=_validate_patch(config.get("patch")),
+            remove=(
+                [op.model_dump(exclude_none=True, by_alias=True) for op in config.remove]
+                if config.remove
+                else None
+            ),
+            patch=(
+                [op.model_dump(exclude_none=True, by_alias=True) for op in config.patch]
+                if config.patch
+                else None
+            ),
         )
 
     def apply(
