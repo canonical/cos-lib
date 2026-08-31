@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cosl"
-version = "1.10.3"
+version = "1.11.3"
 authors = [
     { name = "sed-i", email = "82407168+sed-i@users.noreply.github.com" },
 ]
@@ -123,3 +123,8 @@ ignore-words-list = "assertIn"
 [tool.hatch.metadata]
 # allow git+ dependencies in pyproject
 allow-direct-references = true
+
+[dependency-groups]
+test = [
+    "pytest>=8.3.5",
+]
