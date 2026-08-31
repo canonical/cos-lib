@@ -94,7 +94,9 @@ class TestFromYamlValidation(unittest.TestCase):
             AlertRulesCustomization.from_yaml("remove:\n  - alert: Foo")
 
     def test_remove_empty_where_raises(self):
-        with self.assertRaisesRegex(AlertRulesCustomizationError, "'where' must not be empty"):
+        with self.assertRaisesRegex(
+            AlertRulesCustomizationError, "'where' must have at least one of"
+        ):
             AlertRulesCustomization.from_yaml("remove:\n  - where: {}")
 
     def test_remove_unknown_where_key_raises(self):
@@ -110,7 +112,9 @@ class TestFromYamlValidation(unittest.TestCase):
             AlertRulesCustomization.from_yaml("patch:\n  - where:\n      alert: Foo")
 
     def test_patch_empty_where_raises(self):
-        with self.assertRaisesRegex(AlertRulesCustomizationError, "'where' must not be empty"):
+        with self.assertRaisesRegex(
+            AlertRulesCustomizationError, "'where' must have at least one of"
+        ):
             AlertRulesCustomization.from_yaml("patch:\n  - where: {}\n    set:\n      for: 5m")
 
     def test_patch_unknown_where_key_raises(self):

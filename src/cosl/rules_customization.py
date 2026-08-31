@@ -64,14 +64,15 @@ class _WhereBlock(BaseModel):
     @field_validator("labels", "annotations")
     @classmethod
     def _validate_mapping(cls, v: Any) -> Optional[Dict[str, str]]:  # type: ignore[return]
-        if v is not None and not isinstance(v, collections.abc.Mapping):
+        if not isinstance(v, collections.abc.Mapping):
             raise ValueError("must be a mapping of key-value pairs")
         return v  # type: ignore[return-value]
 
     @model_validator(mode="after")
     def _not_empty(self):
         if not any([self.alert, self.group, self.labels, self.annotations]):
-            raise ValueError("'where' must not be empty")
+            valid_keys = sorted(_WhereBlock.model_fields.keys())
+            raise ValueError(f"'where' must have at least one of: {valid_keys}")
         return self
 
 
@@ -87,7 +88,7 @@ class _SetBlock(BaseModel):
     @field_validator("labels", "annotations")
     @classmethod
     def _validate_mapping(cls, v: Any) -> Optional[Dict[str, str]]:  # type: ignore[return]
-        if v is not None and not isinstance(v, collections.abc.Mapping):
+        if not isinstance(v, collections.abc.Mapping):
             raise ValueError("must be a mapping of key-value pairs")
         return v  # type: ignore[return-value]
 
@@ -102,7 +103,10 @@ class _SetBlock(BaseModel):
                 self.annotations,
             ]
         ):
-            raise ValueError("'set' must not be empty")
+            valid_keys = sorted(
+                f.alias if f.alias else k for k, f in _SetBlock.model_fields.items()
+            )
+            raise ValueError(f"'set' must have at least one of: {valid_keys}")
         return self
 
 
@@ -189,8 +193,9 @@ class AlertRulesCustomization:
             return cls()
 
         if not isinstance(parsed, collections.abc.Mapping):
+            valid_keys = sorted(_RulesCustomizationConfig.model_fields.keys())
             raise AlertRulesCustomizationError(
-                f"configuration must be a mapping with keys 'remove', 'patch'; "
+                f"configuration must be a mapping with keys {valid_keys}; "
                 f"got {type(parsed).__name__}"
             )
 
