@@ -128,8 +128,3 @@ patch:
         severity: critical
 """
     ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
-
-
-# ---------------------------------------------------------------------------
-# Plain pytest tests — edge cases for patch
-# ---------------------------------------------------------------------------

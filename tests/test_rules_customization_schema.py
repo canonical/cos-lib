@@ -9,31 +9,12 @@ test_rules_customization.py backed by tests/features/alert_rule_customization.fe
 
 import unittest
 
+from conftest import _load_sample_alerts
+
 from cosl.rules_customization import (
     AlertRulesCustomization,
     AlertRulesCustomizationError,
 )
-
-
-def _sample_alerts():
-    return {
-        "app-1": {
-            "groups": [
-                {
-                    "name": "group_a",
-                    "rules": [
-                        {
-                            "alert": "HighLatency",
-                            "expr": "latency > 100",
-                            "for": "10m",
-                            "labels": {"severity": "critical", "juju_application": "app-1"},
-                            "annotations": {"summary": "latency is high"},
-                        },
-                    ],
-                },
-            ]
-        }
-    }
 
 
 class TestFromYamlValidation(unittest.TestCase):
@@ -140,7 +121,7 @@ class TestFromYamlValidation(unittest.TestCase):
 
 class TestNoOpConfigs(unittest.TestCase):
     def _assert_noop(self, config_string):
-        sample = _sample_alerts()
+        sample = _load_sample_alerts()
         result = AlertRulesCustomization.from_yaml(config_string).apply(sample)
         self.assertEqual(result, sample)
 
