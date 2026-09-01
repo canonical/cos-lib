@@ -4,7 +4,7 @@ Feature: Alert rule remove and patch interaction
   So that I can rely on the correct ordering and immutability guarantees
 
   Scenario: The original input is not mutated by apply
-    Given a set of relation alerts from two apps
+    Given the sample alerts from "sample_alerts.yaml"
     When I apply a customization that removes alert "LowThroughput" and patches alert "HighLatency"
     Then the original input is unchanged
 
@@ -15,6 +15,6 @@ Feature: Alert rule remove and patch interaction
     And alert "Survivor" has for equal to "2m"
 
   Scenario: The customization instance is reusable across different inputs
-    Given a set of relation alerts from two apps
+    Given the sample alerts from "sample_alerts.yaml"
     When I apply the same remove customization to two different inputs
     Then alert "HostDown" is absent from both results

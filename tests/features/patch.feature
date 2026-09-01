@@ -4,7 +4,7 @@ Feature: Alert rule patch customization
   So that I can tweak thresholds, labels, and annotations
 
   Background:
-    Given a set of relation alerts from two apps
+    Given the sample alerts from "sample_alerts.yaml"
 
   Scenario: Patch updates the for duration of a matching alert
     When I apply a customization that patches alert "HighLatency" setting for to "30m"

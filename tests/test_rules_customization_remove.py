@@ -5,11 +5,17 @@
 Feature file: tests/features/remove.feature
 """
 
+from conftest import _load_sample_alerts
+from conftest import find_rule as _find_rule
 from pytest_bdd import scenarios, when
 
 from cosl.rules_customization import AlertRulesCustomization
 
 scenarios("features/remove.feature")
+
+
+def _apply(config):
+    return AlertRulesCustomization.from_yaml(config).apply(_load_sample_alerts())
 
 
 # ---------------------------------------------------------------------------
@@ -120,67 +126,6 @@ remove:
 # ---------------------------------------------------------------------------
 # Plain pytest tests — edge cases for remove
 # ---------------------------------------------------------------------------
-
-
-def find_rule(alerts, identifier, group_name, rule_name, *, by_record=False):
-    """Fetch a single rule from an alerts dict for assertions."""
-    key = "record" if by_record else "alert"
-    groups = alerts[identifier]["groups"]
-    group = next(g for g in groups if g["name"] == group_name)
-    return next(rule for rule in group["rules"] if rule.get(key) == rule_name)
-
-
-def _sample_alerts():
-    """Relation alerts dict in the same shape as MetricsConsumer.alerts."""
-    return {
-        "app-1": {
-            "groups": [
-                {
-                    "name": "group_a",
-                    "rules": [
-                        {
-                            "alert": "HighLatency",
-                            "expr": "latency > 100",
-                            "for": "10m",
-                            "labels": {"severity": "critical", "juju_application": "app-1"},
-                            "annotations": {"summary": "latency is high"},
-                        },
-                        {
-                            "alert": "LowThroughput",
-                            "expr": "throughput < 10",
-                            "for": "5m",
-                            "labels": {"severity": "warning"},
-                        },
-                        {
-                            "record": "job:latency:mean5m",
-                            "expr": "avg(latency)",
-                            "labels": {"severity": "warning"},
-                        },
-                    ],
-                },
-                {
-                    "name": "group_b",
-                    "rules": [
-                        {"alert": "HostDown", "expr": "up < 1"},
-                    ],
-                },
-            ]
-        },
-        "app-2": {
-            "groups": [
-                {
-                    "name": "group_c",
-                    "rules": [
-                        {"alert": "OtherAlert", "expr": "x > 0"},
-                    ],
-                }
-            ]
-        },
-    }
-
-
-def _apply(config):
-    return AlertRulesCustomization.from_yaml(config).apply(_sample_alerts())
 
 
 class TestRemove:
@@ -311,5 +256,5 @@ class TestRemove:
             """
         result = _apply(config)
 
-        record = find_rule(result, "app-1", "group_a", "job:latency:mean5m", by_record=True)
+        record = _find_rule(result, "app-1", "group_a", "job:latency:mean5m", by_record=True)
         assert record["expr"] == "avg(latency)"

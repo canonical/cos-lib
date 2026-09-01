@@ -4,7 +4,7 @@ Feature: Alert rule remove customization
   So that I can drop irrelevant alerts
 
   Background:
-    Given a set of relation alerts from two apps
+    Given the sample alerts from "sample_alerts.yaml"
 
   Scenario: Remove an alert by name
     When I apply a customization that removes alert "LowThroughput"

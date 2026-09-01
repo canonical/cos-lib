@@ -7,7 +7,7 @@ Feature file: tests/features/remove_patch.feature
 
 import copy
 
-from conftest import _sample_alerts
+from conftest import _load_sample_alerts
 from pytest_bdd import scenarios, when
 
 from cosl.rules_customization import AlertRulesCustomization
@@ -87,7 +87,7 @@ class TestApplySemantics:
                   labels:
                     severity: page
             """
-        sample = _sample_alerts()
+        sample = _load_sample_alerts()
         snapshot = copy.deepcopy(sample)
         AlertRulesCustomization.from_yaml(config).apply(sample)
         assert sample == snapshot
@@ -134,7 +134,7 @@ class TestApplySemantics:
             """
         customization = AlertRulesCustomization.from_yaml(config)
 
-        result_1 = customization.apply(_sample_alerts())
+        result_1 = customization.apply(_load_sample_alerts())
         assert "HostDown" not in str(result_1["app-1"])
         assert "app-2" in result_1
 

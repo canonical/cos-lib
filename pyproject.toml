@@ -126,6 +126,10 @@ ignore-words-list = "assertIn"
 allow-direct-references = true
 
 [dependency-groups]
+dev = [
+    "pytest>=8.3.5",
+    "pytest-bdd>=7.3.0",
+]
 test = [
     "pytest>=8.3.5",
     "pytest-bdd>=7.3.0",

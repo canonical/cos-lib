@@ -3,65 +3,23 @@
 """Shared pytest fixtures, step definitions, and helpers for alert rule customization tests."""
 
 import copy
+from pathlib import Path
 
 import pytest
+import yaml
 from pytest_bdd import given, parsers, then
 
 from cosl.rules_customization import AlertRulesCustomization
 
-# ---------------------------------------------------------------------------
-# Data fixtures
-# ---------------------------------------------------------------------------
+_HERE = Path(__file__).parent
+_SAMPLE_ALERTS_PATH = _HERE / "sample_alerts.yaml"
 
 
 @pytest.fixture
 def sample_alerts():
-    """Relation alerts dict in the same shape as MetricsConsumer.alerts."""
-    return {
-        "app-1": {
-            "groups": [
-                {
-                    "name": "group_a",
-                    "rules": [
-                        {
-                            "alert": "HighLatency",
-                            "expr": "latency > 100",
-                            "for": "10m",
-                            "labels": {"severity": "critical", "juju_application": "app-1"},
-                            "annotations": {"summary": "latency is high"},
-                        },
-                        {
-                            "alert": "LowThroughput",
-                            "expr": "throughput < 10",
-                            "for": "5m",
-                            "labels": {"severity": "warning"},
-                        },
-                        {
-                            "record": "job:latency:mean5m",
-                            "expr": "avg(latency)",
-                            "labels": {"severity": "warning"},
-                        },
-                    ],
-                },
-                {
-                    "name": "group_b",
-                    "rules": [
-                        {"alert": "HostDown", "expr": "up < 1"},
-                    ],
-                },
-            ]
-        },
-        "app-2": {
-            "groups": [
-                {
-                    "name": "group_c",
-                    "rules": [
-                        {"alert": "OtherAlert", "expr": "x > 0"},
-                    ],
-                }
-            ]
-        },
-    }
+    """Relation alerts dict loaded from sample_alerts.yaml."""
+    with open(_SAMPLE_ALERTS_PATH) as f:
+        return yaml.safe_load(f)
 
 
 @pytest.fixture
@@ -75,10 +33,12 @@ def ctx():
 # ---------------------------------------------------------------------------
 
 
-@given("a set of relation alerts from two apps")
-def given_sample_alerts(ctx, sample_alerts):
-    ctx["alerts"] = sample_alerts
-    ctx["original"] = copy.deepcopy(sample_alerts)
+@given(parsers.parse('the sample alerts from "{filename}"'))
+def given_sample_alerts_from_file(ctx, filename):
+    path = _HERE / filename
+    with open(path) as f:
+        ctx["alerts"] = yaml.safe_load(f)
+    ctx["original"] = copy.deepcopy(ctx["alerts"])
 
 
 @given('a rule named "GoneForever" and a rule named "Survivor"')
@@ -279,55 +239,6 @@ def _find_record_anywhere(result, record_name):
     raise AssertionError(f"Recording rule {record_name!r} not found in result")
 
 
-def _sample_alerts():
-    """Relation alerts dict in the same shape as MetricsConsumer.alerts."""
-    return {
-        "app-1": {
-            "groups": [
-                {
-                    "name": "group_a",
-                    "rules": [
-                        {
-                            "alert": "HighLatency",
-                            "expr": "latency > 100",
-                            "for": "10m",
-                            "labels": {"severity": "critical", "juju_application": "app-1"},
-                            "annotations": {"summary": "latency is high"},
-                        },
-                        {
-                            "alert": "LowThroughput",
-                            "expr": "throughput < 10",
-                            "for": "5m",
-                            "labels": {"severity": "warning"},
-                        },
-                        {
-                            "record": "job:latency:mean5m",
-                            "expr": "avg(latency)",
-                            "labels": {"severity": "warning"},
-                        },
-                    ],
-                },
-                {
-                    "name": "group_b",
-                    "rules": [
-                        {"alert": "HostDown", "expr": "up < 1"},
-                    ],
-                },
-            ]
-        },
-        "app-2": {
-            "groups": [
-                {
-                    "name": "group_c",
-                    "rules": [
-                        {"alert": "OtherAlert", "expr": "x > 0"},
-                    ],
-                }
-            ]
-        },
-    }
-
-
 def find_rule(alerts, identifier, group_name, rule_name, *, by_record=False):
     """Return a single rule from an alerts dict, raising if not found."""
     key = "record" if by_record else "alert"
@@ -336,5 +247,11 @@ def find_rule(alerts, identifier, group_name, rule_name, *, by_record=False):
     return next(rule for rule in group["rules"] if rule.get(key) == rule_name)
 
 
+def _load_sample_alerts():
+    """Load the canonical sample alerts from sample_alerts.yaml."""
+    with open(_SAMPLE_ALERTS_PATH) as f:
+        return yaml.safe_load(f)
+
+
 def _apply(config):
-    return AlertRulesCustomization.from_yaml(config).apply(_sample_alerts())
+    return AlertRulesCustomization.from_yaml(config).apply(_load_sample_alerts())
