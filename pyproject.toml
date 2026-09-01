@@ -45,6 +45,7 @@ dev = [
     # https://github.com/pypa/setuptools/issues/5174
     "setuptools<82",
     "pytest",
+    "pytest-bdd",
     "pytest-cov",
     "deepdiff",
     "fs",
@@ -125,6 +126,11 @@ ignore-words-list = "assertIn"
 allow-direct-references = true
 
 [dependency-groups]
+dev = [
+    "pytest>=8.3.5",
+    "pytest-bdd>=7.3.0",
+]
 test = [
     "pytest>=8.3.5",
+    "pytest-bdd>=7.3.0",
 ]
