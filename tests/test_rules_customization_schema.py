@@ -9,7 +9,7 @@ test_rules_customization.py backed by tests/features/alert_rule_customization.fe
 
 import unittest
 
-from conftest import _load_sample_alerts
+from helpers import _load_sample_alerts
 
 from cosl.rules_customization import (
     AlertRulesCustomization,

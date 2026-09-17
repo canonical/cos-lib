@@ -5,8 +5,11 @@
 Feature file: tests/features/remove_patch.feature
 """
 
+import copy
 
-from pytest_bdd import scenarios, when
+import yaml
+from helpers import _find_alert
+from pytest_bdd import given, parsers, scenarios, then, when
 
 from cosl.rules_customization import AlertRulesCustomization
 
@@ -14,53 +17,82 @@ scenarios("features/remove_patch.feature")
 
 
 # ---------------------------------------------------------------------------
-# When — Apply semantics (remove + patch interaction)
+# Given
 # ---------------------------------------------------------------------------
 
 
-@when('I apply a customization that removes alert "LowThroughput" and patches alert "HighLatency"')
-def when_remove_and_patch(ctx):
-    config = """
-remove:
-  - where:
-      alert: LowThroughput
-patch:
-  - where:
-      alert: HighLatency
-    set:
-      for: 1h
-      labels:
-        severity: page
-"""
-    AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
-    ctx["result"] = ctx["alerts"]
+@given("the following alert rules", target_fixture="alerts")
+def given_the_following_alert_rules(docstring):
+    return yaml.safe_load(docstring)
 
 
-@when('I apply a customization that removes "GoneForever" and patches "Survivor" for to "2m"')
-def when_order_of_operations(ctx):
-    config = """
-remove:
-  - where:
-      alert: GoneForever
-patch:
-  - where:
-      alert: Survivor
-    set:
-      for: 2m
-"""
-    ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
+@given("the following combined config", target_fixture="customization")
+def given_the_following_combined_config(docstring):
+    return AlertRulesCustomization.from_yaml(docstring)
 
 
-@when("I apply the same remove customization to two different inputs")
-def when_reuse_customization(ctx):
-    config = """
-remove:
-  - where:
-      alert: HostDown
-"""
-    customization = AlertRulesCustomization.from_yaml(config)
-    ctx["result1"] = customization.apply(ctx["alerts"])
+@given("the following remove config", target_fixture="customization")
+def given_the_following_remove_config(docstring):
+    return AlertRulesCustomization.from_yaml(docstring)
+
+
+# ---------------------------------------------------------------------------
+# When
+# ---------------------------------------------------------------------------
+
+
+@when("the customization is applied", target_fixture="apply_outcome")
+def when_the_customization_is_applied(customization, alerts):
+    original = copy.deepcopy(alerts)
+    result = customization.apply(alerts)
+    return {"result": result, "original": original, "input": alerts}
+
+
+@when("the same customization is applied to two different inputs", target_fixture="both_results")
+def when_same_customization_applied_twice(customization, alerts):
     other = {
         "other": {"groups": [{"name": "g", "rules": [{"alert": "HostDown", "expr": "up < 1"}]}]}
     }
-    ctx["result2"] = customization.apply(other)
+    return {
+        "result1": customization.apply(alerts),
+        "result2": customization.apply(other),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Then
+# ---------------------------------------------------------------------------
+
+
+@then("the original input is unchanged")
+def then_original_input_unchanged(apply_outcome):
+    assert (
+        apply_outcome["input"] == apply_outcome["original"]
+    ), "apply() mutated the input — original and current input differ"
+
+
+@then(parsers.parse('alert "{name}" is absent from identifier "{identifier}"'))
+def then_alert_absent_from_identifier(apply_outcome, name, identifier):
+    result = apply_outcome["result"]
+    if identifier not in result:
+        return
+    assert name not in str(
+        result[identifier]
+    ), f"alert {name!r} was found in identifier {identifier!r} but should be absent"
+
+
+@then(parsers.parse('alert "{name}" has "{field}" equal to "{value}"'))
+def then_alert_field(apply_outcome, name, field, value):
+    result = apply_outcome["result"]
+    found = _find_alert(result, name)
+    assert found[field] == value, f"expected {field}={value!r}, got {found.get(field)!r}"
+
+
+@then(parsers.parse('alert "{name}" is absent from both results'))
+def then_alert_absent_from_both(both_results, name):
+    assert name not in str(
+        both_results["result1"]
+    ), f"alert {name!r} found in result1 but should be absent"
+    assert name not in str(
+        both_results["result2"]
+    ), f"alert {name!r} found in result2 but should be absent"

@@ -5,7 +5,9 @@
 Feature file: tests/features/patch.feature
 """
 
-from pytest_bdd import scenarios, when
+import yaml
+from helpers import _find_alert, _find_record
+from pytest_bdd import given, parsers, scenarios, then, when
 
 from cosl.rules_customization import AlertRulesCustomization
 
@@ -13,118 +15,78 @@ scenarios("features/patch.feature")
 
 
 # ---------------------------------------------------------------------------
-# When — Patch
+# Given
 # ---------------------------------------------------------------------------
 
 
-@when('I apply a customization that patches alert "HighLatency" setting for to "30m"')
-def when_patch_for(ctx):
-    config = """
-patch:
-  - where:
-      alert: HighLatency
-    set:
-      for: 30m
-"""
-    ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
+@given("the following alert rules", target_fixture="alerts")
+def given_the_following_alert_rules(docstring):
+    return yaml.safe_load(docstring)
 
 
-@when(
-    'I apply a customization that patches alert "HighLatency" setting alert name to "RenamedLatency"'
-)
-def when_patch_alert_name(ctx):
-    config = """
-patch:
-  - where:
-      alert: HighLatency
-    set:
-      alert: RenamedLatency
-"""
-    ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
+@given("the following patch", target_fixture="patch")
+def given_the_following_patch(docstring):
+    return AlertRulesCustomization.from_yaml(docstring)
 
 
-@when('I apply a customization that patches alert "HostDown" setting expr to "up == 0"')
-def when_patch_expr(ctx):
-    config = """
-patch:
-  - where:
-      alert: HostDown
-    set:
-      expr: up == 0
-"""
-    ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
+# ---------------------------------------------------------------------------
+# When
+# ---------------------------------------------------------------------------
 
 
-@when(
-    'I apply a customization that patches alert "HighLatency" setting label "severity" to "page" and adding label "extra" as "added"'
-)
-def when_patch_labels(ctx):
-    config = """
-patch:
-  - where:
-      alert: HighLatency
-    set:
-      labels:
-        severity: page
-        extra: added
-"""
-    ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
+@when("the patch is applied", target_fixture="result")
+def when_the_patch_is_applied(patch, alerts):
+    return patch.apply(alerts)
 
 
-@when(
-    'I apply a customization that patches alert "HighLatency" setting label "juju_application" to "other-app"'
-)
-def when_patch_juju_label(ctx):
-    config = """
-patch:
-  - where:
-      alert: HighLatency
-    set:
-      labels:
-        juju_application: other-app
-"""
-    ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
+# ---------------------------------------------------------------------------
+# Then
+# ---------------------------------------------------------------------------
 
 
-@when(
-    'I apply a customization that patches alert "HighLatency" setting annotation "summary" to "new summary" and adding annotation "description" as "new description"'
-)
-def when_patch_annotations(ctx):
-    config = """
-patch:
-  - where:
-      alert: HighLatency
-    set:
-      annotations:
-        summary: new summary
-        description: new description
-"""
-    ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
+@then(parsers.parse('alert "{name}" has "{field}" equal to "{value}"'))
+def then_alert_field(result, name, field, value):
+    found = _find_alert(result, name)
+    assert found[field] == value, f"expected {field}={value!r}, got {found.get(field)!r}"
 
 
-@when('I apply a customization that patches all rules in group "group_a" setting expr to "hacked"')
-def when_patch_group_expr(ctx):
-    config = """
-patch:
-  - where:
-      group: group_a
-    set:
-      expr: hacked
-"""
-    ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
+@then(parsers.parse('alert "{name}" has label "{key}" equal to "{value}"'))
+def then_alert_label(result, name, key, value):
+    found = _find_alert(result, name)
+    labels = found.get("labels", {})
+    assert labels.get(key) == value, f"expected label {key}={value!r}, got {labels.get(key)!r}"
 
 
-@when(
-    'I apply a customization that patches alerts with label "severity" equal to "warning" setting label "severity" to "critical"'
-)
-def when_patch_by_label(ctx):
-    config = """
-patch:
-  - where:
-      labels:
-        severity: warning
-    set:
-      labels:
-        severity: critical
-"""
-    ctx["result"] = AlertRulesCustomization.from_yaml(config).apply(ctx["alerts"])
+@then(parsers.parse('alert "{name}" has annotation "{key}" equal to "{value}"'))
+def then_alert_annotation(result, name, key, value):
+    found = _find_alert(result, name)
+    annotations = found.get("annotations", {})
+    assert (
+        annotations.get(key) == value
+    ), f"expected annotation {key}={value!r}, got {annotations.get(key)!r}"
+
+
+@then(parsers.parse('alert "{name}" is present'))
+def then_alert_present(result, name):
+    _find_alert(result, name)  # raises AssertionError if not found
+
+
+@then(parsers.parse('alert "{name}" is absent'))
+def then_alert_absent(result, name):
+    for rule_file in result.values():
+        for group in rule_file.get("groups", []):
+            for rule in group.get("rules", []):
+                assert rule.get("alert") != name, f"alert {name!r} was found but should be absent"
+
+
+@then(parsers.parse('recording rule "{name}" has "{field}" equal to "{value}"'))
+def then_recording_rule_field(result, name, field, value):
+    found = _find_record(result, name)
+    assert found[field] == value, f"expected {field}={value!r}, got {found.get(field)!r}"
+
+
+@then(parsers.parse('recording rule "{name}" has label "{key}" equal to "{value}"'))
+def then_recording_rule_label(result, name, key, value):
+    found = _find_record(result, name)
+    labels = found.get("labels", {})
+    assert labels.get(key) == value, f"expected label {key}={value!r}, got {labels.get(key)!r}"

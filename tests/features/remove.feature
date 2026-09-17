@@ -3,55 +3,291 @@ Feature: Alert rule remove customization
   I want to remove alert rules via a YAML config
   So that I can drop irrelevant alerts
 
-  Background:
-    Given the sample alerts from "sample_alerts.yaml"
-
   Scenario: Remove an alert by name
-    When I apply a customization that removes alert "LowThroughput"
-    Then alert "LowThroughput" is absent from the result
-    And alert "HighLatency" is present in the result
-    And the recording rule "job:latency:mean5m" is present in the result
+
+    Given the following alert rules
+    """
+    app-1:
+      groups:
+        - name: group_a
+          rules:
+            - alert: HighLatency
+              expr: latency > 100
+              for: 10m
+            - alert: LowThroughput
+              expr: throughput < 10
+              for: 5m
+            - record: job:latency:mean5m
+              expr: avg(latency)
+    """
+
+    Given the following remove config
+    """
+    remove:
+      - where:
+          alert: LowThroughput
+    """
+
+    When the customization is applied
+
+    Then alert "LowThroughput" is absent
+    And alert "HighLatency" is present
+    And recording rule "job:latency:mean5m" is present
 
   Scenario: Remove an entire group by group name drops everything including recording rules
-    When I apply a customization that removes group "group_a"
+
+    Given the following alert rules
+    """
+    app-1:
+      groups:
+        - name: group_a
+          rules:
+            - alert: HighLatency
+              expr: latency > 100
+            - record: job:latency:mean5m
+              expr: avg(latency)
+        - name: group_b
+          rules:
+            - alert: HostDown
+              expr: up < 1
+    """
+
+    Given the following remove config
+    """
+    remove:
+      - where:
+          group: group_a
+    """
+
+    When the customization is applied
+
     Then group "group_a" is absent from identifier "app-1"
     And group "group_b" is present in identifier "app-1"
 
   Scenario: Remove with group and another selector only removes matching alerting rules
-    When I apply a customization that removes alerts in group "group_a" with alert name "LowThroughput"
-    Then alert "LowThroughput" is absent from the result
-    And alert "HighLatency" is present in the result
-    And the recording rule "job:latency:mean5m" is present in the result
+
+    Given the following alert rules
+    """
+    app-1:
+      groups:
+        - name: group_a
+          rules:
+            - alert: HighLatency
+              expr: latency > 100
+              for: 10m
+            - alert: LowThroughput
+              expr: throughput < 10
+              for: 5m
+            - record: job:latency:mean5m
+              expr: avg(latency)
+    """
+
+    Given the following remove config
+    """
+    remove:
+      - where:
+          group: group_a
+          alert: LowThroughput
+    """
+
+    When the customization is applied
+
+    Then alert "LowThroughput" is absent
+    And alert "HighLatency" is present
+    And recording rule "job:latency:mean5m" is present
 
   Scenario: Remove by label value
-    When I apply a customization that removes alerts with label "severity" equal to "warning"
-    Then alert "LowThroughput" is absent from the result
-    And alert "HighLatency" is present in the result
-    And the recording rule "job:latency:mean5m" is present in the result
+
+    Given the following alert rules
+    """
+    app-1:
+      groups:
+        - name: group_a
+          rules:
+            - alert: HighLatency
+              expr: latency > 100
+              for: 10m
+              labels:
+                severity: critical
+            - alert: LowThroughput
+              expr: throughput < 10
+              for: 5m
+              labels:
+                severity: warning
+            - record: job:latency:mean5m
+              expr: avg(latency)
+    """
+
+    Given the following remove config
+    """
+    remove:
+      - where:
+          labels:
+            severity: warning
+    """
+
+    When the customization is applied
+
+    Then alert "LowThroughput" is absent
+    And alert "HighLatency" is present
+    And recording rule "job:latency:mean5m" is present
 
   Scenario: Remove by annotation value
-    When I apply a customization that removes alerts with annotation "summary" equal to "latency is high"
-    Then alert "HighLatency" is absent from the result
-    And alert "LowThroughput" is present in the result
+
+    Given the following alert rules
+    """
+    app-1:
+      groups:
+        - name: group_a
+          rules:
+            - alert: HighLatency
+              expr: latency > 100
+              for: 10m
+              annotations:
+                summary: latency is high
+            - alert: LowThroughput
+              expr: throughput < 10
+              for: 5m
+    """
+
+    Given the following remove config
+    """
+    remove:
+      - where:
+          annotations:
+            summary: latency is high
+    """
+
+    When the customization is applied
+
+    Then alert "HighLatency" is absent
+    And alert "LowThroughput" is present
 
   Scenario: Remove by juju topology label
-    When I apply a customization that removes alerts with label "juju_application" equal to "app-1"
-    Then alert "HighLatency" is absent from the result
-    And alert "LowThroughput" is present in the result
+
+    Given the following alert rules
+    """
+    app-1:
+      groups:
+        - name: group_a
+          rules:
+            - alert: HighLatency
+              expr: latency > 100
+              for: 10m
+              labels:
+                juju_application: app-1
+            - alert: LowThroughput
+              expr: throughput < 10
+              for: 5m
+    """
+
+    Given the following remove config
+    """
+    remove:
+      - where:
+          labels:
+            juju_application: app-1
+    """
+
+    When the customization is applied
+
+    Then alert "HighLatency" is absent
+    And alert "LowThroughput" is present
 
   Scenario: Multiple remove entries are OR'd
-    When I apply a customization that removes alert "HighLatency" and alert "OtherAlert"
-    Then alert "HighLatency" is absent from the result
-    And alert "OtherAlert" is absent from the result
-    And alert "LowThroughput" is present in the result
-    And alert "HostDown" is present in the result
+
+    Given the following alert rules
+    """
+    app-1:
+      groups:
+        - name: group_a
+          rules:
+            - alert: HighLatency
+              expr: latency > 100
+            - alert: LowThroughput
+              expr: throughput < 10
+        - name: group_b
+          rules:
+            - alert: HostDown
+              expr: up < 1
+    app-2:
+      groups:
+        - name: group_c
+          rules:
+            - alert: OtherAlert
+              expr: x > 0
+    """
+
+    Given the following remove config
+    """
+    remove:
+      - where:
+          alert: HighLatency
+      - where:
+          alert: OtherAlert
+    """
+
+    When the customization is applied
+
+    Then alert "HighLatency" is absent
+    And alert "OtherAlert" is absent
+    And alert "LowThroughput" is present
+    And alert "HostDown" is present
 
   Scenario: Removing the only rule in a group prunes the empty group
-    When I apply a customization that removes alert "HostDown"
+
+    Given the following alert rules
+    """
+    app-1:
+      groups:
+        - name: group_a
+          rules:
+            - alert: HighLatency
+              expr: latency > 100
+        - name: group_b
+          rules:
+            - alert: HostDown
+              expr: up < 1
+    """
+
+    Given the following remove config
+    """
+    remove:
+      - where:
+          alert: HostDown
+    """
+
+    When the customization is applied
+
     Then group "group_b" is absent from identifier "app-1"
     And group "group_a" is present in identifier "app-1"
 
   Scenario: Removing all rules from an identifier drops the identifier entirely
-    When I apply a customization that removes alert "OtherAlert"
-    Then identifier "app-2" is absent from the result
-    And identifier "app-1" is present in the result
+
+    Given the following alert rules
+    """
+    app-1:
+      groups:
+        - name: group_a
+          rules:
+            - alert: HighLatency
+              expr: latency > 100
+    app-2:
+      groups:
+        - name: group_c
+          rules:
+            - alert: OtherAlert
+              expr: x > 0
+    """
+
+    Given the following remove config
+    """
+    remove:
+      - where:
+          alert: OtherAlert
+    """
+
+    When the customization is applied
+
+    Then identifier "app-2" is absent
+    And identifier "app-1" is present
