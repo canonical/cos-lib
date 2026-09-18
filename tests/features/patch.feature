@@ -29,7 +29,7 @@ Feature: Alert rule patch customization
 
     Then alert "HighLatency" has "for" equal to "30m"
 
-  Scenario: Patch replaces the alert name
+  Scenario: Rename alert using the patch directive
 
     Given the following alert rules
     """
