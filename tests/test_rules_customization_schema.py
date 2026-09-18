@@ -3,8 +3,10 @@
 """Schema validation tests for AlertRulesCustomization.from_yaml().
 
 Covers invalid YAML, unknown top-level keys, malformed operation entries, and
-no-op configs. Behavioural tests (remove/patch/add/apply semantics) live in
-test_rules_customization.py backed by tests/features/alert_rule_customization.feature.
+no-op configs. Behavioural tests live in:
+  - tests/test_rules_customization_remove.py (tests/features/remove.feature)
+  - tests/test_rules_customization_patch.py (tests/features/patch.feature)
+  - tests/test_rules_customization_remove_patch.py (tests/features/remove_patch.feature)
 """
 
 import unittest
@@ -85,6 +87,14 @@ class TestFromYamlValidation(unittest.TestCase):
         ):
             AlertRulesCustomization.from_yaml(
                 "patch:\n  - where:\n      alert: Foo\n    set:\n      duration: 5m"
+            )
+
+    def test_patch_set_alert_to_empty_string_raises(self):
+        with self.assertRaisesRegex(
+            AlertRulesCustomizationError, "'set' must have at least one of"
+        ):
+            AlertRulesCustomization.from_yaml(
+                'patch:\n  - where:\n      alert: HighLatency\n    set:\n      alert: ""'
             )
 
     def test_operations_not_a_list_raises(self):

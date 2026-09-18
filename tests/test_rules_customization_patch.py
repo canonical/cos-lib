@@ -90,3 +90,15 @@ def then_recording_rule_label(result, name, key, value):
     found = _find_record(result, name)
     labels = found.get("labels", {})
     assert labels.get(key) == value, f"expected label {key}={value!r}, got {labels.get(key)!r}"
+
+
+@then(parsers.parse('alert "{name}" is present in group "{group_name}" of "{identifier}"'))
+def then_alert_present_in_group(result, name, group_name, identifier):
+    assert identifier in result, f"identifier {identifier!r} not found in result"
+    groups = result[identifier].get("groups", [])
+    group = next((g for g in groups if g.get("name") == group_name), None)
+    assert group is not None, f"group {group_name!r} not found in {identifier!r}"
+    rules = group.get("rules", [])
+    assert any(
+        r.get("alert") == name for r in rules
+    ), f"alert {name!r} not found in group {group_name!r} of {identifier!r}"

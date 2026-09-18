@@ -6,7 +6,7 @@ Feature file: tests/features/remove.feature
 """
 
 import yaml
-from helpers import _find_alert, _find_record
+from helpers import _find_alert, _find_record, _find_rule, _load_sample_alerts
 from pytest_bdd import given, parsers, scenarios, then, when
 
 from cosl.rules_customization import AlertRulesCustomization
@@ -96,7 +96,7 @@ def then_identifier_present(result, identifier):
 
 class TestRemove:
     def test_remove_by_alert_and_labels_combined(self):
-        alerts = _sample_alerts()
+        alerts = _load_sample_alerts()
 
         config_matching = """
 remove:
@@ -119,7 +119,7 @@ remove:
         assert "HighLatency" in str(result)
 
     def test_remove_by_group_and_labels_combined(self):
-        alerts = _sample_alerts()
+        alerts = _load_sample_alerts()
         config = """
 remove:
   - where:
@@ -133,7 +133,7 @@ remove:
         assert rule_names == ["HighLatency", "job:latency:mean5m"]
 
     def test_remove_preserves_recording_rules_when_group_not_sole_selector(self):
-        alerts = _sample_alerts()
+        alerts = _load_sample_alerts()
         config = """
 remove:
   - where:
@@ -143,53 +143,3 @@ remove:
         result = AlertRulesCustomization.from_yaml(config).apply(alerts)
         record = _find_rule(result, "app-1", "group_a", "job:latency:mean5m", by_record=True)
         assert record["expr"] == "avg(latency)"
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _sample_alerts():
-    """Return the canonical sample alert rules used by plain pytest tests."""
-    return yaml.safe_load("""\
-app-1:
-  groups:
-    - name: group_a
-      rules:
-        - alert: HighLatency
-          expr: latency > 100
-          for: 10m
-          labels:
-            severity: critical
-            juju_application: app-1
-          annotations:
-            summary: latency is high
-        - alert: LowThroughput
-          expr: throughput < 10
-          for: 5m
-          labels:
-            severity: warning
-        - record: job:latency:mean5m
-          expr: avg(latency)
-          labels:
-            severity: warning
-    - name: group_b
-      rules:
-        - alert: HostDown
-          expr: up < 1
-app-2:
-  groups:
-    - name: group_c
-      rules:
-        - alert: OtherAlert
-          expr: x > 0
-""")
-
-
-def _find_rule(alerts, identifier, group_name, rule_name, *, by_record=False):
-    """Return a single rule from an alerts dict, raising if not found."""
-    key = "record" if by_record else "alert"
-    groups = alerts[identifier]["groups"]
-    group = next(g for g in groups if g["name"] == group_name)
-    return next(rule for rule in group["rules"] if rule.get(key) == rule_name)

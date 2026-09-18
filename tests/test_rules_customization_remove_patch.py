@@ -76,9 +76,11 @@ def then_alert_absent_from_identifier(apply_outcome, name, identifier):
     result = apply_outcome["result"]
     if identifier not in result:
         return
-    assert name not in str(
-        result[identifier]
-    ), f"alert {name!r} was found in identifier {identifier!r} but should be absent"
+    for group in result[identifier].get("groups", []):
+        for rule in group.get("rules", []):
+            assert (
+                rule.get("alert") != name
+            ), f"alert {name!r} was found in identifier {identifier!r} but should be absent"
 
 
 @then(parsers.parse('alert "{name}" has "{field}" equal to "{value}"'))
@@ -90,9 +92,13 @@ def then_alert_field(apply_outcome, name, field, value):
 
 @then(parsers.parse('alert "{name}" is absent from both results'))
 def then_alert_absent_from_both(both_results, name):
-    assert name not in str(
-        both_results["result1"]
-    ), f"alert {name!r} found in result1 but should be absent"
-    assert name not in str(
-        both_results["result2"]
-    ), f"alert {name!r} found in result2 but should be absent"
+    for label, result in [
+        ("result1", both_results["result1"]),
+        ("result2", both_results["result2"]),
+    ]:
+        for rule_file in result.values():
+            for group in rule_file.get("groups", []):
+                for rule in group.get("rules", []):
+                    assert (
+                        rule.get("alert") != name
+                    ), f"alert {name!r} found in {label} but should be absent"

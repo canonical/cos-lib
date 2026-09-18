@@ -242,3 +242,34 @@ Feature: Alert rule patch customization
 
     Then alert "LowThroughput" has label "severity" equal to "critical"
     And recording rule "job:latency:mean5m" has label "severity" equal to "warning"
+
+  Scenario: Patch renames matching alerts across all groups
+
+    Given the following alert rules
+    """
+    app-1:
+      groups:
+        - name: group_a
+          rules:
+            - alert: HighLatency
+              expr: latency > 100
+        - name: group_b
+          rules:
+            - alert: HighLatency
+              expr: latency > 200
+    """
+
+    Given the following patch
+    """
+    patch:
+      - where:
+          alert: HighLatency
+        set:
+          alert: RenamedLatency
+    """
+
+    When the patch is applied
+
+    Then alert "HighLatency" is absent
+    And alert "RenamedLatency" is present in group "group_a" of "app-1"
+    And alert "RenamedLatency" is present in group "group_b" of "app-1"

@@ -1,3 +1,7 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+"""Shared test helpers for alert rule customization tests."""
+
 from pathlib import Path
 
 import yaml
@@ -27,3 +31,11 @@ def _find_record(result, name):
                 if rule.get("record") == name:
                     return rule
     raise AssertionError(f"Recording rule {name!r} not found in result")
+
+
+def _find_rule(alerts, identifier, group_name, rule_name, *, by_record=False):
+    """Return a single rule from an alerts dict by identifier, group, and name."""
+    key = "record" if by_record else "alert"
+    groups = alerts[identifier]["groups"]
+    group = next(g for g in groups if g["name"] == group_name)
+    return next(rule for rule in group["rules"] if rule.get(key) == rule_name)
