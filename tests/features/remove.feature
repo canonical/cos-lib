@@ -21,14 +21,12 @@ Feature: Alert rule remove customization
               expr: avg(latency)
     """
 
-    Given the following remove config
+    When the following customization is applied
     """
     remove:
       - where:
           alert: LowThroughput
     """
-
-    When the customization is applied
 
     Then alert "LowThroughput" is absent
     And alert "HighLatency" is present
@@ -52,14 +50,12 @@ Feature: Alert rule remove customization
               expr: up < 1
     """
 
-    Given the following remove config
+    When the following customization is applied
     """
     remove:
       - where:
           group: group_a
     """
-
-    When the customization is applied
 
     Then group "group_a" is absent from identifier "app-1"
     And group "group_b" is present in identifier "app-1"
@@ -82,15 +78,13 @@ Feature: Alert rule remove customization
               expr: avg(latency)
     """
 
-    Given the following remove config
+    When the following customization is applied
     """
     remove:
       - where:
           group: group_a
           alert: LowThroughput
     """
-
-    When the customization is applied
 
     Then alert "LowThroughput" is absent
     And alert "HighLatency" is present
@@ -118,15 +112,13 @@ Feature: Alert rule remove customization
               expr: avg(latency)
     """
 
-    Given the following remove config
+    When the following customization is applied
     """
     remove:
       - where:
           labels:
             severity: warning
     """
-
-    When the customization is applied
 
     Then alert "LowThroughput" is absent
     And alert "HighLatency" is present
@@ -150,15 +142,13 @@ Feature: Alert rule remove customization
               for: 5m
     """
 
-    Given the following remove config
+    When the following customization is applied
     """
     remove:
       - where:
           annotations:
             summary: latency is high
     """
-
-    When the customization is applied
 
     Then alert "HighLatency" is absent
     And alert "LowThroughput" is present
@@ -181,15 +171,13 @@ Feature: Alert rule remove customization
               for: 5m
     """
 
-    Given the following remove config
+    When the following customization is applied
     """
     remove:
       - where:
           labels:
             juju_application: app-1
     """
-
-    When the customization is applied
 
     Then alert "HighLatency" is absent
     And alert "LowThroughput" is present
@@ -218,7 +206,7 @@ Feature: Alert rule remove customization
               expr: x > 0
     """
 
-    Given the following remove config
+    When the following customization is applied
     """
     remove:
       - where:
@@ -226,8 +214,6 @@ Feature: Alert rule remove customization
       - where:
           alert: OtherAlert
     """
-
-    When the customization is applied
 
     Then alert "HighLatency" is absent
     And alert "OtherAlert" is absent
@@ -250,14 +236,12 @@ Feature: Alert rule remove customization
               expr: up < 1
     """
 
-    Given the following remove config
+    When the following customization is applied
     """
     remove:
       - where:
           alert: HostDown
     """
-
-    When the customization is applied
 
     Then group "group_b" is absent from identifier "app-1"
     And group "group_a" is present in identifier "app-1"
@@ -280,14 +264,12 @@ Feature: Alert rule remove customization
               expr: x > 0
     """
 
-    Given the following remove config
+    When the following customization is applied
     """
     remove:
       - where:
           alert: OtherAlert
     """
-
-    When the customization is applied
 
     Then identifier "app-2" is absent
     And identifier "app-1" is present

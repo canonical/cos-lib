@@ -24,19 +24,14 @@ def given_the_following_alert_rules(docstring):
     return yaml.safe_load(docstring)
 
 
-@given("the following remove config", target_fixture="remove_config")
-def given_the_following_remove_config(docstring):
-    return AlertRulesCustomization.from_yaml(docstring)
-
-
 # ---------------------------------------------------------------------------
 # When
 # ---------------------------------------------------------------------------
 
 
-@when("the customization is applied", target_fixture="result")
-def when_the_customization_is_applied(remove_config, alerts):
-    return remove_config.apply(alerts)
+@when("the following customization is applied", target_fixture="result")
+def when_the_following_customization_is_applied(docstring, alerts):
+    return AlertRulesCustomization.from_yaml(docstring).apply(alerts)
 
 
 # ---------------------------------------------------------------------------

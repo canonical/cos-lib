@@ -26,36 +26,32 @@ def given_the_following_alert_rules(docstring):
     return yaml.safe_load(docstring)
 
 
-@given("the following combined config", target_fixture="customization")
-def given_the_following_combined_config(docstring):
-    return AlertRulesCustomization.from_yaml(docstring)
-
-
-@given("the following remove config", target_fixture="customization")
-def given_the_following_remove_config(docstring):
-    return AlertRulesCustomization.from_yaml(docstring)
-
-
 # ---------------------------------------------------------------------------
 # When
 # ---------------------------------------------------------------------------
 
 
-@when("the customization is applied", target_fixture="apply_outcome")
-def when_the_customization_is_applied(customization, alerts):
+@when("the following customization is applied", target_fixture="apply_outcome")
+def when_the_following_customization_is_applied(docstring, alerts):
+    customization = AlertRulesCustomization.from_yaml(docstring)
     original = copy.deepcopy(alerts)
     result = customization.apply(alerts)
-    return {"result": result, "original": original, "input": alerts}
+    return {
+        "result": result,
+        "original": original,
+        "input": alerts,
+        "customization": customization,
+    }
 
 
-@when("the same customization is applied to two different inputs", target_fixture="both_results")
-def when_same_customization_applied_twice(customization, alerts):
-    other = {
+@when("the same customization is applied to a second input", target_fixture="both_results")
+def when_same_customization_applied_to_second_input(apply_outcome):
+    second_input = {
         "other": {"groups": [{"name": "g", "rules": [{"alert": "HostDown", "expr": "up < 1"}]}]}
     }
     return {
-        "result1": customization.apply(alerts),
-        "result2": customization.apply(other),
+        "result1": apply_outcome["result"],
+        "result2": apply_outcome["customization"].apply(second_input),
     }
 
 

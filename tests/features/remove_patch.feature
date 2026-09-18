@@ -21,7 +21,7 @@ Feature: Alert rule remove and patch interaction
               for: 5m
     """
 
-    Given the following combined config
+    When the following customization is applied
     """
     remove:
       - where:
@@ -34,8 +34,6 @@ Feature: Alert rule remove and patch interaction
           labels:
             severity: page
     """
-
-    When the customization is applied
 
     Then the original input is unchanged
 
@@ -55,7 +53,7 @@ Feature: Alert rule remove and patch interaction
               for: 10m
     """
 
-    Given the following combined config
+    When the following customization is applied
     """
     remove:
       - where:
@@ -66,8 +64,6 @@ Feature: Alert rule remove and patch interaction
         set:
           for: 2m
     """
-
-    When the customization is applied
 
     Then alert "GoneForever" is absent from identifier "app"
     And alert "Survivor" has "for" equal to "2m"
@@ -84,13 +80,13 @@ Feature: Alert rule remove and patch interaction
               expr: up < 1
     """
 
-    Given the following remove config
+    When the following customization is applied
     """
     remove:
       - where:
           alert: HostDown
     """
 
-    When the same customization is applied to two different inputs
+    When the same customization is applied to a second input
 
     Then alert "HostDown" is absent from both results

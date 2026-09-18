@@ -24,19 +24,14 @@ def given_the_following_alert_rules(docstring):
     return yaml.safe_load(docstring)
 
 
-@given("the following patch", target_fixture="patch")
-def given_the_following_patch(docstring):
-    return AlertRulesCustomization.from_yaml(docstring)
-
-
 # ---------------------------------------------------------------------------
 # When
 # ---------------------------------------------------------------------------
 
 
-@when("the patch is applied", target_fixture="result")
-def when_the_patch_is_applied(patch, alerts):
-    return patch.apply(alerts)
+@when("the following customization is applied", target_fixture="result")
+def when_the_following_customization_is_applied(docstring, alerts):
+    return AlertRulesCustomization.from_yaml(docstring).apply(alerts)
 
 
 # ---------------------------------------------------------------------------

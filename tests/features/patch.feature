@@ -16,7 +16,7 @@ Feature: Alert rule patch customization
               for: 10m
     """
 
-    Given the following patch
+    When the following customization is applied
     """
     patch:
       - where:
@@ -24,8 +24,6 @@ Feature: Alert rule patch customization
         set:
           for: 30m
     """
-
-    When the patch is applied
 
     Then alert "HighLatency" has "for" equal to "30m"
 
@@ -42,7 +40,7 @@ Feature: Alert rule patch customization
               for: 10m
     """
 
-    Given the following patch
+    When the following customization is applied
     """
     patch:
       - where:
@@ -50,8 +48,6 @@ Feature: Alert rule patch customization
         set:
           alert: RenamedLatency
     """
-
-    When the patch is applied
 
     Then alert "RenamedLatency" is present
     And alert "HighLatency" is absent
@@ -68,7 +64,7 @@ Feature: Alert rule patch customization
               expr: up < 1
     """
 
-    Given the following patch
+    When the following customization is applied
     """
     patch:
       - where:
@@ -76,8 +72,6 @@ Feature: Alert rule patch customization
         set:
           expr: up == 0
     """
-
-    When the patch is applied
 
     Then alert "HostDown" has "expr" equal to "up == 0"
 
@@ -97,7 +91,7 @@ Feature: Alert rule patch customization
                 juju_application: app-1
     """
 
-    Given the following patch
+    When the following customization is applied
     """
     patch:
       - where:
@@ -107,8 +101,6 @@ Feature: Alert rule patch customization
             severity: page
             extra: added
     """
-
-    When the patch is applied
 
     Then alert "HighLatency" has label "severity" equal to "page"
     And alert "HighLatency" has label "extra" equal to "added"
@@ -129,7 +121,7 @@ Feature: Alert rule patch customization
                 juju_application: app-1
     """
 
-    Given the following patch
+    When the following customization is applied
     """
     patch:
       - where:
@@ -138,8 +130,6 @@ Feature: Alert rule patch customization
           labels:
             juju_application: other-app
     """
-
-    When the patch is applied
 
     Then alert "HighLatency" has label "juju_application" equal to "other-app"
 
@@ -158,7 +148,7 @@ Feature: Alert rule patch customization
                 summary: latency is high
     """
 
-    Given the following patch
+    When the following customization is applied
     """
     patch:
       - where:
@@ -168,8 +158,6 @@ Feature: Alert rule patch customization
             summary: new summary
             description: new description
     """
-
-    When the patch is applied
 
     Then alert "HighLatency" has annotation "summary" equal to "new summary"
     And alert "HighLatency" has annotation "description" equal to "new description"
@@ -189,7 +177,7 @@ Feature: Alert rule patch customization
               expr: avg(latency)
     """
 
-    Given the following patch
+    When the following customization is applied
     """
     patch:
       - where:
@@ -197,8 +185,6 @@ Feature: Alert rule patch customization
         set:
           expr: hacked
     """
-
-    When the patch is applied
 
     Then recording rule "job:latency:mean5m" has "expr" equal to "avg(latency)"
     And alert "HighLatency" has "expr" equal to "hacked"
@@ -227,7 +213,7 @@ Feature: Alert rule patch customization
                 severity: warning
     """
 
-    Given the following patch
+    When the following customization is applied
     """
     patch:
       - where:
@@ -237,8 +223,6 @@ Feature: Alert rule patch customization
           labels:
             severity: critical
     """
-
-    When the patch is applied
 
     Then alert "LowThroughput" has label "severity" equal to "critical"
     And recording rule "job:latency:mean5m" has label "severity" equal to "warning"
@@ -259,7 +243,7 @@ Feature: Alert rule patch customization
               expr: latency > 200
     """
 
-    Given the following patch
+    When the following customization is applied
     """
     patch:
       - where:
@@ -267,8 +251,6 @@ Feature: Alert rule patch customization
         set:
           alert: RenamedLatency
     """
-
-    When the patch is applied
 
     Then alert "HighLatency" is absent
     And alert "RenamedLatency" is present in group "group_a" of "app-1"
