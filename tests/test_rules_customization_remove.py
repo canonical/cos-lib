@@ -19,7 +19,7 @@ scenarios("features/remove.feature")
 # ---------------------------------------------------------------------------
 
 
-@given("the following alert rules", target_fixture="alerts")
+@given(parsers.parse("the following alert rules:\n{docstring}"), target_fixture="alerts")
 def given_the_following_alert_rules(docstring):
     return yaml.safe_load(docstring)
 
@@ -29,7 +29,7 @@ def given_the_following_alert_rules(docstring):
 # ---------------------------------------------------------------------------
 
 
-@when("the following customization is applied", target_fixture="result")
+@when(parsers.parse("the following customization is applied:\n{docstring}"), target_fixture="result")
 def when_the_following_customization_is_applied(docstring, alerts):
     return AlertRulesCustomization.from_yaml(docstring).apply(alerts)
 
