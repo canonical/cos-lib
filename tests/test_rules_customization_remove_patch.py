@@ -31,7 +31,10 @@ def given_the_following_alert_rules(docstring):
 # ---------------------------------------------------------------------------
 
 
-@when(parsers.parse("the following customization is applied:\n{docstring}"), target_fixture="apply_outcome")
+@when(
+    parsers.parse("the following customization is applied:\n{docstring}"),
+    target_fixture="apply_outcome",
+)
 def when_the_following_customization_is_applied(docstring, alerts):
     customization = AlertRulesCustomization.from_yaml(docstring)
     original = copy.deepcopy(alerts)
