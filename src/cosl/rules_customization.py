@@ -9,7 +9,7 @@ takes relation-derived alert rule files (the same dict that relation libraries s
 ``MetricsConsumer.alerts`` produce) and an admin-provided YAML customization config, and
 returns the modified rules in the same format.
 
-The customization config supports two top-level keys:
+The customization config supports the following top-level keys:
 
 - ``remove``: drop matching alerting rules (or entire groups, when ``group`` is the only
   selector).
