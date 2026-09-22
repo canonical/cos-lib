@@ -6,21 +6,21 @@
 
 This module provides :class:`AlertRulesCustomization`, a pure transformation helper that
 takes relation-derived alert rule files (the same dict that relation libraries such as
-``MetricsConsumer.alerts`` produce) and an admin-provided YAML customization config, and
+`MetricsConsumer.alerts` produce) and an admin-provided YAML customization config, and
 returns the modified rules in the same format.
 
 The customization config supports the following top-level keys:
 
-- ``remove``: drop matching alerting rules (or entire groups, when ``group`` is the only
+- `remove`: drop matching alerting rules (or entire groups, when `group` is the only
   selector).
-- ``patch``: modify matching alerting rules by merging a ``set`` block into them.
+- `patch`: modify matching alerting rules by merging a `set` block into them.
 
-Matching is performed via a ``where`` block, supporting exact equality on ``alert``,
-``group``, ``labels`` and ``annotations``. All fields within one ``where`` are ANDed;
-multiple entries in the ``remove``/``patch`` lists provide OR semantics.
+Matching is performed via a `where` block, supporting exact equality on `alert`,
+`group`, `labels` and `annotations`. All fields within one `where` are ANDed;
+multiple entries in the `remove`/`patch` lists provide OR semantics.
 
 Recording rules are never removed or patched unless an entire group is dropped via a
-group-only ``where`` selector.
+group-only `where` selector.
 
 This class is a pure transformation helper. It does not call CosTool, Pebble,
 Prometheus, Loki or Mimir APIs, does not write files and does not set statuses.
@@ -148,13 +148,13 @@ class AlertRulesCustomization:
     """Apply admin-defined remove/patch operations to relation-derived alert rules.
 
     Attributes:
-        _remove: list of ``where``-only operation blocks; rules matching any
+        _remove: list of `where`-only operation blocks; rules matching any
             selector are dropped.
-        _patch: list of ``where``+``set`` operation blocks; each matching rule
-            has the ``set`` keys merged into it.
+        _patch: list of `where`+`set` operation blocks; each matching rule
+            has the `set` keys merged into it.
 
     Build an instance with :meth:`from_yaml`, then call :meth:`apply` on the alerts dict
-    (e.g. ``self.metrics_consumer.alerts``). The instance is reusable: ``apply()`` can be
+    (e.g. `self.metrics_consumer.alerts`). The instance is reusable: `apply()` can be
     called multiple times on different inputs.
     """
 
@@ -178,14 +178,14 @@ class AlertRulesCustomization:
             config_string: raw YAML string, e.g. from a charm config option.
 
         Returns:
-            An ``AlertRulesCustomization`` instance. If the config string is empty,
-            whitespace-only or parses to ``None``, the returned instance is a no-op.
+            An `AlertRulesCustomization` instance. If the config string is empty,
+            whitespace-only or parses to `None`, the returned instance is a no-op.
 
         Raises:
             AlertRulesCustomizationError: on invalid YAML, unknown top-level keys
-                (only ``remove``, ``patch`` are allowed), invalid operation
-                shape (missing ``where``, unknown selector keys, unknown set keys),
-                empty ``where`` selectors.
+                (only `remove`, `patch` are allowed), invalid operation
+                shape (missing `where`, unknown selector keys, unknown set keys),
+                empty `where` selectors.
         """
         if not config_string or not config_string.strip():
             return cls()
@@ -233,11 +233,11 @@ class AlertRulesCustomization:
 
         Args:
             relation_alerts: mapping of identifier to rule file, e.g.
-                ``self.metrics_consumer.alerts``.
+                `self.metrics_consumer.alerts`.
 
         Returns:
             The transformed rules, in the same format as the input. Identifiers whose
-            ``groups`` list becomes empty after removal are dropped.
+            `groups` list becomes empty after removal are dropped.
         """
         output: Dict[str, OfficialRuleFileFormat] = copy.deepcopy(dict(relation_alerts))
 
@@ -250,7 +250,7 @@ class AlertRulesCustomization:
         """Does this rule (in this group) satisfy all fields of this where block?
 
         All fields present in the where block must match (AND semantics). Exact equality
-        is used for ``alert`` and ``group``; ``labels``/``annotations`` require every
+        is used for `alert` and `group`; `labels`/`annotations` require every
         key-value pair in the where block to exist in the rule's corresponding mapping.
         """
         if "group" in where and where["group"] != group_name:
@@ -271,7 +271,7 @@ class AlertRulesCustomization:
 
     @staticmethod
     def _is_group_only_selector(where: Mapping[str, Any]) -> bool:
-        """Is ``group`` the only key of this where block?"""
+        """Is `group` the only key of this where block?"""
         return set(where.keys()) == {"group"}
 
     def _apply_remove(self, output: Dict[str, OfficialRuleFileFormat]) -> None:
@@ -327,7 +327,7 @@ class AlertRulesCustomization:
                 del output[identifier]
 
     def _apply_patch(self, output: Dict[str, OfficialRuleFileFormat]) -> None:
-        """Merge each patch's ``set`` block into every matching alerting rule."""
+        """Merge each patch's `set` block into every matching alerting rule."""
         if not self._patch:
             return
 
@@ -351,7 +351,7 @@ class AlertRulesCustomization:
         identifier: str,
         group_name: str,
     ) -> None:
-        """Merge a single ``set`` block into a rule, logging what changed."""
+        """Merge a single `set` block into a rule, logging what changed."""
         changes: List[str] = []
         if "alert" in set_block:
             changes.append(f"alert={set_block['alert']}")
