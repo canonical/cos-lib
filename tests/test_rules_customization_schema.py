@@ -15,18 +15,18 @@ from helpers import _load_sample_alerts
 
 from cosl.rules_customization import (
     AlertRulesCustomization,
-    AlertRulesCustomizationError,
+    AlertRulesCustomizationSchemaError,
 )
 
 
 class TestFromYamlValidation(unittest.TestCase):
     def test_invalid_yaml_raises(self):
-        with self.assertRaises(AlertRulesCustomizationError):
+        with self.assertRaises(AlertRulesCustomizationSchemaError):
             AlertRulesCustomization.from_yaml("remove: [unclosed")
 
     def test_non_mapping_top_level_raises(self):
         for config in ("- a\n- b", "42", '"just a string"'):
-            with self.assertRaises(AlertRulesCustomizationError):
+            with self.assertRaises(AlertRulesCustomizationSchemaError):
                 AlertRulesCustomization.from_yaml(config)
 
     def test_unknown_top_level_key_raises(self):
@@ -39,43 +39,43 @@ class TestFromYamlValidation(unittest.TestCase):
                   alert: Foo
             """
         with self.assertRaisesRegex(
-            AlertRulesCustomizationError, "Extra inputs are not permitted"
+            AlertRulesCustomizationSchemaError, "Extra inputs are not permitted"
         ):
             AlertRulesCustomization.from_yaml(config)
 
     def test_remove_missing_where_raises(self):
-        with self.assertRaisesRegex(AlertRulesCustomizationError, "remove"):
+        with self.assertRaisesRegex(AlertRulesCustomizationSchemaError, "remove"):
             AlertRulesCustomization.from_yaml("remove:\n  - alert: Foo")
 
     def test_remove_empty_where_raises(self):
         with self.assertRaisesRegex(
-            AlertRulesCustomizationError, "'where' must have at least one of"
+            AlertRulesCustomizationSchemaError, "'where' must have at least one of"
         ):
             AlertRulesCustomization.from_yaml("remove:\n  - where: {}")
 
     def test_remove_unknown_where_key_raises(self):
         with self.assertRaisesRegex(
-            AlertRulesCustomizationError, "Extra inputs are not permitted"
+            AlertRulesCustomizationSchemaError, "Extra inputs are not permitted"
         ):
             AlertRulesCustomization.from_yaml("remove:\n  - where:\n      expr: up < 1")
 
     def test_patch_missing_where_raises(self):
-        with self.assertRaisesRegex(AlertRulesCustomizationError, "patch"):
+        with self.assertRaisesRegex(AlertRulesCustomizationSchemaError, "patch"):
             AlertRulesCustomization.from_yaml("patch:\n  - set:\n      for: 5m")
 
     def test_patch_missing_set_raises(self):
-        with self.assertRaisesRegex(AlertRulesCustomizationError, "patch"):
+        with self.assertRaisesRegex(AlertRulesCustomizationSchemaError, "patch"):
             AlertRulesCustomization.from_yaml("patch:\n  - where:\n      alert: Foo")
 
     def test_patch_empty_where_raises(self):
         with self.assertRaisesRegex(
-            AlertRulesCustomizationError, "'where' must have at least one of"
+            AlertRulesCustomizationSchemaError, "'where' must have at least one of"
         ):
             AlertRulesCustomization.from_yaml("patch:\n  - where: {}\n    set:\n      for: 5m")
 
     def test_patch_unknown_where_key_raises(self):
         with self.assertRaisesRegex(
-            AlertRulesCustomizationError, "Extra inputs are not permitted"
+            AlertRulesCustomizationSchemaError, "Extra inputs are not permitted"
         ):
             AlertRulesCustomization.from_yaml(
                 "patch:\n  - where:\n      record: some:record\n    set:\n      expr: up"
@@ -83,7 +83,7 @@ class TestFromYamlValidation(unittest.TestCase):
 
     def test_patch_unknown_set_key_raises(self):
         with self.assertRaisesRegex(
-            AlertRulesCustomizationError, "Extra inputs are not permitted"
+            AlertRulesCustomizationSchemaError, "Extra inputs are not permitted"
         ):
             AlertRulesCustomization.from_yaml(
                 "patch:\n  - where:\n      alert: Foo\n    set:\n      duration: 5m"
@@ -91,7 +91,7 @@ class TestFromYamlValidation(unittest.TestCase):
 
     def test_patch_set_alert_to_empty_string_raises(self):
         with self.assertRaisesRegex(
-            AlertRulesCustomizationError, "'set' must have at least one of"
+            AlertRulesCustomizationSchemaError, "'set' must have at least one of"
         ):
             AlertRulesCustomization.from_yaml(
                 'patch:\n  - where:\n      alert: HighLatency\n    set:\n      alert: ""'
@@ -100,7 +100,7 @@ class TestFromYamlValidation(unittest.TestCase):
     def test_operations_not_a_list_raises(self):
         for key in ("remove", "patch"):
             with self.assertRaisesRegex(
-                AlertRulesCustomizationError, "Input should be a valid list"
+                AlertRulesCustomizationSchemaError, "Input should be a valid list"
             ):
                 AlertRulesCustomization.from_yaml(f"{key}: not-a-list")
 
@@ -125,7 +125,7 @@ class TestFromYamlValidation(unittest.TestCase):
         ]
         for config in invalid_cases:
             with self.subTest(config):
-                with self.assertRaises(AlertRulesCustomizationError):
+                with self.assertRaises(AlertRulesCustomizationSchemaError):
                     AlertRulesCustomization.from_yaml(config[0])
 
 

@@ -219,3 +219,24 @@ Feature: Alert rule patch customization
     Then alert "HighLatency" is absent
     And alert "RenamedLatency" is present in group "group_a" of "app-1"
     And alert "RenamedLatency" is present in group "group_b" of "app-1"
+
+  Scenario: Patch that sets an invalid PromQL expression raises a validation error and leaves alerts unchanged
+
+    Given the following alert rules:
+      app-1:
+        groups:
+          - name: group_a
+            rules:
+              - alert: HighLatency
+                expr: latency > 100
+                for: 10m
+
+    When the following customization is applied and validation occurs:
+      patch:
+        - where:
+            alert: HighLatency
+          set:
+            expr: "this is not valid {{{promql"
+
+    Then an AlertRulesCustomizationValidationError is raised
+    And the original alerts are unchanged

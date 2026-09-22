@@ -43,7 +43,8 @@ from pydantic import (
     model_validator,
 )
 
-from .types import OfficialRuleFileFormat
+from .cos_tool import CosTool
+from .types import OfficialRuleFileFormat, QueryType
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +132,24 @@ class _RulesCustomizationConfig(BaseModel):
 
 
 class AlertRulesCustomizationError(Exception):
-    """Raised when the alert rules customization configuration is invalid."""
+    """Base class for all alert rules customization errors."""
+
+
+class AlertRulesCustomizationSchemaError(AlertRulesCustomizationError):
+    """Raised when the alert rules customization configuration is structurally invalid.
+
+    This covers invalid YAML, unknown top-level keys, missing or malformed ``where``/``set``
+    blocks, and any other problem detected while parsing the config string.
+    """
+
+
+class AlertRulesCustomizationValidationError(AlertRulesCustomizationError):
+    """Raised when the rules produced by :meth:`AlertRulesCustomization.apply` fail cos-tool validation.
+
+    This means the customization config was structurally valid, but the resulting rule
+    expressions are not valid PromQL/LogQL. The caller should treat the :meth:`apply` call
+    as a no-op and continue using the original, unmodified rules.
+    """
 
 
 def _format_pydantic_error(err: ValidationError) -> str:
@@ -152,6 +170,7 @@ class AlertRulesCustomization:
             selector are dropped.
         _patch: list of `where`+`set` operation blocks; each matching rule
             has the `set` keys merged into it.
+        _tool: :class:`CosTool` instance used to validate the output of :meth:`apply`.
 
     Build an instance with :meth:`from_yaml`, then call :meth:`apply` on the alerts dict
     (e.g. `self.metrics_consumer.alerts`). The instance is reusable: `apply()` can be
@@ -162,45 +181,57 @@ class AlertRulesCustomization:
         self,
         remove: Optional[List[Dict[str, Any]]] = None,
         patch: Optional[List[Dict[str, Any]]] = None,
+        query_type: QueryType = "promql",
     ):
         r"""Build a customization object from pre-validated operation blocks.
 
         Prefer :meth:`from_yaml` for parsing and validating user input.
+
+        Args:
+            remove: pre-validated list of remove operation blocks.
+            patch: pre-validated list of patch operation blocks.
+            query_type: query language used to validate the output of :meth:`apply`
+                via :class:`CosTool`. Defaults to ``"promql"``.
         """
         self._remove: List[Dict[str, Any]] = remove or []
         self._patch: List[Dict[str, Any]] = patch or []
+        self._tool: CosTool = CosTool(default_query_type=query_type)
 
     @classmethod
-    def from_yaml(cls, config_string: str) -> "AlertRulesCustomization":
+    def from_yaml(
+        cls, config_string: str, query_type: QueryType = "promql"
+    ) -> "AlertRulesCustomization":
         """Parse and validate the customization YAML.
 
         Args:
             config_string: raw YAML string, e.g. from a charm config option.
+            query_type: query language used to validate the output of :meth:`apply`
+                via :class:`CosTool`. Defaults to ``"promql"``.
 
         Returns:
             An `AlertRulesCustomization` instance. If the config string is empty,
             whitespace-only or parses to `None`, the returned instance is a no-op.
 
         Raises:
-            AlertRulesCustomizationError: on invalid YAML, unknown top-level keys
+            AlertRulesCustomizationSchemaError: on invalid YAML, unknown top-level keys
                 (only `remove`, `patch` are allowed), invalid operation
                 shape (missing `where`, unknown selector keys, unknown set keys),
                 empty `where` selectors.
         """
         if not config_string or not config_string.strip():
-            return cls()
+            return cls(query_type=query_type)
 
         try:
             parsed = yaml.safe_load(config_string)
         except yaml.YAMLError as e:
-            raise AlertRulesCustomizationError(f"invalid YAML: {e}") from e
+            raise AlertRulesCustomizationSchemaError(f"invalid YAML: {e}") from e
 
         if parsed is None:
-            return cls()
+            return cls(query_type=query_type)
 
         if not isinstance(parsed, collections.abc.Mapping):
             valid_keys = sorted(_RulesCustomizationConfig.model_fields.keys())
-            raise AlertRulesCustomizationError(
+            raise AlertRulesCustomizationSchemaError(
                 f"configuration must be a mapping with keys {valid_keys}; "
                 f"got {type(parsed).__name__}"
             )
@@ -208,7 +239,7 @@ class AlertRulesCustomization:
         try:
             config = _RulesCustomizationConfig.model_validate(parsed)
         except ValidationError as e:
-            raise AlertRulesCustomizationError(_format_pydantic_error(e)) from e
+            raise AlertRulesCustomizationSchemaError(_format_pydantic_error(e)) from e
 
         return cls(
             remove=(
@@ -221,6 +252,7 @@ class AlertRulesCustomization:
                 if config.patch
                 else None
             ),
+            query_type=query_type,
         )
 
     def apply(
@@ -231,6 +263,12 @@ class AlertRulesCustomization:
         Operations run in this order: remove, patch. The input is never mutated;
         the transformations operate on a deep copy.
 
+        After the transformations are applied, each identifier's output is validated
+        with :class:`CosTool`. If **any** identifier produces invalid rules the entire
+        call is treated as a no-op: an :class:`AlertRulesCustomizationValidationError`
+        is raised and the caller should continue using the original, unmodified
+        ``relation_alerts``.
+
         Args:
             relation_alerts: mapping of identifier to rule file, e.g.
                 `self.metrics_consumer.alerts`.
@@ -238,11 +276,28 @@ class AlertRulesCustomization:
         Returns:
             The transformed rules, in the same format as the input. Identifiers whose
             `groups` list becomes empty after removal are dropped.
+
+        Raises:
+            AlertRulesCustomizationValidationError: when the transformed output fails
+                cos-tool validation for any identifier.
         """
         output: Dict[str, OfficialRuleFileFormat] = copy.deepcopy(dict(relation_alerts))
 
         self._apply_remove(output)
         self._apply_patch(output)
+
+        for identifier, rule_file in output.items():
+            valid, errmsg = self._tool.validate_alert_rules(rule_file)
+            if not valid:
+                logger.warning(
+                    "Customized rules for '%s' failed validation (%s); "
+                    "discarding entire customization as a no-op.",
+                    identifier,
+                    errmsg,
+                )
+                raise AlertRulesCustomizationValidationError(
+                    f"Customized rules for '{identifier}' failed validation: {errmsg}"
+                )
 
         return output
 

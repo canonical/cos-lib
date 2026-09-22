@@ -5,11 +5,16 @@
 Feature file: tests/features/patch.feature
 """
 
+import copy
+
 import yaml
 from helpers import _find_alert, _find_record
 from pytest_bdd import given, parsers, scenarios, then, when
 
-from cosl.rules_customization import AlertRulesCustomization
+from cosl.rules_customization import (
+    AlertRulesCustomization,
+    AlertRulesCustomizationValidationError,
+)
 
 scenarios("features/patch.feature")
 
@@ -99,3 +104,36 @@ def then_alert_present_in_group(result, name, group_name, identifier):
     assert any(
         r.get("alert") == name for r in rules
     ), f"alert {name!r} not found in group {group_name!r} of {identifier!r}"
+
+
+# ---------------------------------------------------------------------------
+# Steps for validation scenarios
+# ---------------------------------------------------------------------------
+
+
+@when(
+    parsers.parse("the following customization is applied and validation occurs:\n{docstring}"),
+    target_fixture="validation_outcome",
+)
+def when_customization_with_validation(docstring, alerts):
+    original = copy.deepcopy(alerts)
+    try:
+        AlertRulesCustomization.from_yaml(docstring).apply(alerts)
+        return {"error": None, "original": original}
+    except AlertRulesCustomizationValidationError as e:
+        return {"error": e, "original": original}
+
+
+@then("an AlertRulesCustomizationValidationError is raised")
+def then_validation_error_raised(validation_outcome):
+    assert (
+        validation_outcome["error"] is not None
+    ), "expected an AlertRulesCustomizationValidationError but no error was raised"
+    assert isinstance(validation_outcome["error"], AlertRulesCustomizationValidationError)
+
+
+@then("the original alerts are unchanged")
+def then_original_alerts_unchanged(validation_outcome, alerts):
+    assert (
+        alerts == validation_outcome["original"]
+    ), "apply() must not have mutated the original alerts"
