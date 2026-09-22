@@ -138,7 +138,7 @@ class AlertRulesCustomizationError(Exception):
 class AlertRulesCustomizationSchemaError(AlertRulesCustomizationError):
     """Raised when the alert rules customization configuration is structurally invalid.
 
-    This covers invalid YAML, unknown top-level keys, missing or malformed ``where``/``set``
+    This covers invalid YAML, unknown top-level keys, missing or malformed `where`/`set`
     blocks, and any other problem detected while parsing the config string.
     """
 
@@ -191,7 +191,7 @@ class AlertRulesCustomization:
             remove: pre-validated list of remove operation blocks.
             patch: pre-validated list of patch operation blocks.
             query_type: query language used to validate the output of :meth:`apply`
-                via :class:`CosTool`. Defaults to ``"promql"``.
+                via :class:`CosTool`. Defaults to `"promql"`.
         """
         self._remove: List[Dict[str, Any]] = remove or []
         self._patch: List[Dict[str, Any]] = patch or []
@@ -206,7 +206,7 @@ class AlertRulesCustomization:
         Args:
             config_string: raw YAML string, e.g. from a charm config option.
             query_type: query language used to validate the output of :meth:`apply`
-                via :class:`CosTool`. Defaults to ``"promql"``.
+                via :class:`CosTool`. Defaults to `"promql"`.
 
         Returns:
             An `AlertRulesCustomization` instance. If the config string is empty,
@@ -267,7 +267,7 @@ class AlertRulesCustomization:
         with :class:`CosTool`. If **any** identifier produces invalid rules the entire
         call is treated as a no-op: an :class:`AlertRulesCustomizationValidationError`
         is raised and the caller should continue using the original, unmodified
-        ``relation_alerts``.
+        `relation_alerts`.
 
         Args:
             relation_alerts: mapping of identifier to rule file, e.g.
