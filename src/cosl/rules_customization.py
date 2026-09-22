@@ -147,6 +147,12 @@ def _format_pydantic_error(err: ValidationError) -> str:
 class AlertRulesCustomization:
     """Apply admin-defined remove/patch operations to relation-derived alert rules.
 
+    Attributes:
+        _remove: list of ``where``-only operation blocks; rules matching any
+            selector are dropped.
+        _patch: list of ``where``+``set`` operation blocks; each matching rule
+            has the ``set`` keys merged into it.
+
     Build an instance with :meth:`from_yaml`, then call :meth:`apply` on the alerts dict
     (e.g. ``self.metrics_consumer.alerts``). The instance is reusable: ``apply()`` can be
     called multiple times on different inputs.
