@@ -196,10 +196,7 @@ class AlertRulesCustomization:
             remove: pre-validated list of remove operation blocks.
             patch: pre-validated list of patch operation blocks.
             query_type: query language used to validate the output of :meth:`apply`
-                via :class:`CosTool`. Must be either `"promql"` or `"logql"`.
-                Defaults to `"promql"`. This default only applies to the
-                lower-level `__init__` API; :meth:`from_yaml` requires an
-                explicit argument.
+                via :class:`CosTool`. Must be either "promql" or "logql".
         """
         self._remove: List[Dict[str, Any]] = remove or []
         self._patch: List[Dict[str, Any]] = patch or []
