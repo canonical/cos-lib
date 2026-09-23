@@ -38,7 +38,7 @@ def given_the_following_alert_rules(docstring):
     parsers.parse("the following customization is applied:\n{docstring}"), target_fixture="result"
 )
 def when_the_following_customization_is_applied(docstring, alerts):
-    return AlertRulesCustomization.from_yaml(docstring).apply(alerts)
+    return AlertRulesCustomization.from_yaml(docstring, "promql").apply(alerts)
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +118,7 @@ def then_alert_present_in_group(result, name, group_name, identifier):
 def when_customization_with_validation(docstring, alerts):
     original = copy.deepcopy(alerts)
     try:
-        AlertRulesCustomization.from_yaml(docstring).apply(alerts)
+        AlertRulesCustomization.from_yaml(docstring, "promql").apply(alerts)
         return {"error": None, "original": original}
     except AlertRulesCustomizationValidationError as e:
         return {"error": e, "original": original}

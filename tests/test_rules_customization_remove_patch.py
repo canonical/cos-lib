@@ -39,7 +39,7 @@ def given_the_following_alert_rules(docstring):
     target_fixture="apply_outcome",
 )
 def when_the_following_customization_is_applied(docstring, alerts):
-    customization = AlertRulesCustomization.from_yaml(docstring)
+    customization = AlertRulesCustomization.from_yaml(docstring, "promql")
     original = copy.deepcopy(alerts)
     result = customization.apply(alerts)
     return {
@@ -118,7 +118,7 @@ def then_alert_absent_from_both(both_results, name):
 def when_customization_with_validation(docstring, alerts):
     original = copy.deepcopy(alerts)
     try:
-        AlertRulesCustomization.from_yaml(docstring).apply(alerts)
+        AlertRulesCustomization.from_yaml(docstring, "promql").apply(alerts)
         return {"error": None, "original": original}
     except AlertRulesCustomizationValidationError as e:
         return {"error": e, "original": original}

@@ -22,10 +22,15 @@ multiple entries in the `remove`/`patch` lists provide OR semantics.
 Recording rules are never removed or patched unless an entire group is dropped via a
 group-only `where` selector.
 
-This class is a pure transformation helper. It does not call CosTool, Pebble,
-Prometheus, Loki or Mimir APIs, does not write files and does not set statuses.
-Validation of the resulting rules is the charm's responsibility after calling
-:meth:`AlertRulesCustomization.apply`.
+This class is a pure transformation helper that takes relation-derived alert rule
+files (the same dict that relation libraries such as `MetricsConsumer.alerts`
+produce) and an admin-provided YAML customization config, and returns the modified
+rules in the same format. After applying remove / patch operations,
+:meth:`AlertRulesCustomization.apply` validates the resulting rules via
+:class:`~cosl.cos_tool.CosTool`. If validation fails for any identifier the
+entire transformation is discarded and an
+:class:`AlertRulesCustomizationValidationError` is raised; the caller should
+continue with the original, unmodified rules.
 """
 
 import collections.abc
@@ -191,22 +196,23 @@ class AlertRulesCustomization:
             remove: pre-validated list of remove operation blocks.
             patch: pre-validated list of patch operation blocks.
             query_type: query language used to validate the output of :meth:`apply`
-                via :class:`CosTool`. Defaults to `"promql"`.
+                via :class:`CosTool`. Must be either `"promql"` or `"logql"`.
+                Defaults to `"promql"`. This default only applies to the
+                lower-level `__init__` API; :meth:`from_yaml` requires an
+                explicit argument.
         """
         self._remove: List[Dict[str, Any]] = remove or []
         self._patch: List[Dict[str, Any]] = patch or []
         self._tool: CosTool = CosTool(default_query_type=query_type)
 
     @classmethod
-    def from_yaml(
-        cls, config_string: str, query_type: QueryType = "promql"
-    ) -> "AlertRulesCustomization":
+    def from_yaml(cls, config_string: str, query_type: QueryType) -> "AlertRulesCustomization":
         """Parse and validate the customization YAML.
 
         Args:
             config_string: raw YAML string, e.g. from a charm config option.
             query_type: query language used to validate the output of :meth:`apply`
-                via :class:`CosTool`. Defaults to `"promql"`.
+                via :class:`CosTool`. Must be either `"promql"` or `"logql"`.
 
         Returns:
             An `AlertRulesCustomization` instance. If the config string is empty,
@@ -279,9 +285,16 @@ class AlertRulesCustomization:
 
         Raises:
             AlertRulesCustomizationValidationError: when the transformed output fails
-                cos-tool validation for any identifier.
+                cos-tool validation for any identifier, or when cos-tool is
+                unavailable.
         """
         output: Dict[str, OfficialRuleFileFormat] = copy.deepcopy(dict(relation_alerts))
+        if not self._tool.path:
+            logger.warning(
+                "cos-tool is unavailable; skipping all customizations. "
+                "Rules will not be modified."
+            )
+            return output
 
         self._apply_remove(output)
         self._apply_patch(output)
