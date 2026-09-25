@@ -124,6 +124,21 @@ def when_customization_with_validation(docstring, alerts):
         return {"error": e, "original": original}
 
 
+@when(
+    parsers.parse(
+        'the following customization is applied with "{query_type}" and validation occurs:\n{docstring}'
+    ),
+    target_fixture="validation_outcome",
+)
+def when_customization_with_validation_and_query_type(docstring, query_type, alerts):
+    original = copy.deepcopy(alerts)
+    try:
+        AlertRulesCustomization.from_yaml(docstring, query_type).apply(alerts)
+        return {"error": None, "original": original}
+    except AlertRulesCustomizationValidationError as e:
+        return {"error": e, "original": original}
+
+
 @then("an AlertRulesCustomizationValidationError is raised")
 def then_validation_error_raised(validation_outcome):
     assert (

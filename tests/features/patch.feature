@@ -240,3 +240,24 @@ Feature: Alert rule patch customization
 
     Then an AlertRulesCustomizationValidationError is raised
     And the original alerts are unchanged
+
+  Scenario: Patch that sets an invalid LogQL expression raises a validation error and leaves alerts unchanged
+
+    Given the following alert rules:
+      app-1:
+        groups:
+          - name: group_a
+            rules:
+              - alert: LogAlert
+                expr: '{job="myapp"}'
+                for: 10m
+
+    When the following customization is applied with "logql" and validation occurs:
+      patch:
+        - where:
+            alert: LogAlert
+          set:
+            expr: "{this is not valid {{{logql"
+
+    Then an AlertRulesCustomizationValidationError is raised
+    And the original alerts are unchanged

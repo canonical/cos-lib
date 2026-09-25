@@ -184,9 +184,10 @@ class AlertRulesCustomization:
 
     def __init__(
         self,
+        query_type: QueryType,
+        *,
         remove: Optional[List[Dict[str, Any]]] = None,
         patch: Optional[List[Dict[str, Any]]] = None,
-        query_type: QueryType = "promql",
     ):
         r"""Build a customization object from pre-validated operation blocks.
 
@@ -287,11 +288,10 @@ class AlertRulesCustomization:
         """
         output: Dict[str, OfficialRuleFileFormat] = copy.deepcopy(dict(relation_alerts))
         if not self._tool.path:
-            logger.warning(
-                "cos-tool is unavailable; skipping all customizations. "
-                "Rules will not be modified."
+            raise AlertRulesCustomizationValidationError(
+                "cos-tool is not available; rules cannot be validated and no customizations "
+                "will be applied."
             )
-            return output
 
         self._apply_remove(output)
         self._apply_patch(output)
