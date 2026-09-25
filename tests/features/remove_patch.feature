@@ -78,3 +78,30 @@ Feature: Alert rule remove and patch interaction
     When the same customization is applied to a second input
 
     Then alert "HostDown" is absent from both results
+
+  Scenario: Combined remove and patch where patch sets an invalid PromQL expression raises a validation error and leaves alerts unchanged
+
+    Given the following alert rules:
+      app-1:
+        groups:
+          - name: group_a
+            rules:
+              - alert: HighLatency
+                expr: latency > 100
+                for: 10m
+              - alert: LowThroughput
+                expr: throughput < 10
+                for: 5m
+
+    When the following customization is applied and validation occurs:
+      remove:
+        - where:
+            alert: LowThroughput
+      patch:
+        - where:
+            alert: HighLatency
+          set:
+            expr: "this is not valid {{{promql"
+
+    Then an AlertRulesCustomizationValidationError is raised
+    And the original alerts are unchanged

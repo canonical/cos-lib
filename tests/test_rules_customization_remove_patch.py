@@ -11,7 +11,10 @@ import yaml
 from helpers import _find_alert
 from pytest_bdd import given, parsers, scenarios, then, when
 
-from cosl.rules_customization import AlertRulesCustomization
+from cosl.rules_customization import (
+    AlertRulesCustomization,
+    AlertRulesCustomizationValidationError,
+)
 
 scenarios("features/remove_patch.feature")
 
@@ -36,7 +39,7 @@ def given_the_following_alert_rules(docstring):
     target_fixture="apply_outcome",
 )
 def when_the_following_customization_is_applied(docstring, alerts):
-    customization = AlertRulesCustomization.from_yaml(docstring)
+    customization = AlertRulesCustomization.from_yaml(docstring, "promql")
     original = copy.deepcopy(alerts)
     result = customization.apply(alerts)
     return {
@@ -101,3 +104,36 @@ def then_alert_absent_from_both(both_results, name):
                     assert (
                         rule.get("alert") != name
                     ), f"alert {name!r} found in {label} but should be absent"
+
+
+# ---------------------------------------------------------------------------
+# Steps for validation scenarios
+# ---------------------------------------------------------------------------
+
+
+@when(
+    parsers.parse("the following customization is applied and validation occurs:\n{docstring}"),
+    target_fixture="validation_outcome",
+)
+def when_customization_with_validation(docstring, alerts):
+    original = copy.deepcopy(alerts)
+    try:
+        AlertRulesCustomization.from_yaml(docstring, "promql").apply(alerts)
+        return {"error": None, "original": original}
+    except AlertRulesCustomizationValidationError as e:
+        return {"error": e, "original": original}
+
+
+@then("an AlertRulesCustomizationValidationError is raised")
+def then_validation_error_raised(validation_outcome):
+    assert (
+        validation_outcome["error"] is not None
+    ), "expected an AlertRulesCustomizationValidationError but no error was raised"
+    assert isinstance(validation_outcome["error"], AlertRulesCustomizationValidationError)
+
+
+@then("the original alerts are unchanged")
+def then_original_alerts_unchanged(validation_outcome, alerts):
+    assert (
+        alerts == validation_outcome["original"]
+    ), "apply() must not have mutated the original alerts"

@@ -15,19 +15,19 @@ from helpers import _load_sample_alerts
 
 from cosl.rules_customization import (
     AlertRulesCustomization,
-    AlertRulesCustomizationError,
+    AlertRulesCustomizationSchemaError,
 )
 
 
 class TestFromYamlValidation(unittest.TestCase):
     def test_invalid_yaml_raises(self):
-        with self.assertRaises(AlertRulesCustomizationError):
-            AlertRulesCustomization.from_yaml("remove: [unclosed")
+        with self.assertRaises(AlertRulesCustomizationSchemaError):
+            AlertRulesCustomization.from_yaml("remove: [unclosed", "promql")
 
     def test_non_mapping_top_level_raises(self):
         for config in ("- a\n- b", "42", '"just a string"'):
-            with self.assertRaises(AlertRulesCustomizationError):
-                AlertRulesCustomization.from_yaml(config)
+            with self.assertRaises(AlertRulesCustomizationSchemaError):
+                AlertRulesCustomization.from_yaml(config, "promql")
 
     def test_unknown_top_level_key_raises(self):
         config = """
@@ -39,70 +39,75 @@ class TestFromYamlValidation(unittest.TestCase):
                   alert: Foo
             """
         with self.assertRaisesRegex(
-            AlertRulesCustomizationError, "Extra inputs are not permitted"
+            AlertRulesCustomizationSchemaError, "Extra inputs are not permitted"
         ):
-            AlertRulesCustomization.from_yaml(config)
+            AlertRulesCustomization.from_yaml(config, "promql")
 
     def test_remove_missing_where_raises(self):
-        with self.assertRaisesRegex(AlertRulesCustomizationError, "remove"):
-            AlertRulesCustomization.from_yaml("remove:\n  - alert: Foo")
+        with self.assertRaisesRegex(AlertRulesCustomizationSchemaError, "remove"):
+            AlertRulesCustomization.from_yaml("remove:\n  - alert: Foo", "promql")
 
     def test_remove_empty_where_raises(self):
         with self.assertRaisesRegex(
-            AlertRulesCustomizationError, "'where' must have at least one of"
+            AlertRulesCustomizationSchemaError, "'where' must have at least one of"
         ):
-            AlertRulesCustomization.from_yaml("remove:\n  - where: {}")
+            AlertRulesCustomization.from_yaml("remove:\n  - where: {}", "promql")
 
     def test_remove_unknown_where_key_raises(self):
         with self.assertRaisesRegex(
-            AlertRulesCustomizationError, "Extra inputs are not permitted"
+            AlertRulesCustomizationSchemaError, "Extra inputs are not permitted"
         ):
-            AlertRulesCustomization.from_yaml("remove:\n  - where:\n      expr: up < 1")
+            AlertRulesCustomization.from_yaml("remove:\n  - where:\n      expr: up < 1", "promql")
 
     def test_patch_missing_where_raises(self):
-        with self.assertRaisesRegex(AlertRulesCustomizationError, "patch"):
-            AlertRulesCustomization.from_yaml("patch:\n  - set:\n      for: 5m")
+        with self.assertRaisesRegex(AlertRulesCustomizationSchemaError, "patch"):
+            AlertRulesCustomization.from_yaml("patch:\n  - set:\n      for: 5m", "promql")
 
     def test_patch_missing_set_raises(self):
-        with self.assertRaisesRegex(AlertRulesCustomizationError, "patch"):
-            AlertRulesCustomization.from_yaml("patch:\n  - where:\n      alert: Foo")
+        with self.assertRaisesRegex(AlertRulesCustomizationSchemaError, "patch"):
+            AlertRulesCustomization.from_yaml("patch:\n  - where:\n      alert: Foo", "promql")
 
     def test_patch_empty_where_raises(self):
         with self.assertRaisesRegex(
-            AlertRulesCustomizationError, "'where' must have at least one of"
+            AlertRulesCustomizationSchemaError, "'where' must have at least one of"
         ):
-            AlertRulesCustomization.from_yaml("patch:\n  - where: {}\n    set:\n      for: 5m")
+            AlertRulesCustomization.from_yaml(
+                "patch:\n  - where: {}\n    set:\n      for: 5m", "promql"
+            )
 
     def test_patch_unknown_where_key_raises(self):
         with self.assertRaisesRegex(
-            AlertRulesCustomizationError, "Extra inputs are not permitted"
+            AlertRulesCustomizationSchemaError, "Extra inputs are not permitted"
         ):
             AlertRulesCustomization.from_yaml(
-                "patch:\n  - where:\n      record: some:record\n    set:\n      expr: up"
+                "patch:\n  - where:\n      record: some:record\n    set:\n      expr: up",
+                "promql",
             )
 
     def test_patch_unknown_set_key_raises(self):
         with self.assertRaisesRegex(
-            AlertRulesCustomizationError, "Extra inputs are not permitted"
+            AlertRulesCustomizationSchemaError, "Extra inputs are not permitted"
         ):
             AlertRulesCustomization.from_yaml(
-                "patch:\n  - where:\n      alert: Foo\n    set:\n      duration: 5m"
+                "patch:\n  - where:\n      alert: Foo\n    set:\n      duration: 5m",
+                "promql",
             )
 
     def test_patch_set_alert_to_empty_string_raises(self):
         with self.assertRaisesRegex(
-            AlertRulesCustomizationError, "'set' must have at least one of"
+            AlertRulesCustomizationSchemaError, "'set' must have at least one of"
         ):
             AlertRulesCustomization.from_yaml(
-                'patch:\n  - where:\n      alert: HighLatency\n    set:\n      alert: ""'
+                'patch:\n  - where:\n      alert: HighLatency\n    set:\n      alert: ""',
+                "promql",
             )
 
     def test_operations_not_a_list_raises(self):
         for key in ("remove", "patch"):
             with self.assertRaisesRegex(
-                AlertRulesCustomizationError, "Input should be a valid list"
+                AlertRulesCustomizationSchemaError, "Input should be a valid list"
             ):
-                AlertRulesCustomization.from_yaml(f"{key}: not-a-list")
+                AlertRulesCustomization.from_yaml(f"{key}: not-a-list", "promql")
 
     def test_malformed_operation_entries_raise(self):
         invalid_cases = [
@@ -125,14 +130,14 @@ class TestFromYamlValidation(unittest.TestCase):
         ]
         for config in invalid_cases:
             with self.subTest(config):
-                with self.assertRaises(AlertRulesCustomizationError):
-                    AlertRulesCustomization.from_yaml(config[0])
+                with self.assertRaises(AlertRulesCustomizationSchemaError):
+                    AlertRulesCustomization.from_yaml(config[0], "promql")
 
 
 class TestNoOpConfigs(unittest.TestCase):
     def _assert_noop(self, config_string):
         sample = _load_sample_alerts()
-        result = AlertRulesCustomization.from_yaml(config_string).apply(sample)
+        result = AlertRulesCustomization.from_yaml(config_string, "promql").apply(sample)
         self.assertEqual(result, sample)
 
     def test_empty_config_is_noop(self):

@@ -33,7 +33,7 @@ def given_the_following_alert_rules(docstring):
     parsers.parse("the following customization is applied:\n{docstring}"), target_fixture="result"
 )
 def when_the_following_customization_is_applied(docstring, alerts):
-    return AlertRulesCustomization.from_yaml(docstring).apply(alerts)
+    return AlertRulesCustomization.from_yaml(docstring, "promql").apply(alerts)
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +102,7 @@ remove:
       labels:
         severity: critical
 """
-        result = AlertRulesCustomization.from_yaml(config_matching).apply(alerts)
+        result = AlertRulesCustomization.from_yaml(config_matching, "promql").apply(alerts)
         assert "HighLatency" not in str(result)
 
         config_not_matching = """
@@ -112,7 +112,7 @@ remove:
       labels:
         severity: warning
 """
-        result = AlertRulesCustomization.from_yaml(config_not_matching).apply(alerts)
+        result = AlertRulesCustomization.from_yaml(config_not_matching, "promql").apply(alerts)
         assert "HighLatency" in str(result)
 
     def test_remove_by_group_and_labels_combined(self):
@@ -124,7 +124,7 @@ remove:
       labels:
         severity: warning
 """
-        result = AlertRulesCustomization.from_yaml(config).apply(alerts)
+        result = AlertRulesCustomization.from_yaml(config, "promql").apply(alerts)
         group = next(g for g in result["app-1"]["groups"] if g["name"] == "group_a")
         rule_names = [r.get("alert") or r.get("record") for r in group["rules"]]
         assert rule_names == ["HighLatency", "job:latency:mean5m"]
@@ -137,6 +137,6 @@ remove:
       labels:
         severity: warning
 """
-        result = AlertRulesCustomization.from_yaml(config).apply(alerts)
+        result = AlertRulesCustomization.from_yaml(config, "promql").apply(alerts)
         record = _find_rule(result, "app-1", "group_a", "job:latency:mean5m", by_record=True)
         assert record["expr"] == "avg(latency)"
