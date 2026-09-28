@@ -1,0 +1,31 @@
+app-1:
+  groups:
+    - name: group_a
+      rules:
+        - alert: HighLatency
+          expr: latency > 100
+          for: 10m
+          labels:
+            severity: critical
+            juju_application: app-1
+          annotations:
+            summary: latency is high
+        - alert: LowThroughput
+          expr: throughput < 10
+          for: 5m
+          labels:
+            severity: warning
+        - record: job:latency:mean5m
+          expr: avg(latency)
+          labels:
+            severity: warning
+    - name: group_b
+      rules:
+        - alert: HostDown
+          expr: up < 1
+app-2:
+  groups:
+    - name: group_c
+      rules:
+        - alert: OtherAlert
+          expr: x > 0
