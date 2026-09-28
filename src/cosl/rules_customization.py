@@ -15,17 +15,16 @@ The customization config supports the following top-level keys:
   selector).
 - `patch`: modify matching alerting rules by merging a `set` block into them.
 
-Matching is performed via a `where` block, supporting exact equality on `alert`,
-`group`, `labels` and `annotations`. All fields within one `where` are ANDed;
-multiple entries in the `remove`/`patch` lists provide OR semantics.
+Matching is performed via a `where` block. `alert` and `group` use exact equality;
+for `labels` and `annotations`, every listed key must be present in the rule with
+the same value, while extra keys on the rule are ignored. All fields within one
+`where` are ANDed; multiple entries in the `remove`/`patch` lists provide OR
+semantics.
 
 Recording rules are never removed or patched unless an entire group is dropped via a
 group-only `where` selector.
 
-This class is a pure transformation helper that takes relation-derived alert rule
-files (the same dict that relation libraries such as `MetricsConsumer.alerts`
-produce) and an admin-provided YAML customization config, and returns the modified
-rules in the same format. After applying remove / patch operations,
+After applying remove / patch operations,
 :meth:`AlertRulesCustomization.apply` validates the resulting rules via
 :class:`~cosl.cos_tool.CosTool`. If validation fails for any identifier the
 entire transformation is discarded and an
