@@ -136,7 +136,7 @@ def test_add_does_not_mutate_input(sigma):
     assert "tags" not in original, "add() must not mutate the caller's dict"
 
 
-# --- Topology tag de-duplication edges (gap #5) ---
+# --- Topology tag de-duplication edges ---
 
 
 def test_existing_juju_model_tag_not_overwritten(sigma):
@@ -173,7 +173,7 @@ def test_existing_tag_is_preserved_and_does_not_block_juju_tags(sigma):
     assert any(tag.startswith("juju_model_uuid.") for tag in tags)
 
 
-# --- Accumulation and (intentional) lack of de-duplication (gap #6) ---
+# --- Accumulation ---
 
 
 def test_rules_accumulate_across_add_calls(sigma):
@@ -190,9 +190,7 @@ def test_add_path_then_add_dict_accumulate(sigma):
 
 
 def test_identical_rules_are_not_deduplicated(sigma):
-    # SigmaRules deliberately does not de-duplicate: topology may legitimately
-    # differentiate otherwise-identical rules, and `id` is optional. Pin this so a
-    # future "helpful" dedup change is a conscious decision.
+    # SigmaRules does not de-duplicate identical rules.
     sigma.add(_rule("Dup", id="11111111-1111-4111-8111-111111111111"))
     sigma.add(_rule("Dup", id="11111111-1111-4111-8111-111111111111"))
     assert len(sigma.rules) == 2
@@ -210,7 +208,7 @@ def test_rule_id_is_preserved_verbatim(sigma):
     assert sigma.rules[0]["id"] == rule_id
 
 
-# --- as_dict() returns an isolated rules list (gap #4) ---
+# --- as_dict() isolation ---
 
 
 def test_as_dict_returns_copy_of_rules_list(sigma):
@@ -222,7 +220,7 @@ def test_as_dict_returns_copy_of_rules_list(sigma):
     assert sigma.rules[0]["title"] == "Original"
 
 
-# --- Filesystem edge cases (gaps #2, #3, #7) ---
+# --- Filesystem edge cases ---
 
 
 def test_empty_file_adds_no_rules(sigma, tmp_path):
