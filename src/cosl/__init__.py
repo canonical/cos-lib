@@ -8,6 +8,12 @@ from .grafana_dashboard import DashboardPath40UID, GrafanaDashboard, LZMABase64
 from .juju_topology import JujuTopology
 from .mandatory_relation_pairs import MandatoryRelationPairs
 from .rules import AlertRules, RecordingRules, SigmaRules
+from .rules_customization import (
+    AlertRulesCustomization,
+    AlertRulesCustomizationError,
+    AlertRulesCustomizationSchemaError,
+    AlertRulesCustomizationValidationError,
+)
 from .types import type_convert_stored
 
 __all__ = [
@@ -19,6 +25,10 @@ __all__ = [
     "AlertRules",
     "RecordingRules",
     "SigmaRules",
+    "AlertRulesCustomization",
+    "AlertRulesCustomizationError",
+    "AlertRulesCustomizationSchemaError",
+    "AlertRulesCustomizationValidationError",
     "MandatoryRelationPairs",
     "type_convert_stored",
 ]

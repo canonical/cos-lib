@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cosl"
-version = "1.10.0"
+version = "1.11.0"
 authors = [
     { name = "sed-i", email = "82407168+sed-i@users.noreply.github.com" },
 ]
@@ -19,6 +19,7 @@ dependencies = [
     "PyYAML",
     "typing-extensions",
     "pysigma>=0.11.16",  # latest version supporting python 3.8
+    "diskcache",
 ]
 
 classifiers = [
@@ -45,6 +46,7 @@ dev = [
     # https://github.com/pypa/setuptools/issues/5174
     "setuptools<82",
     "pytest",
+    "pytest-bdd<8",
     "pytest-cov",
     "deepdiff",
     "fs",
