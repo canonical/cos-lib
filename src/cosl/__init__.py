@@ -7,7 +7,7 @@ from .cos_tool import CosTool
 from .grafana_dashboard import DashboardPath40UID, GrafanaDashboard, LZMABase64
 from .juju_topology import JujuTopology
 from .mandatory_relation_pairs import MandatoryRelationPairs
-from .rules import AlertRules, RecordingRules
+from .rules import AlertRules, RecordingRules, SigmaRules
 from .rules_customization import (
     AlertRulesCustomization,
     AlertRulesCustomizationError,
@@ -24,6 +24,7 @@ __all__ = [
     "DashboardPath40UID",
     "AlertRules",
     "RecordingRules",
+    "SigmaRules",
     "AlertRulesCustomization",
     "AlertRulesCustomizationError",
     "AlertRulesCustomizationSchemaError",

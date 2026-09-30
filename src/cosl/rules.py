@@ -104,6 +104,8 @@ from .types import (
     OfficialRuleFileItem,
     QueryType,
     RuleType,
+    SigmaRuleFileFormat,
+    SigmaRuleFormat,
     SingleRuleFormat,
 )
 
@@ -222,6 +224,7 @@ class InjectResult:
 
 
 _RULE_FILE_SUFFIXES = [".rule", ".rules", ".yml", ".yaml"]
+_SIGMA_FILE_SUFFIXES = [".yml", ".yaml"]
 
 
 def _multi_suffix_glob(dir_path: Path, suffixes: List[str], recursive: bool = True) -> List[Path]:
@@ -604,3 +607,98 @@ class RecordingRules(Rules):
     """
 
     pass
+
+
+def _sigma_validation_error(rule: Mapping[str, Any]) -> Optional[str]:
+    """Validate a rule with pysigma; return an error message, or None if valid."""
+    try:
+        from sigma.exceptions import SigmaError
+        from sigma.rule import SigmaRule  # type: ignore[reportMissingTypeStubs]
+    except ImportError as e:
+        raise ImportError(
+            "Sigma rule support requires the 'sigma' extra: pip install 'cosl[sigma]'"
+        ) from e
+    try:
+        cast(Any, SigmaRule).from_dict(cast(Dict[str, Any], rule))
+    except (KeyError, AttributeError, SigmaError) as e:
+        return str(e)
+    return None
+
+
+class SigmaRules:
+    """Utility class for amalgamating Sigma rules and injecting juju topology.
+
+    Topology is injected into each rule's ``tags`` as ``namespace.value`` entries
+    (e.g. ``juju_model.testmodel``); there is no expression rewriting.
+    """
+
+    def __init__(self, topology: Optional[JujuTopology] = None):
+        self.topology = topology
+        self.rules: List[SigmaRuleFormat] = []
+        self.errors: List[str] = []
+
+    @staticmethod
+    def _merge_tags(rule: SigmaRuleFormat, labels: Mapping[str, str]) -> None:
+        tags = rule.setdefault("tags", [])
+        existing = {tag.split(".", 1)[0] for tag in tags}
+        tags.extend(
+            f"{namespace}.{value}"
+            for namespace, value in labels.items()
+            if namespace not in existing
+        )
+        tags.sort()
+
+    def add_extra_tags(self, labels: Mapping[str, str]) -> None:
+        """Tag every rule with ``namespace.value`` for each label, preserving existing namespaces."""
+        for rule in self.rules:
+            self._merge_tags(rule, labels)
+
+    def add(self, rule_dict: Mapping[str, Any]) -> None:
+        """Add a single sigma rule or a ``{"rules": [...]}`` collection.
+
+        Invalid rules are skipped and recorded in :attr:`errors`.
+        """
+        self._add(rule_dict)
+
+    def _add(self, rule_dict: Mapping[str, Any], source: Optional[str] = None) -> None:
+        if not rule_dict:
+            return
+        rule_copy = copy.deepcopy(dict(rule_dict))
+        rules: List[Any] = (
+            rule_copy["rules"] if isinstance(rule_copy.get("rules"), list) else [rule_copy]
+        )
+        for rule in rules:
+            error = _sigma_validation_error(rule)
+            if error is not None:
+                title = (
+                    cast(Mapping[str, Any], rule).get("title", "rule")
+                    if isinstance(rule, dict)
+                    else "rule"
+                )
+                self.errors.append(f"{source + ': ' if source else ''}{title}: {error}")
+                logger.error("Invalid sigma rule: %s", self.errors[-1])
+                continue
+            sigma_rule = cast(SigmaRuleFormat, rule)
+            if self.topology:
+                self._merge_tags(sigma_rule, self.topology.label_matcher_dict)
+            self.rules.append(sigma_rule)
+
+    def add_path(self, dir_path: Union[str, Path], *, recursive: bool = False) -> None:
+        """Add sigma rules from a file or a directory of YAML files."""
+        path = Path(dir_path) if isinstance(dir_path, str) else dir_path
+        if path.is_dir():
+            for file_path in _multi_suffix_glob(path, _SIGMA_FILE_SUFFIXES, recursive):
+                self._add_from_file(file_path)
+        elif path.is_file():
+            self._add_from_file(path)
+        else:
+            logger.debug("Rules path does not exist: %s", path)
+
+    def _add_from_file(self, file_path: Path) -> None:
+        rule_file = _read_rule_file(file_path)
+        if rule_file is not None:
+            self._add(rule_file, source=str(file_path))
+
+    def as_dict(self) -> SigmaRuleFileFormat:
+        """Return sigma rules in dict representation, or ``{}`` when there are none."""
+        return SigmaRuleFileFormat(rules=list(self.rules)) if self.rules else SigmaRuleFileFormat()

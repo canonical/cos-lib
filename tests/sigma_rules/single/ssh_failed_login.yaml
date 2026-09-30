@@ -1,0 +1,14 @@
+title: Failed SSH Login Attempt
+id: 5f3a4e20-1b2c-4d5e-9f8a-7b6c3d4e5f6a
+status: experimental
+description: Detects failed SSH login attempts
+logsource:
+  category: authentication
+  product: linux
+  service: sshd
+detection:
+  selection:
+    event_type: authentication_failure
+    service: sshd
+  condition: selection
+level: medium
