@@ -173,5 +173,31 @@ class TestNoOpConfigs(unittest.TestCase):
         self._assert_noop(config)
 
 
+class TestApplyEdgeCases(unittest.TestCase):
+    def test_empty_relation_alerts_no_customizations(self):
+        obj = AlertRulesCustomization(query_type="promql")
+        result = obj.apply({})
+        self.assertEqual(result, {})
+
+    def test_empty_relation_alerts_with_customizations(self):
+        obj = AlertRulesCustomization.from_yaml(
+            """
+            remove:
+              - where:
+                  alert: Foo
+            """,
+            "promql",
+        )
+        result = obj.apply({})
+        self.assertEqual(result, {})
+
+    def test_no_customizations_returns_input_directly(self):
+        sample = _load_sample_alerts()
+        obj = AlertRulesCustomization(query_type="promql")
+        result = obj.apply(sample)
+        self.assertEqual(result, sample)
+        self.assertIs(result, sample)
+
+
 if __name__ == "__main__":
     unittest.main()

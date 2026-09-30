@@ -285,6 +285,12 @@ class AlertRulesCustomization:
                 cos-tool validation for any identifier, or when cos-tool is
                 unavailable.
         """
+        if not relation_alerts:
+            return {}
+
+        if not self._remove and not self._patch:
+            return cast(Dict[str, OfficialRuleFileFormat], relation_alerts)
+
         output: Dict[str, OfficialRuleFileFormat] = copy.deepcopy(dict(relation_alerts))
         if not self._tool.path:
             raise AlertRulesCustomizationValidationError(
