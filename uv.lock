@@ -430,7 +430,7 @@ wheels = [
 
 [[package]]
 name = "cosl"
-version = "1.11.0"
+version = "1.12.0"
 source = { editable = "." }
 dependencies = [
     { name = "diskcache" },
@@ -438,9 +438,6 @@ dependencies = [
     { name = "ops", version = "3.8.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "pydantic", version = "2.10.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
     { name = "pydantic", version = "2.13.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
-    { name = "pysigma", version = "0.11.16", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "pysigma", version = "0.11.23", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
-    { name = "pysigma", version = "1.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "pyyaml" },
     { name = "tenacity", version = "9.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
     { name = "tenacity", version = "9.1.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
@@ -472,6 +469,11 @@ dev = [
     { name = "setuptools", version = "75.3.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
     { name = "setuptools", version = "81.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
 ]
+sigma = [
+    { name = "pysigma", version = "0.11.16", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "pysigma", version = "0.11.23", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
+    { name = "pysigma", version = "1.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -485,7 +487,7 @@ requires-dist = [
     { name = "orderly-set", marker = "extra == 'dev'", specifier = "==5.3.0" },
     { name = "pydantic" },
     { name = "pyright", marker = "extra == 'dev'" },
-    { name = "pysigma", specifier = ">=0.11.16" },
+    { name = "pysigma", marker = "extra == 'sigma'", specifier = ">=0.11.16" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "pytest-bdd", marker = "extra == 'dev'", specifier = "<8" },
     { name = "pytest-cov", marker = "extra == 'dev'" },
@@ -495,7 +497,7 @@ requires-dist = [
     { name = "tenacity" },
     { name = "typing-extensions" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["sigma", "dev"]
 
 [[package]]
 name = "coverage"

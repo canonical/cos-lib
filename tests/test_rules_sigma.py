@@ -364,4 +364,57 @@ def test_loading_partially_valid_collection_yields_valid_rules(sigma):
     sigma.add_path(SIGMA_INVALID_DIR / "collection.yaml")
     assert len(sigma.rules) == 1
     assert sigma.rules[0].get("title") == "Disk Space Critical"
-    pass
+
+
+def test_valid_rule_records_no_error(sigma):
+    sigma.add(_rule("Fine"))
+    assert sigma.errors == []
+
+
+def test_invalid_rule_records_error_with_source(sigma):
+    sigma.add_path(SIGMA_INVALID_DIR / "high_cpu_process.yaml")
+    assert sigma.rules == []
+    assert len(sigma.errors) == 1
+    assert "high_cpu_process.yaml" in sigma.errors[0]
+
+
+# --- Extra tags ---
+
+
+def test_add_extra_tags_appends_and_sorts(sigma):
+    sigma.add(_rule("Tagged"))
+    sigma.add_extra_tags({"env": "prod", "team": "core"})
+    tags = sigma.rules[0]["tags"]
+    assert {"env.prod", "team.core"} <= set(tags)
+    assert tags == sorted(tags)
+
+
+def test_add_extra_tags_preserves_existing_namespace(sigma):
+    sigma.add(_rule("Pre-tagged", tags=["env.staging"]))
+    sigma.add_extra_tags({"env": "prod"})
+    assert "env.staging" in sigma.rules[0]["tags"]
+    assert "env.prod" not in sigma.rules[0]["tags"]
+
+
+# --- Multi-source determinism ---
+
+
+def test_multi_source_combine_is_byte_stable():
+    topology = JujuTopology(
+        model="testmodel", model_uuid=MODEL_UUID, unit="myapp/0", application="myapp"
+    )
+
+    def build():
+        upstream = SigmaRules(topology=topology)
+        upstream.add(
+            {"rules": [_rule("Upstream", tags=["juju_application.upstream"]), _rule("B")]}
+        )
+        local = SigmaRules(topology=topology)
+        local.add(_rule("Local", tags=["zeta.z", "alpha.a"]))
+        local.add(upstream.as_dict())
+        return local.as_dict()
+
+    first, second = build(), build()
+    assert first == second
+    for rule in first["rules"]:
+        assert rule["tags"] == sorted(rule["tags"])

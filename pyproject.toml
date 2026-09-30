@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cosl"
-version = "1.11.0"
+version = "1.12.0"
 authors = [
     { name = "sed-i", email = "82407168+sed-i@users.noreply.github.com" },
 ]
@@ -18,7 +18,6 @@ dependencies = [
     "tenacity",
     "PyYAML",
     "typing-extensions",
-    "pysigma>=0.11.16",  # latest version supporting python 3.8
     "diskcache",
 ]
 
@@ -34,6 +33,9 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+sigma = [
+    "pysigma>=0.11.16",  # latest version supporting python 3.8
+]
 dev = [
     # Lint
     "black",
