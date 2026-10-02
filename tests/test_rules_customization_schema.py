@@ -10,9 +10,11 @@ no-op configs. Behavioural tests live in:
 """
 
 import unittest
+from unittest import mock
 
 from helpers import _load_sample_alerts
 
+from cosl import CosTool
 from cosl.rules_customization import (
     AlertRulesCustomization,
     AlertRulesCustomizationSchemaError,
@@ -197,6 +199,78 @@ class TestApplyEdgeCases(unittest.TestCase):
         result = obj.apply(sample)
         self.assertEqual(result, sample)
         self.assertIs(result, sample)
+
+
+class TestNoMatchBehavior(unittest.TestCase):
+    def test_zero_match_remove_logs_warning(self):
+        config = """
+            remove:
+              - where:
+                  alert: NoSuchAlert
+            """
+        sample = _load_sample_alerts()
+        with self.assertLogs("cosl.rules_customization", level="WARNING") as captured:
+            AlertRulesCustomization.from_yaml(config, "promql").apply(sample)
+        self.assertIn("No rules matched any 'remove' where selectors", captured.output[0])
+
+    def test_zero_match_patch_logs_warning(self):
+        config = """
+            patch:
+              - where:
+                  alert: NoSuchAlert
+                set:
+                  for: 1m
+            """
+        sample = _load_sample_alerts()
+        with self.assertLogs("cosl.rules_customization", level="WARNING") as captured:
+            AlertRulesCustomization.from_yaml(config, "promql").apply(sample)
+        self.assertIn("No rules matched any 'patch' where selectors", captured.output[0])
+
+    def test_zero_match_both_logs_warnings(self):
+        config = """
+            remove:
+              - where:
+                  alert: NoSuchAlert
+            patch:
+              - where:
+                  alert: AlsoNoMatch
+                set:
+                  for: 1m
+            """
+        sample = _load_sample_alerts()
+        with self.assertLogs("cosl.rules_customization", level="WARNING") as captured:
+            AlertRulesCustomization.from_yaml(config, "promql").apply(sample)
+        warnings = "\n".join(captured.output)
+        self.assertIn("No rules matched any 'remove' where selectors", warnings)
+        self.assertIn("No rules matched any 'patch' where selectors", warnings)
+
+    def test_zero_match_skips_validation(self):
+        config = """
+            remove:
+              - where:
+                  alert: NoSuchAlert
+            """
+        sample = _load_sample_alerts()
+        with mock.patch.object(
+            CosTool, "validate_alert_rules", return_value=(False, "should not be called")
+        ) as mocked_validate:
+            result = AlertRulesCustomization.from_yaml(config, "promql").apply(sample)
+        mocked_validate.assert_not_called()
+        self.assertEqual(result, sample)
+
+    def test_matching_remove_still_validates(self):
+        config = """
+            remove:
+              - where:
+                  alert: HighLatency
+            """
+        sample = _load_sample_alerts()
+        with mock.patch.object(
+            CosTool, "validate_alert_rules", return_value=(True, "")
+        ) as mocked_validate:
+            result = AlertRulesCustomization.from_yaml(config, "promql").apply(sample)
+        mocked_validate.assert_called()
+        self.assertNotIn("HighLatency", str(result))
 
 
 if __name__ == "__main__":

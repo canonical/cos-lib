@@ -292,14 +292,17 @@ class AlertRulesCustomization:
             return cast(Dict[str, OfficialRuleFileFormat], relation_alerts)
 
         output: Dict[str, OfficialRuleFileFormat] = copy.deepcopy(dict(relation_alerts))
+        self._apply_remove(output)
+        self._apply_patch(output)
+
+        if output == dict(relation_alerts):
+            return output
+
         if not self._tool.path:
             raise AlertRulesCustomizationValidationError(
                 "cos-tool is not available; rules cannot be validated and no customizations "
                 "will be applied."
             )
-
-        self._apply_remove(output)
-        self._apply_patch(output)
 
         for identifier, rule_file in output.items():
             valid, errmsg = self._tool.validate_alert_rules(rule_file)
@@ -350,6 +353,7 @@ class AlertRulesCustomization:
             return
 
         where_blocks: List[Mapping[str, Any]] = [entry["where"] for entry in self._remove]
+        found_match = False
 
         def matches_any_remove(group_name: str, rule: Mapping[str, Any]) -> bool:
             # OR semantics across remove entries.
@@ -365,6 +369,7 @@ class AlertRulesCustomization:
                     for where in where_blocks
                 ):
                     # A group-only selector drops the entire group, recording rules included.
+                    found_match = True
                     logger.debug("Removed entire group '%s' from '%s'", group_name, identifier)
                     continue
 
@@ -375,6 +380,7 @@ class AlertRulesCustomization:
                         kept_rules.append(rule)
                         continue
                     if matches_any_remove(group_name, rule):
+                        found_match = True
                         logger.debug(
                             "Removed rule '%s' from group '%s' ('%s')",
                             rule.get("alert"),
@@ -396,10 +402,17 @@ class AlertRulesCustomization:
                 logger.debug("Dropped identifier '%s': no groups left", identifier)
                 del output[identifier]
 
+        if not found_match:
+            logger.warning(
+                "No rules matched any 'remove' where selectors; remove operations had no effect."
+            )
+
     def _apply_patch(self, output: Dict[str, OfficialRuleFileFormat]) -> None:
         """Merge each patch's `set` block into every matching alerting rule."""
         if not self._patch:
             return
+
+        found_match = False
 
         for identifier, rule_file in output.items():
             for group in cast(List[Any], rule_file.get("groups", [])):
@@ -410,9 +423,15 @@ class AlertRulesCustomization:
                         continue
                     for entry in self._patch:
                         if self._matches(entry["where"], group_name, rule):
+                            found_match = True
                             self._patch_rule(
                                 cast(Dict[str, Any], rule), entry["set"], identifier, group_name
                             )
+
+        if not found_match:
+            logger.warning(
+                "No rules matched any 'patch' where selectors; patch operations had no effect."
+            )
 
     @staticmethod
     def _patch_rule(
