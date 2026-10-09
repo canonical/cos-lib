@@ -134,7 +134,9 @@ def _cache_key(binary_path: str, parts: Tuple[str, ...]) -> str:
     The parts are hashed rather than stored: validate keys carry whole rule files, and
     SQLite's index stores every key twice, so raw keys would eat most of the size limit.
     Each part is length-prefixed so that different splits (e.g. ``("ab", "c")`` and
-    ``("a", "bc")``) never hash the same.
+    ``("a", "bc")``) never hash the same. diskcache looks ``str`` keys up verbatim, so two
+    invocations only share an entry if their sha256 digests collide, which is not a
+    practical concern.
     """
     digest = hashlib.sha256()
     for part in parts:
@@ -144,9 +146,10 @@ def _cache_key(binary_path: str, parts: Tuple[str, ...]) -> str:
     return f"{_fingerprint(binary_path)}:{digest.hexdigest()}"
 
 
-def _cache_get(binary_path: str, cache_key: Tuple[str, ...]) -> Optional[str]:
+def _cached_output(binary_path: str, parts: Tuple[str, ...]) -> Optional[str]:
     """Return the cached output of an invocation, or ``None`` if it is not cached."""
-    cached = _get_cache().get(_cache_key(binary_path, cache_key))  # pyright: ignore
+    # diskcache ships no type stubs, so ``get`` is untyped; we only ever store ``str``.
+    cached = _get_cache().get(_cache_key(binary_path, parts))  # pyright: ignore
     return cast(Optional[str], cached)
 
 
@@ -159,21 +162,19 @@ def _exec(cmd: List[str], cache_key: Optional[Tuple[str, ...]] = None) -> str:
             pass an explicit key for commands that reference a nondeterministic path
             (e.g. the tempfile used by ``validate_alert_rules``), so the cache still hits.
     """
-    cache = _get_cache()
-    # Prefix the key with a fingerprint (cosl version + binary size/mtime) so a library
-    # upgrade or a replaced cos-tool binary invalidates entries automatically, rather than
-    # silently returning output computed by a previous binary. cmd[0] is the binary path.
-    key = _cache_key(cmd[0], tuple(cache_key) if cache_key is not None else tuple(cmd))
-    # diskcache ships no type stubs, so ``get``/``set`` are untyped; we only ever store
-    # ``str`` under these keys, so cast the retrieved value back to ``str``.
-    cached = cast(Optional[str], cache.get(key))  # pyright: ignore[reportUnknownMemberType]
+    # The key is prefixed with a fingerprint (cosl version + binary size/mtime, see
+    # ``_cache_key``) so a library upgrade or a replaced cos-tool binary invalidates entries
+    # automatically, rather than silently returning output computed by a previous binary.
+    # cmd[0] is the binary path.
+    parts = tuple(cache_key) if cache_key is not None else tuple(cmd)
+    cached = _cached_output(cmd[0], parts)
     if cached is not None:
         return cached
     result = subprocess.run(
         list(cmd), check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
     )
     output = result.stdout.decode("utf-8").strip()
-    cache.set(key, output)  # pyright: ignore[reportUnknownMemberType]
+    _get_cache().set(_cache_key(cmd[0], parts), output)  # pyright: ignore
     return output
 
 
@@ -277,15 +278,17 @@ class CosTool:
         # Validation is a pure function of the binary, format and rules, so key on the rules'
         # content. Canonical JSON is far cheaper to produce than the YAML file the binary
         # reads, so a cache hit skips the YAML dump (and the tempfile) entirely.
-        cache_key = (
-            str(self.path),
-            "--format",
-            str(query_type),
-            "validate",
-            "--json",
-            json.dumps(rules, sort_keys=True, separators=(",", ":"), default=repr),
-        )
-        if _cache_get(str(self.path), cache_key) is not None:
+        try:
+            content = (
+                "--json",
+                json.dumps(rules, sort_keys=True, separators=(",", ":"), default=repr),
+            )
+        except (TypeError, ValueError):
+            # YAML allows mapping keys JSON can't sort (e.g. mixed int/str label keys): key
+            # on the YAML dump instead, as before, rather than raising before cos-tool runs.
+            content = ("--yaml", yaml.dump(rules))
+        cache_key = (str(self.path), "--format", str(query_type), "validate") + content
+        if _cached_output(str(self.path), cache_key) is not None:
             return True, ""
 
         with tempfile.TemporaryDirectory() as tmpdir:

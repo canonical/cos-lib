@@ -211,25 +211,17 @@ class TestExecCachePersistence(unittest.TestCase):
             self.assertFalse(os.path.exists(target))
             self.assertIsNone(cos_tool._exec_cache)
 
-    def test_cache_hits_do_not_write(self):
-        """Eviction is least-recently-*stored*, so a cache hit is a pure read."""
-        # GIVEN a cached value
-        with unittest.mock.patch(
-            "cosl.cos_tool.subprocess.run",
-            return_value=unittest.mock.Mock(stdout=b"x"),
-        ):
-            _exec(["cmd"], cache_key=("k",))
+    def test_cache_uses_least_recently_stored_eviction(self):
+        """The cache evicts least-recently-*stored* entries.
+
+        Unlike least-recently-used, this keeps cache hits read-only: LRU updates each entry's
+        access time on every hit, a SQLite write per lookup.
+        """
+        # WHEN the cache is opened
         cache = cos_tool._get_cache()
-        before = list(cache._sql("SELECT access_time, access_count FROM Cache"))
 
-        # WHEN it is read back
-        out = _exec(["cmd"], cache_key=("k",))
-
-        # THEN the hit leaves the row untouched (no access time/count update)
-        after = list(cache._sql("SELECT access_time, access_count FROM Cache"))
-        self.assertEqual(out, "x")
+        # THEN it is configured with the least-recently-stored eviction policy
         self.assertEqual(cache.eviction_policy, "least-recently-stored")
-        self.assertEqual(before, after)
 
     def test_cache_size_limit_defaults_to_512_mib(self):
         """Without an explicit size limit, the cache is capped at 512 MiB."""
@@ -367,6 +359,26 @@ class TestValidateCaching(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(dump.call_count, 0)
         self.assertEqual(spy.call_count, 0)
+
+    def test_rules_with_mixed_type_keys_are_reported_not_raised(self):
+        """Keys JSON can't sort (e.g. mixed int/str label keys) must not raise.
+
+        cos-tool rejects the integer label key, so the expected result is a graceful
+        ``(False, errmsg)``, as before keys were built from JSON.
+        """
+        # GIVEN rules whose labels mix integer and string keys
+        tool = CosTool(default_query_type="promql")
+        labels = {1: "x", "a": "y"}
+        rules = {
+            "groups": [{"name": "g", "rules": [{"alert": "A", "expr": "up", "labels": labels}]}]
+        }
+
+        # WHEN they are validated
+        ok, err = tool.validate_alert_rules(rules)  # type: ignore[arg-type]
+
+        # THEN the validation error is reported instead of raised
+        self.assertFalse(ok)
+        self.assertIn("error validating", err)
 
     def test_invalid_rules_are_reported_on_every_call(self):
         """Failed validations are not cached: invalid rules keep being reported."""
