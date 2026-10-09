@@ -111,6 +111,9 @@ logger = logging.getLogger(__name__)
 
 HOST_METRICS_MISSING_RULE_NAME = "HostMetricsMissing"
 
+# Characters not allowed in a Prometheus metric name, replaced when sanitizing group names.
+_INVALID_METRIC_NAME_CHARS = re.compile(r"[^a-zA-Z0-9_:]")
+
 _generic_alert_rules: Final = SimpleNamespace(
     # We use "5m" to avoid false positives on expected temporary "down", e.g. during intentional (re)start.
     # Juju topology will be later injected by providers of alert rules.
@@ -498,7 +501,7 @@ class Rules:
 
     def _sanitize_metric_name(self, metric_name: str) -> str:
         """Sanitize a metric name according to https://prometheus.io/docs/concepts/data_model/#metric-names-and-labels."""
-        return "".join(char if re.match(r"[a-zA-Z0-9_:]", char) else "_" for char in metric_name)
+        return _INVALID_METRIC_NAME_CHARS.sub("_", metric_name)
 
     # ---- END STATIC HELPER METHODS --- #
 
