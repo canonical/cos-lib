@@ -126,6 +126,28 @@ def _fingerprint(binary_path: str) -> str:
     return f"cosl={_cosl_version()};bin={_binary_fingerprint(binary_path)}"
 
 
+def _cache_key(binary_path: str, parts: Tuple[str, ...]) -> str:
+    """Return a small, fixed-size cache key identifying a cos-tool invocation.
+
+    The parts are hashed rather than stored: validate keys carry whole rule files, and
+    SQLite's index stores every key twice, so raw keys would eat most of the size limit.
+    Each part is length-prefixed so that different splits (e.g. ``("ab", "c")`` and
+    ``("a", "bc")``) never hash the same.
+    """
+    digest = hashlib.sha256()
+    for part in parts:
+        encoded = part.encode("utf-8")
+        digest.update(len(encoded).to_bytes(8, "big"))
+        digest.update(encoded)
+    return f"{_fingerprint(binary_path)}:{digest.hexdigest()}"
+
+
+def _cache_get(binary_path: str, cache_key: Tuple[str, ...]) -> Optional[str]:
+    """Return the cached output of an invocation, or ``None`` if it is not cached."""
+    cached = _get_cache().get(_cache_key(binary_path, cache_key))  # pyright: ignore
+    return cast(Optional[str], cached)
+
+
 def _exec(cmd: List[str], cache_key: Optional[Tuple[str, ...]] = None) -> str:
     """Run a cos-tool command, memoizing its (deterministic) output.
 
@@ -139,7 +161,7 @@ def _exec(cmd: List[str], cache_key: Optional[Tuple[str, ...]] = None) -> str:
     # Prefix the key with a fingerprint (cosl version + binary size/mtime) so a library
     # upgrade or a replaced cos-tool binary invalidates entries automatically, rather than
     # silently returning output computed by a previous binary. cmd[0] is the binary path.
-    key = (_fingerprint(cmd[0]),) + (tuple(cache_key) if cache_key is not None else tuple(cmd))
+    key = _cache_key(cmd[0], tuple(cache_key) if cache_key is not None else tuple(cmd))
     # diskcache ships no type stubs, so ``get``/``set`` are untyped; we only ever store
     # ``str`` under these keys, so cast the retrieved value back to ``str``.
     cached = cast(Optional[str], cache.get(key))  # pyright: ignore[reportUnknownMemberType]
@@ -233,41 +255,42 @@ class CosTool:
             logger.debug("`cos-tool` unavailable. Not validating alert correctness.")
             return True, ""
 
+        # Smash "our" rules format into what upstream actually uses for Loki,
+        # which is more like:
+        #
+        # groups:
+        #   - name: foo
+        #     rules:
+        #       - alert: SomeAlert
+        #         expr: up
+        #       - alert: OtherAlert
+        #         expr: up
+        if query_type == "logql":
+            transformed_rules = OfficialRuleFileFormat(groups=[])
+            for rule in rules.get("groups", []):
+                transformed_rules.get("groups", []).append(rule)
+
+            rules = transformed_rules
+
+        # Validation is a pure function of the binary, format and rules, so key on the rules'
+        # content. Canonical JSON is far cheaper to produce than the YAML file the binary
+        # reads, so a cache hit skips the YAML dump (and the tempfile) entirely.
+        cache_key = (
+            str(self.path),
+            "--format",
+            str(query_type),
+            "validate",
+            "--json",
+            json.dumps(rules, sort_keys=True, separators=(",", ":"), default=repr),
+        )
+        if _cache_get(str(self.path), cache_key) is not None:
+            return True, ""
+
         with tempfile.TemporaryDirectory() as tmpdir:
             rule_path = Path(tmpdir + "/validate_rule.yaml")
-
-            # Smash "our" rules format into what upstream actually uses for Loki,
-            # which is more like:
-            #
-            # groups:
-            #   - name: foo
-            #     rules:
-            #       - alert: SomeAlert
-            #         expr: up
-            #       - alert: OtherAlert
-            #         expr: up
-            if query_type == "logql":
-                transformed_rules = OfficialRuleFileFormat(groups=[])
-                for rule in rules.get("groups", []):
-                    transformed_rules.get("groups", []).append(rule)
-
-                rules = transformed_rules
-
-            rules_yaml = yaml.dump(rules)
-            rule_path.write_text(rules_yaml)
+            rule_path.write_text(yaml.dump(rules))
 
             args = [str(self.path), "--format", query_type, "validate", str(rule_path)]
-            # The tempfile path is nondeterministic, so it must not be part of the cache
-            # key or validation would never be memoized. Key on the rule *content*
-            # instead: validation is a pure function of the binary, format and rules.
-            cache_key = (
-                str(self.path),
-                "--format",
-                query_type,
-                "validate",
-                "--content",
-                rules_yaml,
-            )
             # noinspection PyBroadException
             try:
                 self._exec(args, cache_key=cache_key)  # type: ignore
