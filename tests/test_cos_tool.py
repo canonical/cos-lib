@@ -211,13 +211,41 @@ class TestExecCachePersistence(unittest.TestCase):
             self.assertFalse(os.path.exists(target))
             self.assertIsNone(cos_tool._exec_cache)
 
-    def test_cache_uses_lru_eviction(self):
-        """The cache evicts least-recently-*used* entries, not least-recently-stored."""
+    def test_cache_uses_least_recently_stored_eviction(self):
+        """The cache evicts least-recently-*stored* entries.
+
+        Unlike least-recently-used, this keeps cache hits read-only: LRU updates each entry's
+        access time on every hit, a SQLite write per lookup.
+        """
         # WHEN the cache is opened
         cache = cos_tool._get_cache()
 
-        # THEN it is configured with the least-recently-used eviction policy
-        self.assertEqual(cache.eviction_policy, "least-recently-used")
+        # THEN it is configured with the least-recently-stored eviction policy
+        self.assertEqual(cache.eviction_policy, "least-recently-stored")
+
+    def test_cache_size_limit_defaults_to_512_mib(self):
+        """Without an explicit size limit, the cache is capped at 512 MiB."""
+        # WHEN the cache is opened without a size limit (setUp configures only a directory)
+        cache = cos_tool._get_cache()
+
+        # THEN it uses the default limit
+        self.assertEqual(cache.size_limit, 512 * 1024 * 1024)
+
+    def test_configure_cache_sets_size_limit(self):
+        """A size limit passed to configure_cache is applied, and dropped when reconfigured."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # GIVEN the cache configured with an explicit size limit
+            configure_cache(tmpdir, size_limit=1024 * 1024 * 1024)
+
+            # WHEN the cache is opened
+            # THEN it uses that limit
+            self.assertEqual(cos_tool._get_cache().size_limit, 1024 * 1024 * 1024)
+
+            # WHEN it is reconfigured without a size limit
+            configure_cache(tmpdir)
+
+            # THEN the default limit applies again
+            self.assertEqual(cos_tool._get_cache().size_limit, 512 * 1024 * 1024)
 
     def test_changed_binary_fingerprint_invalidates_cache(self):
         """A changed binary fingerprint must miss the cache instead of serving stale output."""
@@ -246,6 +274,50 @@ class TestExecCachePersistence(unittest.TestCase):
                 self.assertEqual(mock_run.call_count, 1)
 
 
+class TestCacheKeys(unittest.TestCase):
+    """Cache keys are small hashes of the invocation, not the invocation itself."""
+
+    def setUp(self):
+        isolate_cache(self)
+
+    def test_large_inputs_are_stored_under_a_small_key(self):
+        """A huge input (e.g. a whole rules file) does not end up in the cache key."""
+        # GIVEN a 1 MiB input
+        huge = "x" * (1024 * 1024)
+        with unittest.mock.patch(
+            "cosl.cos_tool.subprocess.run",
+            return_value=unittest.mock.Mock(stdout=b"ok"),
+        ) as mock_run:
+            # WHEN it is executed twice
+            _exec(["cos-tool", "validate"], cache_key=("validate", huge))
+            out = _exec(["cos-tool", "validate"], cache_key=("validate", huge))
+
+        # THEN the second call is a hit, and the only stored key is small
+        self.assertEqual(out, "ok")
+        self.assertEqual(mock_run.call_count, 1)
+        keys = list(cos_tool._get_cache().iterkeys())
+        self.assertEqual(len(keys), 1)
+        self.assertLess(len(str(keys[0])), 200)
+
+    def test_different_splits_of_the_same_text_do_not_collide(self):
+        """("ab", "c") and ("a", "bc") are different invocations, so both must run."""
+        # GIVEN two keys whose parts concatenate to the same text
+        with unittest.mock.patch(
+            "cosl.cos_tool.subprocess.run",
+            side_effect=[
+                unittest.mock.Mock(stdout=b"first"),
+                unittest.mock.Mock(stdout=b"second"),
+            ],
+        ) as mock_run:
+            # WHEN both are executed
+            first = _exec(["cos-tool"], cache_key=("ab", "c"))
+            second = _exec(["cos-tool"], cache_key=("a", "bc"))
+
+        # THEN each ran the binary and got its own result
+        self.assertEqual((first, second), ("first", "second"))
+        self.assertEqual(mock_run.call_count, 2)
+
+
 class TestValidateCaching(unittest.TestCase):
     """Validation must be memoized by rule content, not by the tempfile path."""
 
@@ -271,6 +343,60 @@ class TestValidateCaching(unittest.TestCase):
         self.assertTrue(first_ok)
         self.assertTrue(second_ok)
         self.assertEqual(spy.call_count, 1)
+
+    def test_cache_hit_skips_the_yaml_dump(self):
+        """The rules file is only rendered to YAML when cos-tool actually has to run."""
+        # GIVEN rules that were already validated once
+        tool = CosTool(default_query_type="promql")
+        rules = {"groups": [{"name": "g", "rules": [{"alert": "A", "expr": "up"}]}]}
+        tool.validate_alert_rules(rules)
+
+        # WHEN the same rules are validated again
+        with unittest.mock.patch("cosl.cos_tool.yaml.dump") as dump, spy_on_cos_tool() as spy:
+            ok, _ = tool.validate_alert_rules(rules)
+
+        # THEN the result comes from the cache without rendering YAML or running cos-tool
+        self.assertTrue(ok)
+        self.assertEqual(dump.call_count, 0)
+        self.assertEqual(spy.call_count, 0)
+
+    def test_rules_with_mixed_type_keys_do_not_raise(self):
+        """Keys JSON can't sort (e.g. mixed int/str label keys) must not raise.
+
+        Whether cos-tool accepts an integer label key depends on its version, so only the
+        graceful ``(bool, str)`` result is asserted, not the verdict.
+        """
+        # GIVEN rules whose labels mix integer and string keys
+        tool = CosTool(default_query_type="promql")
+        labels = {1: "x", "a": "y"}
+        rules = {
+            "groups": [{"name": "g", "rules": [{"alert": "A", "expr": "up", "labels": labels}]}]
+        }
+
+        # WHEN they are validated
+        ok, err = tool.validate_alert_rules(rules)  # type: ignore[arg-type]
+
+        # THEN a validation result is returned instead of an exception being raised
+        self.assertIsInstance(ok, bool)
+        self.assertIsInstance(err, str)
+
+    def test_invalid_rules_are_reported_on_every_call(self):
+        """Failed validations are not cached: invalid rules keep being reported."""
+        # GIVEN rules with an invalid expression
+        tool = CosTool(default_query_type="promql")
+        rules = {"groups": [{"name": "g", "rules": [{"alert": "A", "expr": "up{"}]}]}
+
+        # WHEN they are validated twice
+        with spy_on_cos_tool() as spy:
+            first_ok, first_err = tool.validate_alert_rules(rules)
+            second_ok, second_err = tool.validate_alert_rules(rules)
+
+        # THEN both calls run cos-tool and report the error
+        self.assertFalse(first_ok)
+        self.assertFalse(second_ok)
+        self.assertIn("error validating", first_err)
+        self.assertIn("error validating", second_err)
+        self.assertEqual(spy.call_count, 2)
 
 
 class TestCacheFidelity(unittest.TestCase):

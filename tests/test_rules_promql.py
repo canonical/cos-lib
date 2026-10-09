@@ -185,6 +185,15 @@ class TestFromDictGroupName(unittest.TestCase):
                 group["name"], "Foo_123_Hello:World_go_od_bye______________:_________rules"
             )
 
+    def test_single_rule_from_dict_group_non_ascii_sanitized(self):
+        # GIVEN an alert rule in single-rule format
+        rules = AlertRules(query_type="promql")
+        # WHEN provided a custom group name with non-ASCII letters, digits and spaces
+        groups = rules._from_dict(self.single_rule, group_name="Año ñandú-٣ 9:x")
+        for group in groups:
+            # THEN only ASCII letters, digits, "_" and ":" are kept
+            self.assertEqual(group["name"], "A_o__and____9:x_rules")
+
     def test_single_rule_from_dict(self):
         # GIVEN an alert rule in single-rule format
         rules = AlertRules(query_type="promql")

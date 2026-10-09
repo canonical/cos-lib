@@ -4,6 +4,8 @@
 """COS Tool."""
 
 import functools
+import hashlib
+import json
 import logging
 import os
 import platform
@@ -24,18 +26,20 @@ logger = logging.getLogger(__name__)
 
 _F = TypeVar("_F", bound=Callable[..., Any])
 
-# Upper bound (in bytes) for the on-disk cos-tool result cache. cos-tool is invoked once
-# per alert expression and its (deterministic) results are memoized to avoid the dominant
-# cost: the subprocess spawn (~tens of ms) on every reconcile. Once the size limit is
-# exceeded, the least-recently-*used* entries are evicted (see ``_EXEC_CACHE_EVICTION``),
-# so the cache never grows unbounded while staying "hot" for the expressions actually in
-# use. Entries are short strings, so this comfortably holds the distinct expressions of a
-# large (hundreds of apps) aggregation deployment with room to grow.
-_EXEC_CACHE_SIZE_LIMIT = 256 * 1024 * 1024  # 256 MiB
+# Default upper bound (in bytes) for the on-disk cos-tool result cache; override it with
+# ``configure_cache(size_limit=...)``. cos-tool is invoked once per alert expression and its
+# (deterministic) results are memoized to avoid the dominant cost: the subprocess spawn on
+# every reconcile. Once the limit is exceeded, the oldest entries are evicted (see
+# ``_EXEC_CACHE_EVICTION``). The limit must hold everything a single reconcile looks up:
+# every reconcile walks the rules in the same order, so a cache even slightly smaller than
+# that evicts each entry just before it is needed again and nearly every lookup misses.
+_EXEC_CACHE_SIZE_LIMIT = 512 * 1024 * 1024  # 512 MiB
 
-# Evict the least-recently-*used* entries (not diskcache's default least-recently-stored),
-# so entries that keep being looked up survive and only genuinely stale ones are dropped.
-_EXEC_CACHE_EVICTION = "least-recently-used"
+# Evict the least-recently-*stored* entries (diskcache's default). Least-recently-used would
+# keep hot entries longer, but it pays for that with a SQLite write (the access time) on
+# every cache hit, and a reconcile is tens of thousands of hits. Since the size limit has to
+# fit a whole reconcile anyway, eviction only drops entries no longer produced by any rule.
+_EXEC_CACHE_EVICTION = "least-recently-stored"
 
 # Default on-disk location for the cache when ``configure_cache`` is not called. A fixed,
 # shared path (rather than a random temp dir) means all processes reuse the same cache, so
@@ -49,6 +53,7 @@ _DEFAULT_CACHE_DIR = "/tmp/cosl-cos-tool"  # noqa: S108
 # module has no filesystem side effects (no directory creation, no failure on a read-only
 # or permission-restricted ``/tmp``). Only the target directory is held at module scope.
 _cache_dir: str = _DEFAULT_CACHE_DIR
+_cache_size_limit: int = _EXEC_CACHE_SIZE_LIMIT
 _exec_cache: Optional[Cache] = None
 
 
@@ -58,13 +63,15 @@ def _get_cache() -> Cache:
     if _exec_cache is None:
         _exec_cache = Cache(
             directory=_cache_dir,
-            size_limit=_EXEC_CACHE_SIZE_LIMIT,
+            size_limit=_cache_size_limit,
             eviction_policy=_EXEC_CACHE_EVICTION,
         )
     return _exec_cache
 
 
-def configure_cache(cache_dir: Optional[Union[str, Path]]) -> None:
+def configure_cache(
+    cache_dir: Optional[Union[str, Path]], size_limit: Optional[int] = None
+) -> None:
     """Point the cos-tool result cache at a specific directory.
 
     By default the cache lives at a fixed shared path (``/tmp/cosl-cos-tool``), which gives
@@ -78,9 +85,12 @@ def configure_cache(cache_dir: Optional[Union[str, Path]]) -> None:
 
     Args:
         cache_dir: directory in which to store the cache, or ``None`` for the default.
+        size_limit: maximum on-disk size of the cache in bytes, or ``None`` for the default
+            (512 MiB). Size it to fit every rule a single reconcile processes.
     """
-    global _cache_dir, _exec_cache
+    global _cache_dir, _cache_size_limit, _exec_cache
     _cache_dir = str(cache_dir) if cache_dir is not None else _DEFAULT_CACHE_DIR
+    _cache_size_limit = size_limit if size_limit is not None else _EXEC_CACHE_SIZE_LIMIT
     if _exec_cache is not None:
         _exec_cache.close()
     _exec_cache = None  # reopened lazily at _cache_dir on next use
@@ -118,6 +128,31 @@ def _fingerprint(binary_path: str) -> str:
     return f"cosl={_cosl_version()};bin={_binary_fingerprint(binary_path)}"
 
 
+def _cache_key(binary_path: str, parts: Tuple[str, ...]) -> str:
+    """Return a small, fixed-size cache key identifying a cos-tool invocation.
+
+    The parts are hashed rather than stored: validate keys carry whole rule files, and
+    SQLite's index stores every key twice, so raw keys would eat most of the size limit.
+    Each part is length-prefixed so that different splits (e.g. ``("ab", "c")`` and
+    ``("a", "bc")``) never hash the same. diskcache looks ``str`` keys up verbatim, so two
+    invocations only share an entry if their sha256 digests collide, which is not a
+    practical concern.
+    """
+    digest = hashlib.sha256()
+    for part in parts:
+        encoded = part.encode("utf-8")
+        digest.update(len(encoded).to_bytes(8, "big"))
+        digest.update(encoded)
+    return f"{_fingerprint(binary_path)}:{digest.hexdigest()}"
+
+
+def _cached_output(binary_path: str, parts: Tuple[str, ...]) -> Optional[str]:
+    """Return the cached output of an invocation, or ``None`` if it is not cached."""
+    # diskcache ships no type stubs, so ``get`` is untyped; we only ever store ``str``.
+    cached = _get_cache().get(_cache_key(binary_path, parts))  # pyright: ignore
+    return cast(Optional[str], cached)
+
+
 def _exec(cmd: List[str], cache_key: Optional[Tuple[str, ...]] = None) -> str:
     """Run a cos-tool command, memoizing its (deterministic) output.
 
@@ -127,21 +162,19 @@ def _exec(cmd: List[str], cache_key: Optional[Tuple[str, ...]] = None) -> str:
             pass an explicit key for commands that reference a nondeterministic path
             (e.g. the tempfile used by ``validate_alert_rules``), so the cache still hits.
     """
-    cache = _get_cache()
-    # Prefix the key with a fingerprint (cosl version + binary size/mtime) so a library
-    # upgrade or a replaced cos-tool binary invalidates entries automatically, rather than
-    # silently returning output computed by a previous binary. cmd[0] is the binary path.
-    key = (_fingerprint(cmd[0]),) + (tuple(cache_key) if cache_key is not None else tuple(cmd))
-    # diskcache ships no type stubs, so ``get``/``set`` are untyped; we only ever store
-    # ``str`` under these keys, so cast the retrieved value back to ``str``.
-    cached = cast(Optional[str], cache.get(key))  # pyright: ignore[reportUnknownMemberType]
+    # The key is prefixed with a fingerprint (cosl version + binary size/mtime, see
+    # ``_cache_key``) so a library upgrade or a replaced cos-tool binary invalidates entries
+    # automatically, rather than silently returning output computed by a previous binary.
+    # cmd[0] is the binary path.
+    parts = tuple(cache_key) if cache_key is not None else tuple(cmd)
+    cached = _cached_output(cmd[0], parts)
     if cached is not None:
         return cached
     result = subprocess.run(
         list(cmd), check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
     )
     output = result.stdout.decode("utf-8").strip()
-    cache.set(key, output)  # pyright: ignore[reportUnknownMemberType]
+    _get_cache().set(_cache_key(cmd[0], parts), output)  # pyright: ignore
     return output
 
 
@@ -225,41 +258,44 @@ class CosTool:
             logger.debug("`cos-tool` unavailable. Not validating alert correctness.")
             return True, ""
 
+        # Smash "our" rules format into what upstream actually uses for Loki,
+        # which is more like:
+        #
+        # groups:
+        #   - name: foo
+        #     rules:
+        #       - alert: SomeAlert
+        #         expr: up
+        #       - alert: OtherAlert
+        #         expr: up
+        if query_type == "logql":
+            transformed_rules = OfficialRuleFileFormat(groups=[])
+            for rule in rules.get("groups", []):
+                transformed_rules.get("groups", []).append(rule)
+
+            rules = transformed_rules
+
+        # Validation is a pure function of the binary, format and rules, so key on the rules'
+        # content. Canonical JSON is far cheaper to produce than the YAML file the binary
+        # reads, so a cache hit skips the YAML dump (and the tempfile) entirely.
+        try:
+            content = (
+                "--json",
+                json.dumps(rules, sort_keys=True, separators=(",", ":"), default=repr),
+            )
+        except (TypeError, ValueError):
+            # YAML allows mapping keys JSON can't sort (e.g. mixed int/str label keys): key
+            # on the YAML dump instead, as before, rather than raising before cos-tool runs.
+            content = ("--yaml", yaml.dump(rules))
+        cache_key = (str(self.path), "--format", str(query_type), "validate") + content
+        if _cached_output(str(self.path), cache_key) is not None:
+            return True, ""
+
         with tempfile.TemporaryDirectory() as tmpdir:
             rule_path = Path(tmpdir + "/validate_rule.yaml")
-
-            # Smash "our" rules format into what upstream actually uses for Loki,
-            # which is more like:
-            #
-            # groups:
-            #   - name: foo
-            #     rules:
-            #       - alert: SomeAlert
-            #         expr: up
-            #       - alert: OtherAlert
-            #         expr: up
-            if query_type == "logql":
-                transformed_rules = OfficialRuleFileFormat(groups=[])
-                for rule in rules.get("groups", []):
-                    transformed_rules.get("groups", []).append(rule)
-
-                rules = transformed_rules
-
-            rules_yaml = yaml.dump(rules)
-            rule_path.write_text(rules_yaml)
+            rule_path.write_text(yaml.dump(rules))
 
             args = [str(self.path), "--format", query_type, "validate", str(rule_path)]
-            # The tempfile path is nondeterministic, so it must not be part of the cache
-            # key or validation would never be memoized. Key on the rule *content*
-            # instead: validation is a pure function of the binary, format and rules.
-            cache_key = (
-                str(self.path),
-                "--format",
-                query_type,
-                "validate",
-                "--content",
-                rules_yaml,
-            )
             # noinspection PyBroadException
             try:
                 self._exec(args, cache_key=cache_key)  # type: ignore
