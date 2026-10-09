@@ -4,6 +4,8 @@
 """COS Tool."""
 
 import functools
+import hashlib
+import json
 import logging
 import os
 import platform
@@ -24,18 +26,18 @@ logger = logging.getLogger(__name__)
 
 _F = TypeVar("_F", bound=Callable[..., Any])
 
-# Upper bound (in bytes) for the on-disk cos-tool result cache. cos-tool is invoked once
-# per alert expression and its (deterministic) results are memoized to avoid the dominant
-# cost: the subprocess spawn (~tens of ms) on every reconcile. Once the size limit is
-# exceeded, the least-recently-*used* entries are evicted (see ``_EXEC_CACHE_EVICTION``),
-# so the cache never grows unbounded while staying "hot" for the expressions actually in
-# use. Entries are short strings, so this comfortably holds the distinct expressions of a
-# large (hundreds of apps) aggregation deployment with room to grow.
-_EXEC_CACHE_SIZE_LIMIT = 256 * 1024 * 1024  # 256 MiB
-
 # Evict the least-recently-*used* entries (not diskcache's default least-recently-stored),
 # so entries that keep being looked up survive and only genuinely stale ones are dropped.
 _EXEC_CACHE_EVICTION = "least-recently-used"
+# Default upper bound (in bytes) for the on-disk cos-tool result cache; override it with
+# ``configure_cache(size_limit=...)``. cos-tool is invoked once per alert expression and its
+# (deterministic) results are memoized to avoid the dominant cost: the subprocess spawn on
+# every reconcile. Once the limit is exceeded, the oldest entries are evicted (see
+# ``_EXEC_CACHE_EVICTION``). The limit must hold everything a single reconcile looks up:
+# every reconcile walks the rules in the same order, so a cache even slightly smaller than
+# that evicts each entry just before it is needed again and nearly every lookup misses.
+_EXEC_CACHE_SIZE_LIMIT = 512 * 1024 * 1024  # 512 MiB
+
 
 # Default on-disk location for the cache when ``configure_cache`` is not called. A fixed,
 # shared path (rather than a random temp dir) means all processes reuse the same cache, so
@@ -49,6 +51,7 @@ _DEFAULT_CACHE_DIR = "/tmp/cosl-cos-tool"  # noqa: S108
 # module has no filesystem side effects (no directory creation, no failure on a read-only
 # or permission-restricted ``/tmp``). Only the target directory is held at module scope.
 _cache_dir: str = _DEFAULT_CACHE_DIR
+_cache_size_limit: int = _EXEC_CACHE_SIZE_LIMIT
 _exec_cache: Optional[Cache] = None
 
 
@@ -58,13 +61,15 @@ def _get_cache() -> Cache:
     if _exec_cache is None:
         _exec_cache = Cache(
             directory=_cache_dir,
-            size_limit=_EXEC_CACHE_SIZE_LIMIT,
+            size_limit=_cache_size_limit,
             eviction_policy=_EXEC_CACHE_EVICTION,
         )
     return _exec_cache
 
 
-def configure_cache(cache_dir: Optional[Union[str, Path]]) -> None:
+def configure_cache(
+    cache_dir: Optional[Union[str, Path]], size_limit: Optional[int] = None
+) -> None:
     """Point the cos-tool result cache at a specific directory.
 
     By default the cache lives at a fixed shared path (``/tmp/cosl-cos-tool``), which gives
@@ -78,9 +83,12 @@ def configure_cache(cache_dir: Optional[Union[str, Path]]) -> None:
 
     Args:
         cache_dir: directory in which to store the cache, or ``None`` for the default.
+        size_limit: maximum on-disk size of the cache in bytes, or ``None`` for the default
+            (512 MiB). Size it to fit every rule a single reconcile processes.
     """
-    global _cache_dir, _exec_cache
+    global _cache_dir, _cache_size_limit, _exec_cache
     _cache_dir = str(cache_dir) if cache_dir is not None else _DEFAULT_CACHE_DIR
+    _cache_size_limit = size_limit if size_limit is not None else _EXEC_CACHE_SIZE_LIMIT
     if _exec_cache is not None:
         _exec_cache.close()
     _exec_cache = None  # reopened lazily at _cache_dir on next use

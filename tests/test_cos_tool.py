@@ -218,6 +218,29 @@ class TestExecCachePersistence(unittest.TestCase):
 
         # THEN it is configured with the least-recently-used eviction policy
         self.assertEqual(cache.eviction_policy, "least-recently-used")
+    def test_cache_size_limit_defaults_to_512_mib(self):
+        """Without an explicit size limit, the cache is capped at 512 MiB."""
+        # WHEN the cache is opened without a size limit (setUp configures only a directory)
+        cache = cos_tool._get_cache()
+
+        # THEN it uses the default limit
+        self.assertEqual(cache.size_limit, 512 * 1024 * 1024)
+
+    def test_configure_cache_sets_size_limit(self):
+        """A size limit passed to configure_cache is applied, and dropped when reconfigured."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # GIVEN the cache configured with an explicit size limit
+            configure_cache(tmpdir, size_limit=1024 * 1024 * 1024)
+
+            # WHEN the cache is opened
+            # THEN it uses that limit
+            self.assertEqual(cos_tool._get_cache().size_limit, 1024 * 1024 * 1024)
+
+            # WHEN it is reconfigured without a size limit
+            configure_cache(tmpdir)
+
+            # THEN the default limit applies again
+            self.assertEqual(cos_tool._get_cache().size_limit, 512 * 1024 * 1024)
 
     def test_changed_binary_fingerprint_invalidates_cache(self):
         """A changed binary fingerprint must miss the cache instead of serving stale output."""
