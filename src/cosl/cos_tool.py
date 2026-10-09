@@ -26,9 +26,6 @@ logger = logging.getLogger(__name__)
 
 _F = TypeVar("_F", bound=Callable[..., Any])
 
-# Evict the least-recently-*used* entries (not diskcache's default least-recently-stored),
-# so entries that keep being looked up survive and only genuinely stale ones are dropped.
-_EXEC_CACHE_EVICTION = "least-recently-used"
 # Default upper bound (in bytes) for the on-disk cos-tool result cache; override it with
 # ``configure_cache(size_limit=...)``. cos-tool is invoked once per alert expression and its
 # (deterministic) results are memoized to avoid the dominant cost: the subprocess spawn on
@@ -38,6 +35,11 @@ _EXEC_CACHE_EVICTION = "least-recently-used"
 # that evicts each entry just before it is needed again and nearly every lookup misses.
 _EXEC_CACHE_SIZE_LIMIT = 512 * 1024 * 1024  # 512 MiB
 
+# Evict the least-recently-*stored* entries (diskcache's default). Least-recently-used would
+# keep hot entries longer, but it pays for that with a SQLite write (the access time) on
+# every cache hit, and a reconcile is tens of thousands of hits. Since the size limit has to
+# fit a whole reconcile anyway, eviction only drops entries no longer produced by any rule.
+_EXEC_CACHE_EVICTION = "least-recently-stored"
 
 # Default on-disk location for the cache when ``configure_cache`` is not called. A fixed,
 # shared path (rather than a random temp dir) means all processes reuse the same cache, so
