@@ -2,7 +2,9 @@
 # See LICENSE file for licensing details.
 """Test the round-trip encoding/decoding of the LZMABase64 class."""
 
+import base64
 import json
+import lzma
 
 import pytest
 
@@ -45,3 +47,13 @@ def test_round_trip_dict():
 )
 def test_round_trip(input):
     assert input == LZMABase64.decompress(LZMABase64.compress(input))
+
+
+def test_data_compressed_with_the_default_preset_still_decompresses():
+    # GIVEN data compressed with lzma's default preset (what older cosl versions produced)
+    data = json.dumps({"groups": [{"name": "g", "rules": [{"expr": "up"}] * 100}]})
+    legacy = base64.b64encode(lzma.compress(data.encode("utf-8"))).decode("utf-8")
+
+    # WHEN it is decompressed
+    # THEN the original data is recovered
+    assert LZMABase64.decompress(legacy) == data
