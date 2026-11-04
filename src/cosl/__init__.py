@@ -3,6 +3,7 @@
 
 """Utils for observability Juju charms."""
 
+from .architecture import get_host_architecture
 from .cos_tool import CosTool
 from .grafana_dashboard import DashboardPath40UID, GrafanaDashboard, LZMABase64
 from .juju_topology import JujuTopology
@@ -17,6 +18,7 @@ from .rules_customization import (
 from .types import type_convert_stored
 
 __all__ = [
+    "get_host_architecture",
     "JujuTopology",
     "CosTool",
     "GrafanaDashboard",

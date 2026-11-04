@@ -10,6 +10,7 @@ This library provides utilities for
 
 - [`CosTool`](src/cosl/cos_tool.py): bindings for
   [cos-tool](https://github.com/canonical/cos-tool)
+- [`get_host_architecture`](src/cosl/architecture.py): returns a Debian/Snap-style host architecture name (for example `x86_64` → `amd64`, `aarch64` → `arm64`). Unknown machine types pass through unchanged.
 - [`JujuTopology`](src/cosl/juju_topology.py): logic for
   [topology labels](https://ubuntu.com/blog/model-driven-observability-part-2-juju-topology-metrics)
 - [`LokiHandler`](src/cosl/loki_logger.py): python logging handler that forwards logs to a Loki push api endpoint.
