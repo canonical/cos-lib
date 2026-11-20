@@ -14,13 +14,13 @@ import subprocess
 import tempfile
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union, cast
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union, cast
 
 import yaml
 from diskcache import Cache  # pyright: ignore[reportMissingTypeStubs]
 from typing_extensions import TypeVar
 
-from .types import OfficialRuleFileFormat, QueryType
+from .types import OfficialRuleFileFormat, OfficialRuleFileItem, QueryType
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +178,24 @@ def _exec(cmd: List[str], cache_key: Optional[Tuple[str, ...]] = None) -> str:
     return output
 
 
+def _group_content(group: Any) -> Tuple[str, str]:
+    """Canonical (flag, text) form of a group, used in its cache key."""
+    try:
+        return ("--json", json.dumps(group, sort_keys=True, separators=(",", ":"), default=repr))
+    except (TypeError, ValueError):
+        # YAML allows mapping keys JSON can't sort (e.g. mixed int/str label keys)
+        return ("--yaml", yaml.dump(group))
+
+
+def _validation_error(e: subprocess.CalledProcessError) -> str:
+    """Summarise a failed cos-tool validation."""
+    output = (e.output or b"").decode("utf-8")
+    logger.debug("Validating the rules failed: %s", output)
+    message = ", ".join(line for line in output.splitlines() if "error validating" in line)
+    # e.g. an OOM kill gives exit code 137 and no output; never report an empty error
+    return message or f"cos-tool failed with exit code {e.returncode}"
+
+
 def ensure_querytype(func: _F) -> _F:
     """A small decorator to ensure that query type is specified."""
 
@@ -252,63 +270,86 @@ class CosTool:
     def validate_alert_rules(
         self, rules: OfficialRuleFileFormat, query_type: Optional[QueryType] = None
     ) -> Tuple[bool, str]:
-        """Will validate correctness of alert rules, returning a boolean and any errors."""
+        """Will validate correctness of alert rules, returning a boolean and any errors.
+
+        The rules are validated group by group (see `validate_alert_groups`), so the memory
+        needed by cos-tool is bounded by the largest group rather than the whole rules file.
+        """
         query_type = query_type or self.query_type
         if not self.path:
             logger.debug("`cos-tool` unavailable. Not validating alert correctness.")
             return True, ""
 
-        # Smash "our" rules format into what upstream actually uses for Loki,
-        # which is more like:
-        #
-        # groups:
-        #   - name: foo
-        #     rules:
-        #       - alert: SomeAlert
-        #         expr: up
-        #       - alert: OtherAlert
-        #         expr: up
-        if query_type == "logql":
-            transformed_rules = OfficialRuleFileFormat(groups=[])
-            for rule in rules.get("groups", []):
-                transformed_rules.get("groups", []).append(rule)
+        errors = self.validate_alert_groups(rules.get("groups", []), query_type)
+        return (not errors, ", ".join(errors.values()))
 
-            rules = transformed_rules
+    @ensure_querytype
+    def validate_alert_groups(
+        self,
+        groups: Sequence[OfficialRuleFileItem],
+        query_type: Optional[QueryType] = None,
+    ) -> Dict[int, str]:
+        """Validate each alert rule group on its own, returning the errors of invalid groups.
 
-        # Validation is a pure function of the binary, format and rules, so key on the rules'
-        # content. Canonical JSON is far cheaper to produce than the YAML file the binary
-        # reads, so a cache hit skips the YAML dump (and the tempfile) entirely.
-        try:
-            content = (
-                "--json",
-                json.dumps(rules, sort_keys=True, separators=(",", ":"), default=repr),
+        Every group that is not already cached is validated by a separate cos-tool process
+        on a file holding only that group, so cos-tool's peak memory is bounded by the largest
+        group. Duplicate group names are detected here, since cos-tool no longer sees them.
+        All occurrences of a duplicated name are reported as invalid.
+
+        Args:
+            groups: the rule groups to validate.
+            query_type: the query type, if not set as the default for this instance.
+
+        Returns:
+            A mapping of the index in `groups` to a non-empty error message, for invalid groups
+            only. An empty mapping means that all groups are valid.
+        """
+        query_type = query_type or self.query_type
+        if not self.path:
+            logger.debug("`cos-tool` unavailable. Not validating alert correctness.")
+            return {}
+
+        errors: Dict[int, str] = {}
+
+        indices_by_name: Dict[str, List[int]] = {}
+        for i, group in enumerate(groups):
+            raw: Any = group  # untrusted input: may not be a mapping at all
+            name: Any = (
+                cast(Mapping[str, Any], raw).get("name") if isinstance(raw, Mapping) else None
             )
-        except (TypeError, ValueError):
-            # YAML allows mapping keys JSON can't sort (e.g. mixed int/str label keys): key
-            # on the YAML dump instead, as before, rather than raising before cos-tool runs.
-            content = ("--yaml", yaml.dump(rules))
-        cache_key = (str(self.path), "--format", str(query_type), "validate") + content
-        if _cached_output(str(self.path), cache_key) is not None:
-            return True, ""
+            if isinstance(name, str) and name:
+                indices_by_name.setdefault(name, []).append(i)
+        for name, indices in indices_by_name.items():
+            if len(indices) > 1:
+                for i in indices:
+                    errors[i] = (
+                        f'error validating: groupname: "{name}" is repeated in the same file'
+                    )
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            rule_path = Path(tmpdir + "/validate_rule.yaml")
-            rule_path.write_text(yaml.dump(rules))
-
-            args = [str(self.path), "--format", query_type, "validate", str(rule_path)]
-            # noinspection PyBroadException
-            try:
-                self._exec(args, cache_key=cache_key)  # type: ignore
-                return True, ""
-            except subprocess.CalledProcessError as e:
-                logger.debug("Validating the rules failed: %s", e.output.decode("utf-8"))
-                return False, ", ".join(
-                    [
-                        line
-                        for line in e.output.decode("utf-8").splitlines()
-                        if "error validating" in line
-                    ]
+            rule_path = Path(tmpdir) / "validate_rule.yaml"
+            for i, group in enumerate(groups):
+                if i in errors:
+                    continue
+                flag, text = _group_content(group)
+                cache_key = (
+                    str(self.path),
+                    "--format",
+                    str(query_type),
+                    "validate-group",
+                    flag,
+                    text,
                 )
+                if _cached_output(str(self.path), cache_key) is not None:
+                    continue
+
+                rule_path.write_text(yaml.dump({"groups": [group]}))
+                args = [str(self.path), "--format", str(query_type), "validate", str(rule_path)]
+                try:
+                    self._exec(args, cache_key=cache_key)
+                except subprocess.CalledProcessError as e:
+                    errors[i] = _validation_error(e)
+        return errors
 
     @ensure_querytype
     def inject_label_matchers(
