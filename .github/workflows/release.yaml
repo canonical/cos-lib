@@ -9,7 +9,7 @@ jobs:
     uses: ./.github/workflows/pull-request.yaml
   release:
     name: Build and Publish to PyPI
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [ quality ]
     steps:
       - uses: actions/checkout@v3
