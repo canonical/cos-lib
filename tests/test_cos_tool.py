@@ -399,6 +399,80 @@ class TestValidateCaching(unittest.TestCase):
         self.assertEqual(spy.call_count, 2)
 
 
+def _group(name, expr="up == 0"):
+    return {"name": name, "rules": [{"alert": "A", "expr": expr}]}
+
+
+class TestValidateAlertGroups(unittest.TestCase):
+    """Groups are validated one cos-tool process each, and only when not already cached."""
+
+    def setUp(self):
+        isolate_cache(self)
+        if CosTool(default_query_type="promql").path is None:
+            self.skipTest("real cos-tool binary not available")
+        self.tool = CosTool(default_query_type="promql")
+
+    def test_each_uncached_group_is_validated_alone(self):
+        groups = [_group("a"), _group("b"), _group("c")]
+
+        with spy_on_cos_tool() as spy:
+            first = self.tool.validate_alert_groups(groups)
+        self.assertEqual(first, {})
+        self.assertEqual(spy.call_count, 3)
+
+        with spy_on_cos_tool() as spy:
+            second = self.tool.validate_alert_groups(groups)
+        self.assertEqual(second, {})
+        self.assertEqual(spy.call_count, 0)
+
+    def test_only_new_groups_are_validated(self):
+        a, b, c = _group("a"), _group("b"), _group("c")
+        self.tool.validate_alert_groups([a, b])
+
+        with spy_on_cos_tool() as spy:
+            errors = self.tool.validate_alert_groups([a, b, c])
+
+        self.assertEqual(errors, {})
+        self.assertEqual(spy.call_count, 1)
+
+    def test_invalid_group_is_isolated_and_valid_groups_are_cached(self):
+        good1, bad, good2 = _group("good1"), _group("bad", "up{"), _group("good2")
+
+        errors = self.tool.validate_alert_groups([good1, bad, good2])
+        self.assertEqual(set(errors), {1})
+        self.assertIn("error validating", errors[1])
+
+        with spy_on_cos_tool() as spy:
+            self.assertEqual(self.tool.validate_alert_groups([good1, good2]), {})
+        self.assertEqual(spy.call_count, 0)
+
+        with spy_on_cos_tool() as spy:
+            self.assertEqual(set(self.tool.validate_alert_groups([bad])), {0})
+        self.assertEqual(spy.call_count, 1)
+
+    def test_duplicate_group_names_are_all_invalid(self):
+        x, other, x2 = _group("x"), _group("other"), _group("x", "up == 1")
+
+        errors = self.tool.validate_alert_groups([x, other, x2])
+
+        self.assertEqual(set(errors), {0, 2})
+        self.assertIn("repeated", errors[0])
+        with spy_on_cos_tool() as spy:
+            self.assertEqual(self.tool.validate_alert_groups([other]), {})
+        self.assertEqual(spy.call_count, 0)
+
+    def test_unavailable_cos_tool_validates_nothing(self):
+        tool = CosTool(default_query_type="promql")
+        with unittest.mock.patch.object(tool, "_get_tool_path", return_value=None):
+            tool._path = None
+            tool._disabled = False
+            with spy_on_cos_tool() as spy:
+                errors = tool.validate_alert_groups([_group("a")])
+
+        self.assertEqual(errors, {})
+        self.assertEqual(spy.call_count, 0)
+
+
 class TestCacheFidelity(unittest.TestCase):
     """The cached value must be byte-identical to what the real cos-tool binary returns.
 

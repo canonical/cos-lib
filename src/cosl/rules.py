@@ -216,8 +216,10 @@ class InjectResult:
     """Typed result for rule injection and validation.
 
     Attributes:
-        rules: The (possibly injected) rules dictionary.
-        errmsg: Optional error message produced during validation.
+        rules: The (possibly injected) rules dictionary, containing only the groups that
+            passed validation (invalid groups are dropped).
+        errmsg: None if every group is valid, otherwise a comma-joined description of the
+            dropped groups.
     """
 
     rules: OfficialRuleFileFormat
@@ -560,8 +562,9 @@ class Rules:
             metadata: Juju topology metadata to inject into the rules, if
                 labels are not already present
         Returns:
-            An InjectResult with the possibly-injected rules and an optional
-            error message if validation failed.
+            An InjectResult whose `rules` contain only the groups that passed validation
+            (invalid groups are dropped) and whose `errmsg` is None when every group is valid,
+            otherwise a comma-joined description of the dropped groups.
         """
         if not rules:
             return InjectResult(rules=OfficialRuleFileFormat(groups=[]), errmsg=None)
@@ -571,12 +574,15 @@ class Rules:
             topology = JujuTopology.from_dict(metadata)
 
         # Inject juju topology labels and sanitize rules
-        rules_data = OfficialRuleFileFormat(groups=self._from_dict(rules, metadata=topology))
-        valid_rules, errmsg = self.tool.validate_alert_rules(rules_data)
-        if not valid_rules:
-            return InjectResult(rules=rules_data, errmsg=errmsg)
+        groups = self._from_dict(rules, metadata=topology)
+        errors = self.tool.validate_alert_groups(groups)
+        if not errors:
+            return InjectResult(rules=OfficialRuleFileFormat(groups=groups), errmsg=None)
 
-        return InjectResult(rules=rules_data, errmsg=None)
+        valid_groups = [g for i, g in enumerate(groups) if i not in errors]
+        return InjectResult(
+            rules=OfficialRuleFileFormat(groups=valid_groups), errmsg=", ".join(errors.values())
+        )
 
 
 class AlertRules(Rules):
