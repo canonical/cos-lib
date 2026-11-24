@@ -280,7 +280,7 @@ class CosTool:
             logger.debug("`cos-tool` unavailable. Not validating alert correctness.")
             return True, ""
 
-        errors = self.validate_alert_groups(rules.get("groups", []), query_type)
+        errors = self.validate_alert_groups(rules.get("groups", []), query_type=query_type)
         return (not errors, ", ".join(errors.values()))
 
     @ensure_querytype
@@ -349,7 +349,7 @@ class CosTool:
                     self._exec(args, cache_key=cache_key)
                 except subprocess.CalledProcessError as e:
                     errors[i] = _validation_error(e)
-        return errors
+        return dict(sorted(errors.items()))
 
     @ensure_querytype
     def inject_label_matchers(

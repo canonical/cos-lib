@@ -461,6 +461,25 @@ class TestValidateAlertGroups(unittest.TestCase):
             self.assertEqual(self.tool.validate_alert_groups([other]), {})
         self.assertEqual(spy.call_count, 0)
 
+    def test_errors_are_ordered_by_group_index(self):
+        x, bad, x2 = _group("x"), _group("bad", "up{"), _group("x", "up == 1")
+
+        errors = self.tool.validate_alert_groups([x, bad, x2])
+
+        self.assertEqual(list(errors), [0, 1, 2])
+        self.assertEqual(
+            [("repeated" in e) for e in errors.values()],
+            [True, False, True],
+        )
+
+    def test_validate_alert_rules_accepts_per_call_query_type_without_default(self):
+        tool = CosTool()
+
+        valid, _ = tool.validate_alert_rules({"groups": [_group("a")]}, query_type="promql")
+        self.assertTrue(valid)
+        valid, _ = tool.validate_alert_rules({"groups": [_group("a", "up{")]}, query_type="promql")
+        self.assertFalse(valid)
+
     def test_unavailable_cos_tool_validates_nothing(self):
         tool = CosTool(default_query_type="promql")
         with unittest.mock.patch.object(tool, "_get_tool_path", return_value=None):
