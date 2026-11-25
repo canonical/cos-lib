@@ -190,7 +190,6 @@ def _group_content(group: Any) -> Tuple[str, str]:
 def _validation_error(e: subprocess.CalledProcessError) -> str:
     """Summarise a failed cos-tool validation."""
     output = (e.output or b"").decode("utf-8")
-    logger.debug("Validating the rules failed: %s", output)
     message = ", ".join(line for line in output.splitlines() if "error validating" in line)
     # e.g. an OOM kill gives exit code 137 and no output; never report an empty error
     return message or f"cos-tool failed with exit code {e.returncode}"
