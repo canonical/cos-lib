@@ -764,6 +764,25 @@ class TestInjectAndValidateRules(unittest.TestCase):
                         continue
                     self.assertIn(f'{k}="{v}"', rule["expr"])
 
+    def test_invalid_group_is_dropped_but_valid_groups_are_kept(self):
+        # GIVEN one valid group and one group with an unparsable expression
+        ri = AlertRules(query_type="promql", topology=self.topology)
+        invalid = {
+            "name": "model_f4d59020_charm_x_broken_alerts",
+            "rules": [{"alert": "Broken", "expr": "up{", "labels": {}}],
+        }
+
+        # WHEN they are injected and validated together
+        result = ri.inject_and_validate_rules(
+            rules={"groups": [copy.deepcopy(self.promql_alert), invalid]},
+            metadata=self.metadata_assertions[0]["metadata"],
+        )
+
+        # THEN only the valid group is kept, and the error is reported
+        self.assertEqual(len(result.rules["groups"]), 1)
+        self.assertEqual(result.rules["groups"][0]["rules"][0]["alert"], "Workload Missing")
+        self.assertTrue(result.errmsg)
+
     def test_each_logql_rule_is_topology_labeled(self):
         # GIVEN a LogQL Rules class with default and metadata topology
         ri = AlertRules(query_type="logql", topology=self.topology)
